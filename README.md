@@ -4,6 +4,10 @@
 
 DeepSeek Harness 的 Windows 桌面壳。Shell 与 DSH runtime 独立版本化：安装器只安装 Electron Shell；首次启动时，Shell 根据上游 [`deepseek-ai/deepseek-harness`](https://github.com/deepseek-ai/deepseek-harness) 的 `dsh-v*` tag 安装兼容的预构建 runtime。
 
+## 下载
+
+从 [Latest Release](https://github.com/ToxicantX/deepseek-harness-desktop/releases/latest) 下载 Windows x64 安装器或 portable 版本。首次启动会自动安装最新兼容的 DSH runtime。
+
 ## 版本模型
 
 - **Shell version** 表示窗口、下载器、版本管理和 runtime 协议版本，例如 `0.1.0`。

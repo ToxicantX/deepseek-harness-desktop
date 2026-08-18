@@ -4,6 +4,10 @@
 
 Windows desktop shell for DeepSeek Harness. The Shell and DSH runtime have independent versions: the installer carries only the Electron Shell, and first launch installs a compatible prebuilt runtime derived from a `dsh-v*` tag in [`deepseek-ai/deepseek-harness`](https://github.com/deepseek-ai/deepseek-harness).
 
+## Download
+
+Download the Windows x64 installer or portable build from the [Latest Release](https://github.com/ToxicantX/deepseek-harness-desktop/releases/latest). First launch installs the newest compatible DSH runtime automatically.
+
 ## Version model
 
 - **Shell version** identifies the window, downloader, version manager, and runtime protocol, for example `0.1.0`.
