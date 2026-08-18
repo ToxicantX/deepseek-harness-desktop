@@ -71,7 +71,20 @@ pnpm run dist
   -RequiredShellRange '>=0.1.0 <1.0.0'
 ```
 
-本地 `dist` 默认未签名，Windows SmartScreen 可能显示信誉提示。Shell Release 工作流在配置 `CSC_LINK` 和 `CSC_KEY_PASSWORD` 后执行签名。
+## Windows 代码签名
+
+公开分发应从受 Windows 信任的 CA 获取 Authenticode 代码签名证书。自签名证书只适合已部署根证书的内部环境，不能消除普通用户看到的“未知发布者”或 SmartScreen 提示。
+
+对于可导出的 PKCS#12/PFX 证书，在 GitHub 仓库 **Settings → Secrets and variables → Actions** 中创建两个 Repository secrets：
+
+- `CSC_LINK`：PFX 文件的 Base64 内容。可在 PowerShell 中运行 `[Convert]::ToBase64String([IO.File]::ReadAllBytes('certificate.pfx')) | Set-Clipboard` 生成；不得把 PFX 或 Base64 内容提交到仓库。
+- `CSC_KEY_PASSWORD`：导出 PFX 时设置的密码。
+
+只有 `shell-v*` tag 构建会接收这两个 secret。工作流使用 electron-builder 对主程序、NSIS 安装器、卸载器和 portable EXE 签名；提供 `CSC_LINK` 后还会检查两个发布 EXE 的 Authenticode 状态必须为 `Valid`。增加 `package.json` 版本并推送匹配的 `shell-v<version>` tag 即可发布新的签名版本。
+
+多数新签发的公开证书要求硬件或云端保护私钥，不能导出 PFX。此时不要把硬件 token 密钥复制到 GitHub；应按 CA 选择 Azure Artifact Signing、DigiCert KeyLocker、SignPath 等远程签名服务，并把 provider action 接入 tag 构建。
+
+本地 `dist` 在没有证书时保持未签名，Windows SmartScreen 可能显示信誉提示。即使使用受信任证书，SmartScreen 信誉仍可能需要随下载量和时间建立。
 
 ## 当前范围
 

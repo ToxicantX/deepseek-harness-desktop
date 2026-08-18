@@ -23,9 +23,6 @@ permissions:
 jobs:
   build:
     runs-on: windows-2025
-    env:
-      CSC_LINK: ${{ secrets.CSC_LINK }}
-      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -50,7 +47,28 @@ jobs:
           if ($tagVersion -ne $packageVersion) { throw "Tag version $tagVersion does not match package version $packageVersion" }
       - name: Build Windows Shell artifacts
         shell: pwsh
+        env:
+          CSC_LINK: ${{ startsWith(github.ref, 'refs/tags/shell-v') && secrets.CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ startsWith(github.ref, 'refs/tags/shell-v') && secrets.CSC_KEY_PASSWORD || '' }}
         run: pnpm run dist
+      - name: Verify Authenticode signatures
+        if: startsWith(github.ref, 'refs/tags/shell-v')
+        shell: pwsh
+        env:
+          HAS_SIGNING_CERTIFICATE: ${{ secrets.CSC_LINK != '' }}
+        run: |
+          if ($env:HAS_SIGNING_CERTIFICATE -ne 'true') {
+            Write-Warning 'CSC_LINK is not configured; publishing unsigned Shell artifacts.'
+            exit 0
+          }
+          $artifacts = Get-ChildItem dist -Filter 'DeepSeek-Harness-Shell*.exe'
+          if ($artifacts.Count -lt 2) { throw 'Expected NSIS and portable Shell artifacts.' }
+          foreach ($artifact in $artifacts) {
+            $signature = Get-AuthenticodeSignature $artifact.FullName
+            if ($signature.Status -ne 'Valid') {
+              throw "$($artifact.Name) Authenticode status is $($signature.Status): $($signature.StatusMessage)"
+            }
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: deepseek-harness-shell-${{ github.sha }}

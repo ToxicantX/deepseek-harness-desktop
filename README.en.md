@@ -71,7 +71,20 @@ Build one complete runtime with:
   -RequiredShellRange '>=0.1.0 <1.0.0'
 ```
 
-Local `dist` artifacts are unsigned and may trigger Windows SmartScreen reputation warnings. The Shell Release workflow signs when `CSC_LINK` and `CSC_KEY_PASSWORD` are configured.
+## Windows code signing
+
+Public distribution should use an Authenticode code-signing certificate issued by a Windows-trusted CA. A self-signed certificate is suitable only for managed internal environments where its root is deployed; it does not remove Unknown Publisher or SmartScreen warnings for ordinary users.
+
+For an exportable PKCS#12/PFX certificate, create two Repository secrets under GitHub **Settings → Secrets and variables → Actions**:
+
+- `CSC_LINK`: the Base64 content of the PFX file. Generate it in PowerShell with `[Convert]::ToBase64String([IO.File]::ReadAllBytes('certificate.pfx')) | Set-Clipboard`. Never commit the PFX or its Base64 content.
+- `CSC_KEY_PASSWORD`: the password selected when exporting the PFX.
+
+Only `shell-v*` tag builds receive these secrets. The workflow lets electron-builder sign the main executable, NSIS installer, uninstaller, and portable EXE. When `CSC_LINK` is present, it also requires both published EXEs to report a `Valid` Authenticode status. Increment the `package.json` version and push the matching `shell-v<version>` tag to publish a newly signed version.
+
+Most newly issued public certificates require hardware- or cloud-protected private keys and cannot be exported as PFX. Do not copy a hardware-token key into GitHub. Instead, integrate the provider action for a remote service such as Azure Artifact Signing, DigiCert KeyLocker, or SignPath into the tag build.
+
+Local `dist` artifacts remain unsigned when no certificate is configured. Even with a trusted certificate, SmartScreen reputation may still need to develop through downloads and time.
 
 ## Current scope
 
