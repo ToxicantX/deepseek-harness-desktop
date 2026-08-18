@@ -1,0 +1,88 @@
+{
+  "name": "deepseek-harness-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Windows desktop shell and versioned runtime manager for DeepSeek Harness",
+  "author": "ToxicantX",
+  "type": "module",
+  "packageManager": "pnpm@11.7.0",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "main": "lib/main.js",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ToxicantX/deepseek-harness-desktop.git"
+  },
+  "scripts": {
+    "build": "tsc --noEmit && tsdown",
+    "dist": "pnpm run build && node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && electron-builder --win --publish never",
+    "start": "pnpm run build && electron .",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "electron-updater": "6.8.9",
+    "extract-zip": "2.0.1",
+    "semver": "7.7.4"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.13",
+    "7zip-bin": "5.2.0",
+    "@types/semver": "7.7.1",
+    "electron": "43.4.0",
+    "electron-builder": "26.15.3",
+    "tsdown": "0.21.4",
+    "typescript": "5.9.3",
+    "vitest": "4.1.8"
+  },
+  "build": {
+    "appId": "ai.deepseek.dsh.desktop",
+    "productName": "DeepSeek Harness",
+    "asar": true,
+    "asarUnpack": [
+      "lib/shutdown-hook.js"
+    ],
+    "npmRebuild": false,
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "lib/*.js",
+      "lib/*.cjs",
+      "assets/*",
+      "package.json"
+    ],
+    "win": {
+      "icon": "build/icon.png",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "artifactName": "DeepSeek-Harness-Shell-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": true
+    },
+    "portable": {
+      "artifactName": "DeepSeek-Harness-Shell-Portable-${version}-${arch}.${ext}"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "ToxicantX",
+      "repo": "deepseek-harness-desktop"
+    }
+  }
+}

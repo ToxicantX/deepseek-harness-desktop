@@ -1,0 +1,8 @@
+packages:
+  - .
+
+allowBuilds:
+  # Selects the current platform's reviewed standalone pnpm binary package for DSH runtimes.
+  '@pnpm/exe': true
+  # Selects the packaged 7-Zip binary used by Electron's Windows installer tooling.
+  electron-winstaller: true

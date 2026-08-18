@@ -1,0 +1,82 @@
+name: Build Shell
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'assets/**'
+      - 'build/**'
+      - 'tests/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'tsconfig.json'
+      - 'tsdown.config.ts'
+      - '.github/workflows/shell-release.yml'
+  push:
+    tags:
+      - 'shell-v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2025
+    env:
+      CSC_LINK: ${{ secrets.CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+          cache: pnpm
+      - name: Install and test
+        shell: pwsh
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run typecheck
+          pnpm test
+      - name: Verify release version
+        if: startsWith(github.ref, 'refs/tags/shell-v')
+        shell: pwsh
+        run: |
+          $tagVersion = '${{ github.ref_name }}'.Substring('shell-v'.Length)
+          $packageVersion = node -p "require('./package.json').version"
+          if ($tagVersion -ne $packageVersion) { throw "Tag version $tagVersion does not match package version $packageVersion" }
+      - name: Build Windows Shell artifacts
+        shell: pwsh
+        run: pnpm run dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deepseek-harness-shell-${{ github.sha }}
+          path: |
+            dist/*.exe
+            dist/*.blockmap
+            dist/latest.yml
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/shell-v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: deepseek-harness-shell-${{ github.sha }}
+          path: release
+      - name: Publish Shell release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          prerelease=()
+          [[ '${{ github.ref_name }}' == *-* ]] && prerelease+=(--prerelease)
+          gh release create '${{ github.ref_name }}' release/* --repo "$GITHUB_REPOSITORY" --generate-notes "${prerelease[@]}"

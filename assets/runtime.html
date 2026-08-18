@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self'; style-src 'unsafe-inline'; script-src 'none'">
+  <title>DeepSeek Harness</title>
+  <style>
+    :root { color-scheme: light; font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif; background: #f5f6f8; color: #1d2028; }
+    * { box-sizing: border-box; letter-spacing: 0; }
+    html, body { width: 100%; min-width: 320px; min-height: 100%; margin: 0; }
+    body { display: grid; min-height: 100vh; place-items: center; padding: 28px; }
+    main { width: min(620px, 100%); background: #ffffff; border: 1px solid #dfe2e8; border-radius: 8px; box-shadow: 0 12px 36px rgba(25, 30, 45, 0.10); overflow: hidden; }
+    header { display: flex; align-items: center; gap: 14px; padding: 22px 24px 18px; border-bottom: 1px solid #e7e9ee; }
+    header img { width: 44px; height: 44px; border-radius: 8px; }
+    h1 { margin: 0; font-size: 20px; font-weight: 650; }
+    #shell-version { margin-top: 3px; color: #686e7c; font-size: 12px; }
+    .content { padding: 22px 24px 24px; }
+    #message { margin: 0; font-size: 15px; font-weight: 600; }
+    #detail { min-height: 20px; margin: 8px 0 0; color: #686e7c; font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .progress { height: 6px; margin-top: 18px; overflow: hidden; border-radius: 3px; background: #e7e9ee; }
+    #progress-value { width: 0; height: 100%; background: #5068e8; transition: width 160ms ease; }
+    .versions { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; margin-top: 22px; padding-top: 20px; border-top: 1px solid #e7e9ee; }
+    label { grid-column: 1 / -1; color: #4d5360; font-size: 12px; font-weight: 600; }
+    select, button { min-height: 38px; border: 1px solid #cbd0da; border-radius: 6px; background: #fff; color: #1d2028; font: inherit; }
+    select { min-width: 0; padding: 0 34px 0 10px; }
+    button { padding: 0 16px; cursor: pointer; font-weight: 600; }
+    button.primary { border-color: #5068e8; background: #5068e8; color: #fff; }
+    button:hover:not(:disabled) { border-color: #5068e8; }
+    button:disabled { cursor: default; opacity: 0.55; }
+    .actions { display: flex; gap: 8px; margin-top: 16px; }
+    #error { display: none; margin-top: 16px; padding: 12px; border-left: 3px solid #c63f48; background: #fff3f4; color: #80272e; font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+    #cache { display: none; margin-top: 12px; color: #8a6421; font-size: 12px; }
+    @media (max-width: 520px) { body { padding: 0; place-items: stretch; } main { min-height: 100vh; border: 0; border-radius: 0; box-shadow: none; } .versions { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <img src="icon.png" alt="">
+      <div><h1>DeepSeek Harness</h1><div id="shell-version"></div></div>
+    </header>
+    <div class="content">
+      <p id="message">正在检查可用的 DSH 版本</p>
+      <p id="detail"></p>
+      <div class="progress" aria-hidden="true"><div id="progress-value"></div></div>
+      <div id="cache">当前使用缓存的版本目录</div>
+      <div id="error"></div>
+      <div class="versions">
+        <label for="version">DSH 版本</label>
+        <select id="version" aria-label="DSH 版本"></select>
+        <button id="apply" class="primary" type="button">应用并启动</button>
+      </div>
+      <div class="actions"><button id="retry" type="button">刷新版本</button></div>
+    </div>
+  </main>
+</body>
+</html>

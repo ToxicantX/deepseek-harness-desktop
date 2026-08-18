@@ -1,0 +1,137 @@
+name: Build DSH runtime
+
+on:
+  workflow_dispatch:
+    inputs:
+      dsh_tag:
+        description: Upstream dsh-v* tag; blank selects the latest tag
+        required: false
+        type: string
+      required_shell_range:
+        description: Shell semver range allowed to install this runtime
+        required: true
+        default: '>=0.1.0 <1.0.0'
+        type: string
+  schedule:
+    - cron: '23 4 * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: runtime-release
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.runtime.outputs.tag }}
+      version: ${{ steps.runtime.outputs.version }}
+      exists: ${{ steps.runtime.outputs.exists }}
+      shell_range: ${{ steps.runtime.outputs.shell_range }}
+    steps:
+      - name: Resolve upstream tag
+        id: runtime
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_TAG: ${{ inputs.dsh_tag }}
+          REQUESTED_RANGE: ${{ inputs.required_shell_range }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$REQUESTED_TAG"
+          if [[ -z "$tag" ]]; then
+            tag="$(git ls-remote --tags --refs https://github.com/deepseek-ai/deepseek-harness.git 'refs/tags/dsh-v*' | sed 's#.*refs/tags/##' | sort -V | tail -n 1)"
+          fi
+          [[ "$tag" =~ ^dsh-v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]] || { echo "Invalid DSH tag: $tag" >&2; exit 1; }
+          git ls-remote --exit-code --tags --refs https://github.com/deepseek-ai/deepseek-harness.git "refs/tags/$tag" >/dev/null
+          version="${tag#dsh-v}"
+          exists=false
+          if gh release view "runtime-$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then exists=true; fi
+          shell_range="${REQUESTED_RANGE:-">=0.1.0 <1.0.0"}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "exists=$exists" >> "$GITHUB_OUTPUT"
+          echo "shell_range=$shell_range" >> "$GITHUB_OUTPUT"
+
+  build-and-publish:
+    needs: resolve
+    if: needs.resolve.outputs.exists != 'true'
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+          cache: pnpm
+      - name: Install and verify shell tooling
+        shell: pwsh
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run typecheck
+          pnpm test
+          pnpm run build
+      - name: Build upstream runtime archive
+        shell: pwsh
+        run: |
+          ./scripts/build-runtime.ps1 `
+            -DshTag '${{ needs.resolve.outputs.tag }}' `
+            -OutputDirectory "$PWD/runtime-output" `
+            -RequiredShellRange '${{ needs.resolve.outputs.shell_range }}'
+      - name: Install and smoke the exact runtime archive
+        shell: pwsh
+        run: |
+          $version = '${{ needs.resolve.outputs.version }}'
+          node scripts/install-local-runtime.mjs `
+            "runtime-output/dsh-runtime-$version-win-x64.zip" `
+            "runtime-output/dsh-runtime-$version-win-x64.json" `
+            runtime-smoke-store
+          node scripts/smoke-runtime.mjs `
+            "runtime-smoke-store/runtimes/$version" `
+            "runtime-output/dsh-runtime-$version-win-x64.json"
+      - name: Publish immutable runtime release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $tag = '${{ needs.resolve.outputs.tag }}'
+          $version = '${{ needs.resolve.outputs.version }}'
+          gh release create "runtime-$tag" `
+            "runtime-output/dsh-runtime-$version-win-x64.zip" `
+            "runtime-output/dsh-runtime-$version-win-x64.json" `
+            --repo $env:GITHUB_REPOSITORY `
+            --prerelease `
+            --title "DSH Runtime $version" `
+            --notes "Windows x64 runtime built from deepseek-ai/deepseek-harness tag $tag. Runtime releases remain prereleases so they do not replace the Shell update channel."
+      - name: Update compatible runtime catalog
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $version = '${{ needs.resolve.outputs.version }}'
+          New-Item runtime-catalog -ItemType Directory -Force | Out-Null
+          gh release download runtime-catalog --repo $env:GITHUB_REPOSITORY --pattern runtime-catalog.json --dir runtime-catalog --clobber
+          if ($LASTEXITCODE -ne 0) {
+            '{"schemaVersion":1,"generatedAt":"1970-01-01T00:00:00.000Z","releases":[]}' | Set-Content runtime-catalog/runtime-catalog.json -Encoding utf8NoBOM
+          }
+          node scripts/update-runtime-catalog.mjs `
+            --manifest "runtime-output/dsh-runtime-$version-win-x64.json" `
+            --existing runtime-catalog/runtime-catalog.json `
+            --output runtime-output/runtime-catalog.json
+          gh release view runtime-catalog --repo $env:GITHUB_REPOSITORY
+          if ($LASTEXITCODE -ne 0) {
+            gh release create runtime-catalog --repo $env:GITHUB_REPOSITORY --prerelease --title 'DSH Runtime Catalog' --notes 'Machine-readable runtime catalog for DeepSeek Harness Desktop.'
+          }
+          gh release upload runtime-catalog runtime-output/runtime-catalog.json --repo $env:GITHUB_REPOSITORY --clobber
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dsh-runtime-${{ needs.resolve.outputs.version }}-win-x64
+          path: |
+            runtime-output/dsh-runtime-${{ needs.resolve.outputs.version }}-win-x64.zip
+            runtime-output/dsh-runtime-${{ needs.resolve.outputs.version }}-win-x64.json
+            runtime-output/runtime-catalog.json
+          if-no-files-found: error
