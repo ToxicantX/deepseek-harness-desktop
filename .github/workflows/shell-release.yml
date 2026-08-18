@@ -78,5 +78,7 @@ jobs:
         run: |
           set -euo pipefail
           prerelease=()
-          [[ '${{ github.ref_name }}' == *-* ]] && prerelease+=(--prerelease)
+          version='${{ github.ref_name }}'
+          version="${version#shell-v}"
+          [[ "$version" == *-* ]] && prerelease+=(--prerelease)
           gh release create '${{ github.ref_name }}' release/* --repo "$GITHUB_REPOSITORY" --generate-notes "${prerelease[@]}"
