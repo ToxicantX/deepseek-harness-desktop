@@ -33,7 +33,13 @@ Profiles, sessions, settings, and plugins remain under `%USERPROFILE%\.dsh`, or 
 
 ## Plugins
 
-The Shell writes a stable `dsh.cmd` under its user-data directory and puts the active runtime's standard Node and pnpm on `PATH`. Open **Runtime → Open plugin management terminal** and use the existing commands:
+Open the desktop plugin manager from **Runtime → Manage Plugins**. It lists plugins installed in the current Web profile and supports installing, updating, and removing them. For installation, enter a controlled npm package spec or a GitHub HTTPS / `github:` spec, such as `@scope/plugin@1.2.3`, `https://github.com/owner/repo.git`, or `github:owner/repo`. Update and removal actions use package names from the installed list. The manager shows operation progress and logs.
+
+After a successful install, update, or removal, the Runtime restarts automatically so the change takes effect. If a plugin fails to load and prevents Web readiness, the Shell-owned plugin manager remains available so you can remove or update the problematic plugin and restart the Runtime again.
+
+If a patch under an existing `%USERPROFILE%\.dsh` still references a deleted local plugin file, the setup page offers **Disable stale local plugins and retry**. After confirmation, the Shell backs up and removes only loader entries that exactly match the startup error; it does not clear sessions, settings, credentials, other plugins, or the profile.
+
+The Shell writes a stable `dsh.cmd` under its user-data directory and puts the active runtime's standard Node and pnpm on `PATH`. As an advanced fallback, open **Runtime → Open plugin management terminal** and use the existing commands:
 
 ```powershell
 dsh plugin --profile web list

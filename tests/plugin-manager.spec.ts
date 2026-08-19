@@ -1,0 +1,227 @@
+import { EventEmitter } from 'node:events'
+import { PassThrough } from 'node:stream'
+import { join } from 'node:path'
+import { describe, expect, it, vi } from 'vitest'
+import {
+  PluginManager,
+  validatePackageName,
+  validatePackageSpec,
+  type PluginProcess,
+  type PluginProcessOptions,
+} from '../src/plugin-manager.ts'
+import type { InstalledRuntime } from '../src/runtime-store.ts'
+
+class FakeProcess extends EventEmitter implements PluginProcess {
+  readonly stdout = new PassThrough()
+  readonly stderr = new PassThrough()
+  readonly kill = vi.fn(() => true)
+
+  close(code: number | null, signal: NodeJS.Signals | null = null): void {
+    this.emit('close', code, signal)
+  }
+}
+
+const runtime: InstalledRuntime = {
+  directory: 'C:/runtime',
+  manifest: {
+    schemaVersion: 1,
+    runtimeProtocolVersion: 1,
+    runtimeRevision: 1,
+    dshVersion: '0.1.0-rc.7',
+    requiredShellRange: '>=0.1.1 <1.0.0',
+    platform: 'win32',
+    arch: 'x64',
+    source: { repository: 'https://github.com/deepseek-ai/deepseek-harness.git', tag: 'dsh-v0.1.0-rc.7', commit: 'a'.repeat(40) },
+    archive: { url: 'https://example.test/runtime.zip', sha256: 'b'.repeat(64), size: 1 },
+    paths: { node: 'node/node.exe', pnpm: 'tools/pnpm.exe', dsh: 'app/bin.js' },
+  },
+  nodeExecutable: 'C:/runtime/node/node.exe',
+  pnpmExecutable: 'C:/runtime/tools/pnpm.exe',
+  dshBin: 'C:/runtime/app/bin.js',
+}
+
+function harness(readText = vi.fn(async () => JSON.stringify({
+  dependencies: { 'example-plugin': 'github:owner/example-plugin' },
+}))): {
+  manager: PluginManager
+  children: FakeProcess[]
+  calls: { command: string; args: readonly string[]; options: PluginProcessOptions }[]
+  readText: typeof readText
+} {
+  const children: FakeProcess[] = []
+  const calls: { command: string; args: readonly string[]; options: PluginProcessOptions }[] = []
+  const manager = new PluginManager({
+    runtime: () => runtime,
+    home: 'C:/Users/test/.dsh',
+    environment: { PATH: 'C:/Windows/System32', SAFE: 'yes' },
+    readText,
+    runProcess(command, args, options) {
+      calls.push({ command, args, options })
+      const child = new FakeProcess()
+      children.push(child)
+      return child
+    },
+  })
+  return { manager, children, calls, readText }
+}
+
+describe('plugin package validation', () => {
+  it.each([
+    'example-plugin',
+    '@scope/example-plugin',
+    'example-plugin@1.2.3',
+    'example-plugin@next',
+    'github:owner/repository',
+    'github:owner/repository#release-1',
+    'https://github.com/owner/repository.git#main',
+    'git+https://github.com/owner/repository',
+  ])('accepts controlled package spec %s', (value) => {
+    expect(validatePackageSpec(value)).toBe(value)
+  })
+
+  it.each([
+    '',
+    '-Dflag',
+    'file:../plugin',
+    'link:C:/plugin',
+    '../plugin',
+    'https://example.com/plugin.git',
+    'example-plugin && calc',
+    'example plugin',
+    'example-plugin@^1.0.0',
+    'github:owner/repo#main&calc',
+  ])('rejects unsafe package spec %s', (value) => {
+    expect(() => validatePackageSpec(value)).toThrow()
+  })
+
+  it('accepts exact npm names and rejects command-like names', () => {
+    expect(validatePackageName('@scope/example-plugin')).toBe('@scope/example-plugin')
+    expect(() => validatePackageName('example-plugin --latest')).toThrow()
+    expect(() => validatePackageName('github:owner/repository')).toThrow()
+  })
+})
+
+describe('PluginManager', () => {
+  it('lists direct profile dependencies without returning profile paths', async () => {
+    const value = harness()
+    const pending = value.manager.list()
+    const child = value.children[0]
+    expect(child).toBeDefined()
+    child?.stdout.write(JSON.stringify([{
+      name: 'dsh-profile-web',
+      path: 'C:/Users/test/.dsh/profiles/web',
+      dependencies: {
+        'example-plugin': {
+          version: '1.2.3',
+          resolved: 'https://codeload.github.com/owner/example-plugin/tar.gz/abc',
+          path: 'C:/secret/node_modules/example-plugin',
+        },
+      },
+    }]))
+    child?.close(0)
+
+    const result = await pending
+    expect(result).toEqual({ entries: [{
+      name: 'example-plugin',
+      spec: 'github:owner/example-plugin',
+      version: '1.2.3',
+    }] })
+    expect(JSON.stringify(result)).not.toContain('C:')
+    expect(value.readText).toHaveBeenCalledWith(join('C:/Users/test/.dsh/profiles/web', 'package.json'))
+    expect(value.calls[0]).toMatchObject({
+      command: runtime.nodeExecutable,
+      args: [runtime.dshBin, 'plugin', '--profile', 'web', 'list', '--depth', '0', '--json'],
+      options: { cwd: 'C:/Users/test/.dsh', shell: false, windowsHide: true },
+    })
+    expect(value.calls[0]?.options.env.DSH_HOME).toBe('C:/Users/test/.dsh')
+    expect(value.calls[0]?.options.env.PATH).toContain('C:/runtime/tools')
+  })
+
+  it('does not expose local dependency specs to the renderer', async () => {
+    const value = harness(vi.fn(async () => JSON.stringify({ dependencies: { 'local-plugin': 'file:C:/private/plugin' } })))
+    const pending = value.manager.list()
+    value.children[0]?.stdout.write(JSON.stringify([{
+      path: 'C:/Users/test/.dsh/profiles/web',
+      dependencies: { 'local-plugin': { version: '1.0.0', resolved: 'file:C:/private/plugin' } },
+    }]))
+    value.children[0]?.close(0)
+    const result = await pending
+    expect(result).toEqual({ entries: [{ name: 'local-plugin', version: '1.0.0' }] })
+    expect(JSON.stringify(result)).not.toContain('C:/private')
+  })
+
+  it('keeps a missing installed dependency visible for recovery removal', async () => {
+    const value = harness(vi.fn(async () => JSON.stringify({ dependencies: { 'broken-plugin': 'broken-plugin@1.0.0' } })))
+    const pending = value.manager.list()
+    value.children[0]?.stdout.write(JSON.stringify([{ path: 'C:/Users/test/.dsh/profiles/web', dependencies: {} }]))
+    value.children[0]?.close(0)
+    await expect(pending).resolves.toEqual({ entries: [{ name: 'broken-plugin', spec: 'broken-plugin@1.0.0' }] })
+  })
+
+  it('starts only fixed mutation argv and reports sanitized success output', () => {
+    const value = harness()
+    const started = value.manager.start({ action: 'add', spec: 'github:owner/example-plugin#main' })
+    const child = value.children[0]
+    child?.stdout.write('installing\u001b[32m ok\u001b[0m\rprogress\u0000 at C:/Users/test/.dsh/profiles/web')
+    expect(() => value.manager.start({ action: 'remove', packageName: 'example-plugin' })).toThrow('already running')
+    child?.close(0)
+
+    expect(value.calls[0]?.args).toEqual([
+      runtime.dshBin,
+      'plugin',
+      '--profile',
+      'web',
+      'add',
+      'github:owner/example-plugin#main',
+    ])
+    expect(value.manager.status(started.operationId)).toMatchObject({
+      state: 'succeeded',
+      action: 'add',
+      output: 'installing ok\nprogress at [路径已隐藏]',
+    })
+  })
+
+  it('reports process failures and bounds retained output', () => {
+    const value = harness()
+    const started = value.manager.start({ action: 'update', packageName: '@scope/example-plugin' })
+    value.children[0]?.stderr.write('x'.repeat(70_000))
+    value.children[0]?.close(7)
+    const status = value.manager.status(started.operationId)
+    expect(status.state).toBe('failed')
+    expect(status.error).toContain('退出码')
+    expect(status.output.length).toBeLessThanOrEqual(64 * 1024)
+    expect(status.output).toContain('较早的输出已省略')
+  })
+
+  it('redacts Runtime paths from list process errors', async () => {
+    const value = harness()
+    const pending = value.manager.list()
+    value.children[0]?.emit('error', new Error('spawn C:/runtime/node/node.exe ENOENT'))
+    await expect(pending).rejects.toThrow('spawn [路径已隐藏] ENOENT')
+    await expect(pending).rejects.not.toThrow('C:/runtime')
+  })
+
+  it('rejects malformed operations, ids, list data, and unavailable runtimes', async () => {
+    const value = harness()
+    expect(() => value.manager.start({ action: 'remove', packageName: 'example-plugin', extra: true })).toThrow('unsupported')
+    expect(() => value.manager.status('not-an-id')).toThrow('operationId')
+
+    const pending = value.manager.list()
+    value.children[0]?.stdout.write('{}')
+    value.children[0]?.close(0)
+    await expect(pending).rejects.toThrow('plugin list')
+
+    const unavailable = new PluginManager({ runtime: () => undefined, home: 'C:/Users/test/.dsh' })
+    await expect(unavailable.list()).rejects.toThrow('尚未安装')
+    expect(() => unavailable.start({ action: 'remove', packageName: 'example-plugin' })).toThrow('尚未安装')
+  })
+
+  it('kills the active process on disposal and rejects later requests', () => {
+    const value = harness()
+    value.manager.start({ action: 'remove', packageName: 'example-plugin' })
+    const child = value.children[0]
+    value.manager.dispose()
+    expect(child?.kill).toHaveBeenCalledWith('SIGTERM')
+    expect(() => value.manager.start({ action: 'remove', packageName: 'example-plugin' })).toThrow('disposed')
+  })
+})

@@ -1,5 +1,6 @@
 import { ipcRenderer } from 'electron'
 import type { RuntimePreference } from './catalog.ts'
+import type { PluginEntry, PluginList, PluginOperationStatus, PluginStartInput } from './plugin-manager.ts'
 import type { RuntimeView } from './runtime-controller.ts'
 import type { SessionRepairAnomalyKind, SessionRepairInspection, SessionRepairResult, SessionRepairRollbackResult } from './session-repair.ts'
 import type { ShellUpdateProgress } from './shell-updater.ts'
@@ -10,12 +11,19 @@ function element<T extends HTMLElement>(id: string): T {
   return value
 }
 
+let runtimeRecoveryIds: string[] = []
+let runtimeRecoveryCount = 0
+
 function renderRuntime(view: RuntimeView): void {
   element('shell-version').textContent = 'Shell ' + view.shellVersion + ' · 最低 DSH ' + view.minimumDshVersion
   element('message').textContent = view.message
-  element('detail').textContent = view.currentVersion === undefined
+  const versionDetail = view.currentVersion === undefined
     ? ''
     : '当前运行版本：' + view.currentVersion + ' · desktop revision ' + String(view.currentRuntimeRevision ?? 0)
+  runtimeRecoveryIds = view.recovery?.entryIds ?? []
+  runtimeRecoveryCount = view.recovery?.count ?? runtimeRecoveryIds.length
+  const recoveryDetail = runtimeRecoveryIds.length === 0 ? '' : '检测到失效的本地插件：' + runtimeRecoveryIds.join('、')
+  element('detail').textContent = [versionDetail, recoveryDetail].filter(value => value.length > 0).join('\n')
   const progress = view.progress === undefined || view.progress.total === 0 ? 0 : Math.min(100, (view.progress.received / view.progress.total) * 100)
   element<HTMLDivElement>('progress-value').style.width = String(progress) + '%'
   element('cache').style.display = view.cachedCatalog ? 'block' : 'none'
@@ -43,6 +51,12 @@ function renderRuntime(view: RuntimeView): void {
   select.disabled = busy
   element<HTMLButtonElement>('apply').disabled = busy || view.versions.length === 0
   element<HTMLButtonElement>('retry').disabled = busy
+  const recoverButton = element<HTMLButtonElement>('recover-stale-plugins')
+  recoverButton.hidden = runtimeRecoveryIds.length === 0
+  recoverButton.disabled = busy || runtimeRecoveryIds.length === 0
+  recoverButton.textContent = runtimeRecoveryCount <= 1
+    ? '禁用失效本地插件并重试'
+    : '禁用 ' + String(runtimeRecoveryCount) + ' 个失效本地插件并重试'
 }
 
 function initializeShellUpdatePage(): void {
@@ -79,6 +93,16 @@ function initializeShellUpdatePage(): void {
 function initializeRuntimePage(): void {
   ipcRenderer.on('runtime:view', (_event, view: RuntimeView) => { renderRuntime(view) })
   element<HTMLButtonElement>('retry').addEventListener('click', () => { void ipcRenderer.invoke('runtime:retry') })
+  element<HTMLButtonElement>('recover-stale-plugins').addEventListener('click', () => {
+    if (runtimeRecoveryIds.length === 0) return
+    const names = runtimeRecoveryIds.join('、')
+    if (!window.confirm('将备份配置并禁用 ' + String(runtimeRecoveryCount) + ' 个失效本地插件：' + names + '。会话、设置和其他插件不会被删除。是否继续？')) return
+    void ipcRenderer.invoke('runtime:recover-stale-local-plugins').catch((error: unknown) => {
+      const errorElement = element('error')
+      errorElement.textContent = errorMessage(error)
+      errorElement.style.display = 'block'
+    })
+  })
   element<HTMLButtonElement>('apply').addEventListener('click', () => {
     const value = element<HTMLSelectElement>('version').value
     const preference: RuntimePreference = value === 'latest-compatible' ? { mode: 'latest-compatible' } : { mode: 'pinned', version: value }
@@ -105,6 +129,128 @@ function formatBytes(value: number | undefined): string {
 function errorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error)
   return message.replace(/^Error invoking remote method '[^']+': Error: /u, '')
+}
+
+function initializePluginManagerPage(): void {
+  const specInput = element<HTMLInputElement>('plugin-spec')
+  const installButton = element<HTMLButtonElement>('plugin-install')
+  const refreshButton = element<HTMLButtonElement>('plugin-refresh')
+  const progress = element<HTMLProgressElement>('plugin-progress')
+  const statusElement = element('plugin-status')
+  const listElement = element('plugin-list')
+  const emptyElement = element('plugin-empty')
+  const logSection = element('plugin-log-section')
+  const logElement = element('plugin-log')
+  let busy = false
+
+  const setStatus = (message: string, kind: 'normal' | 'success' | 'error' = 'normal'): void => {
+    statusElement.textContent = message
+    statusElement.dataset.kind = kind
+  }
+  const setBusy = (value: boolean): void => {
+    busy = value
+    specInput.disabled = value
+    installButton.disabled = value
+    refreshButton.disabled = value
+    progress.hidden = !value
+    for (const button of listElement.querySelectorAll<HTMLButtonElement>('button')) button.disabled = value
+  }
+  const showLog = (value: string): void => {
+    logElement.textContent = value
+    logSection.hidden = value.length === 0
+    logElement.scrollTop = logElement.scrollHeight
+  }
+  const renderEntries = (entries: PluginEntry[]): void => {
+    listElement.replaceChildren()
+    emptyElement.hidden = entries.length !== 0
+    for (const entry of entries) {
+      const row = document.createElement('div')
+      row.className = 'plugin-row'
+      row.setAttribute('role', 'listitem')
+      const main = document.createElement('div')
+      main.className = 'plugin-main'
+      const name = document.createElement('div')
+      name.className = 'plugin-name'
+      name.textContent = entry.name
+      const meta = document.createElement('div')
+      meta.className = 'plugin-meta'
+      meta.textContent = (entry.version === undefined ? '未解析版本' : '版本 ' + entry.version)
+        + (entry.spec === undefined ? '' : ' · ' + entry.spec)
+      main.append(name, meta)
+      const actions = document.createElement('div')
+      actions.className = 'plugin-actions'
+      const updateButton = document.createElement('button')
+      updateButton.type = 'button'
+      updateButton.textContent = '更新'
+      updateButton.addEventListener('click', () => { void runOperation({ action: 'update', packageName: entry.name }, '更新 ' + entry.name) })
+      const removeButton = document.createElement('button')
+      removeButton.type = 'button'
+      removeButton.className = 'danger'
+      removeButton.textContent = '卸载'
+      removeButton.addEventListener('click', () => {
+        if (window.confirm('确认卸载 ' + entry.name + '？')) void runOperation({ action: 'remove', packageName: entry.name }, '卸载 ' + entry.name)
+      })
+      actions.append(updateButton, removeButton)
+      row.append(main, actions)
+      listElement.append(row)
+    }
+  }
+  const loadEntries = async (): Promise<void> => {
+    const value = await ipcRenderer.invoke('plugin-manager:list') as PluginList
+    renderEntries(value.entries)
+  }
+  const refresh = async (): Promise<void> => {
+    if (busy) return
+    setBusy(true)
+    setStatus('正在读取插件列表...')
+    try {
+      await loadEntries()
+      setStatus('插件列表已刷新', 'success')
+    } catch (error: unknown) {
+      setStatus(errorMessage(error), 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+  const waitForOperation = async (operationId: string): Promise<PluginOperationStatus> => {
+    for (;;) {
+      const value = await ipcRenderer.invoke('plugin-manager:status', operationId) as PluginOperationStatus
+      showLog(value.output)
+      if (value.state !== 'running') return value
+      await new Promise<void>(resolve => { setTimeout(resolve, 350) })
+    }
+  }
+  async function runOperation(input: PluginStartInput, label: string): Promise<void> {
+    if (busy) return
+    setBusy(true)
+    showLog('')
+    setStatus(label + '，请稍候...')
+    try {
+      const started = await ipcRenderer.invoke('plugin-manager:start', input) as { operationId: string }
+      const result = await waitForOperation(started.operationId)
+      if (result.state === 'failed') throw new Error(result.error ?? '插件操作失败')
+      setStatus(label + '完成，正在重启 Runtime...')
+      await ipcRenderer.invoke('plugin-manager:restart', started.operationId)
+      await loadEntries()
+      if (input.action === 'add') specInput.value = ''
+      setStatus(label + '完成', 'success')
+    } catch (error: unknown) {
+      setStatus(errorMessage(error), 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  installButton.addEventListener('click', () => {
+    const spec = specInput.value
+    if (spec.length === 0) { setStatus('请输入插件包名或 GitHub 地址', 'error'); specInput.focus(); return }
+    void runOperation({ action: 'add', spec }, '安装插件')
+  })
+  specInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') installButton.click()
+  })
+  refreshButton.addEventListener('click', () => { void refresh() })
+  void refresh()
 }
 
 function anomalyLabel(kind: SessionRepairAnomalyKind): string {
@@ -257,6 +403,7 @@ function initializeRepairPage(): void {
 
 window.addEventListener('DOMContentLoaded', () => {
   if (document.querySelector('#shell-update-page') !== null) initializeShellUpdatePage()
+  else if (document.querySelector('#plugin-manager-page') !== null) initializePluginManagerPage()
   else if (document.querySelector('#version') !== null) initializeRuntimePage()
   else if (document.querySelector('#repair-session-id') !== null) initializeRepairPage()
 })

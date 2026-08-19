@@ -13,6 +13,10 @@ import {
 import { desktopEnvironment, startBackend, type RunningBackend } from './backend.ts'
 import { prepareCliShim } from './cli-shell.ts'
 import { RuntimeStore, type InstalledRuntime, type RuntimeState } from './runtime-store.ts'
+import {
+  inspectStaleLocalPluginRecovery,
+  type StaleLocalPluginRecoveryPlan,
+} from './stale-local-plugin-recovery.ts'
 
 export type RuntimePhase = 'checking' | 'downloading' | 'starting' | 'ready' | 'error'
 
@@ -23,6 +27,12 @@ export interface RuntimeVersionView {
   sourceTag: string
   installed: boolean
   current: boolean
+}
+
+export interface RuntimeRecoveryView {
+  kind: 'stale-local-plugins'
+  entryIds: string[]
+  count: number
 }
 
 export interface RuntimeView {
@@ -36,8 +46,11 @@ export interface RuntimeView {
   versions: RuntimeVersionView[]
   cachedCatalog: boolean
   progress?: { received: number; total: number }
+  recovery?: RuntimeRecoveryView
   error?: string
 }
+
+type StaleLocalPluginRecoveryInspector = typeof inspectStaleLocalPluginRecovery
 
 export interface RuntimeControllerOptions {
   shellVersion: string
@@ -46,6 +59,7 @@ export interface RuntimeControllerOptions {
   userData: string
   catalogUrl?: string
   environment?: NodeJS.ProcessEnv
+  inspectStaleLocalPlugins?: StaleLocalPluginRecoveryInspector
   onView(view: RuntimeView): void
   onReady(url: URL, runtime: InstalledRuntime, cliDirectory: string): Promise<void>
   onOpenSettingsDocument(path: string): Promise<void>
@@ -58,12 +72,15 @@ export class RuntimeController {
   private readonly userData: string
   private readonly catalogUrl: string
   private readonly environment: NodeJS.ProcessEnv
+  private readonly inspectStaleLocalPlugins: StaleLocalPluginRecoveryInspector
   private readonly onView: (view: RuntimeView) => void
   private readonly onReady: (url: URL, runtime: InstalledRuntime, cliDirectory: string) => Promise<void>
   private readonly onOpenSettingsDocument: (path: string) => Promise<void>
   private catalog: RuntimeCatalog | undefined
   private state: RuntimeState = { schemaVersion: 1, preference: { mode: 'latest-compatible' } }
   private backend: RunningBackend | undefined
+  private selectedRuntime: InstalledRuntime | undefined
+  private recoveryPlan: StaleLocalPluginRecoveryPlan | undefined
   private expectedStop = false
   private currentRuntimeRevision: number | undefined
   private installedVersions = new Set<string>()
@@ -81,6 +98,7 @@ export class RuntimeController {
     this.userData = options.userData
     this.catalogUrl = options.catalogUrl ?? DEFAULT_CATALOG_URL
     this.environment = options.environment ?? process.env
+    this.inspectStaleLocalPlugins = options.inspectStaleLocalPlugins ?? inspectStaleLocalPluginRecovery
     this.onView = options.onView
     this.onReady = options.onReady
     this.onOpenSettingsDocument = options.onOpenSettingsDocument
@@ -94,6 +112,16 @@ export class RuntimeController {
     return this.enqueue(async () => { await this.boot() })
   }
 
+  recoverStaleLocalPlugins(): Promise<void> {
+    return this.enqueue(async () => {
+      const plan = this.recoveryPlan
+      if (plan === undefined) throw new Error('没有可恢复的失效本地插件')
+      await plan.apply()
+      this.recoveryPlan = undefined
+      await this.boot()
+    })
+  }
+
   setPreference(preference: RuntimePreference): Promise<void> {
     return this.enqueue(async () => {
       this.state = await this.store.setPreference(preference)
@@ -104,6 +132,10 @@ export class RuntimeController {
 
   stop(): Promise<void> {
     return this.enqueue(async () => { await this.stopBackend() })
+  }
+
+  installedRuntime(): InstalledRuntime | undefined {
+    return this.selectedRuntime
   }
 
   snapshot(): RuntimeView {
@@ -128,6 +160,13 @@ export class RuntimeController {
       versions,
       cachedCatalog: this.cachedCatalog,
       ...(this.progress === undefined ? {} : { progress: this.progress }),
+      ...(this.phase !== 'error' || this.recoveryPlan === undefined ? {} : {
+        recovery: {
+          kind: 'stale-local-plugins' as const,
+          entryIds: [...this.recoveryPlan.entryIds],
+          count: this.recoveryPlan.count,
+        },
+      }),
       ...(this.error === undefined ? {} : { error: this.error }),
     }
   }
@@ -139,6 +178,7 @@ export class RuntimeController {
   }
 
   private async boot(): Promise<void> {
+    this.recoveryPlan = undefined
     this.update('checking', '正在检查可用的 DSH 版本')
     this.state = await this.store.readState()
     let target: InstalledRuntime | undefined
@@ -201,16 +241,25 @@ export class RuntimeController {
 
   private async launch(runtime: InstalledRuntime, message = `正在启动 DSH ${runtime.manifest.dshVersion}`): Promise<void> {
     await this.stopBackend()
+    this.selectedRuntime = runtime
     this.update('starting', message)
     const home = this.environment.DSH_HOME ?? join(homedir(), '.dsh')
     await mkdir(home, { recursive: true })
-    const backend = await startBackend({
-      runtime,
-      shutdownHook: this.shutdownHook,
-      cwd: home,
-      env: desktopEnvironment(runtime, this.environment),
-      onOpenSettingsDocument: this.onOpenSettingsDocument,
-    })
+    let backend: RunningBackend
+    try {
+      backend = await startBackend({
+        runtime,
+        shutdownHook: this.shutdownHook,
+        cwd: home,
+        env: desktopEnvironment(runtime, this.environment),
+        onOpenSettingsDocument: this.onOpenSettingsDocument,
+      })
+    } catch (error: unknown) {
+      const diagnostics = error instanceof Error ? error.message : String(error)
+      await this.detectStaleLocalPlugins(home, diagnostics)
+      throw error
+    }
+    this.recoveryPlan = undefined
     this.backend = backend
     this.expectedStop = false
     this.state = await this.store.promote(runtime.manifest.dshVersion)
@@ -224,6 +273,15 @@ export class RuntimeController {
       const reason = exit.error?.message ?? `退出码 ${exit.exitCode ?? 'unknown'}`
       this.fail(exit.diagnostics.length === 0 ? `DSH runtime 意外退出：${reason}` : `DSH runtime 意外退出：${reason}\n\n${exit.diagnostics}`)
     })
+  }
+
+  private async detectStaleLocalPlugins(home: string, diagnostics: string): Promise<void> {
+    try {
+      const plan = await this.inspectStaleLocalPlugins({ home, diagnostics })
+      if (plan !== undefined) this.recoveryPlan = plan
+    } catch {
+      // Recovery inspection must not replace the Runtime startup failure.
+    }
   }
 
   private async stopBackend(): Promise<void> {

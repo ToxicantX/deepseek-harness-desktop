@@ -28,7 +28,8 @@
     button.primary { border-color: #5068e8; background: #5068e8; color: #fff; }
     button:hover:not(:disabled) { border-color: #5068e8; }
     button:disabled { cursor: default; opacity: 0.55; }
-    .actions { display: flex; gap: 8px; margin-top: 16px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+    #recover-stale-plugins { border-color: #a96b18; color: #7a4a0d; background: #fff8ed; }
     #error { display: none; margin-top: 16px; padding: 12px; border-left: 3px solid #c63f48; background: #fff3f4; color: #80272e; font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
     #cache { display: none; margin-top: 12px; color: #8a6421; font-size: 12px; }
     @media (max-width: 520px) { body { padding: 0; place-items: stretch; } main { min-height: 100vh; border: 0; border-radius: 0; box-shadow: none; } .versions { grid-template-columns: 1fr; } }
@@ -51,7 +52,10 @@
         <select id="version" aria-label="DSH 版本"></select>
         <button id="apply" class="primary" type="button">应用并启动</button>
       </div>
-      <div class="actions"><button id="retry" type="button">刷新版本</button></div>
+      <div class="actions">
+        <button id="retry" type="button">刷新版本</button>
+        <button id="recover-stale-plugins" type="button" hidden>禁用失效本地插件并重试</button>
+      </div>
     </div>
   </main>
 </body>

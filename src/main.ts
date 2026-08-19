@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   app,
@@ -17,6 +17,8 @@ import {
 } from 'electron'
 import { MINIMUM_DSH_VERSION, type RuntimePreference } from './catalog.ts'
 import { openPluginTerminal } from './cli-shell.ts'
+import { PluginManager } from './plugin-manager.ts'
+import { restartRuntimeAfterPluginMutation } from './plugin-restart.ts'
 import { RuntimeController, type RuntimeView } from './runtime-controller.ts'
 import { SessionRepairClient } from './session-repair.ts'
 import { SettingsDocumentClient } from './settings-document.ts'
@@ -27,8 +29,9 @@ import { allowDshWebPermission } from './window-security.ts'
 const moduleDirectory = dirname(fileURLToPath(import.meta.url))
 const setupPage = join(app.getAppPath(), 'assets', 'runtime.html')
 const repairPage = join(app.getAppPath(), 'assets', 'session-repair.html')
+const pluginManagerPage = join(app.getAppPath(), 'assets', 'plugin-manager.html')
 const shellUpdatePage = join(app.getAppPath(), 'assets', 'shell-update.html')
-const allowedLocalPages = new Set([setupPage, repairPage, shellUpdatePage])
+const allowedLocalPages = new Set([setupPage, repairPage, pluginManagerPage, shellUpdatePage])
 const preload = join(moduleDirectory, 'preload.cjs')
 const shutdownHook = app.isPackaged
   ? join(process.resourcesPath, 'app.asar.unpacked', 'lib', 'shutdown-hook.js')
@@ -37,9 +40,11 @@ const shutdownHook = app.isPackaged
 let mainWindow: BrowserWindow | undefined
 let managerWindow: BrowserWindow | undefined
 let repairWindow: BrowserWindow | undefined
+let pluginWindow: BrowserWindow | undefined
 let updateWindow: BrowserWindow | undefined
 let latestUpdateProgress: ShellUpdateProgress | undefined
 let controller: RuntimeController | undefined
+let pluginManager: PluginManager | undefined
 let updater: ShellUpdater | undefined
 let latestView: RuntimeView | undefined
 let cliDirectory: string | undefined
@@ -53,17 +58,18 @@ function runtimeRoot(): string {
   return join(local, 'DeepSeek Harness', 'runtime-manager')
 }
 
-function createWindow(options: { utility?: 'manager' | 'repair' | 'update' } = {}): BrowserWindow {
+function createWindow(options: { utility?: 'manager' | 'repair' | 'plugin' | 'update' } = {}): BrowserWindow {
   const utility = options.utility
   const manager = utility === 'manager'
   const repair = utility === 'repair'
+  const plugin = utility === 'plugin'
   const update = utility === 'update'
   const window = new BrowserWindow({
     ...(update && mainWindow !== undefined ? { parent: mainWindow, modal: true } : {}),
-    width: manager ? 700 : repair ? 760 : update ? 480 : 1240,
-    height: manager ? 720 : repair ? 780 : update ? 250 : 820,
-    minWidth: manager || repair ? 480 : update ? 420 : 820,
-    minHeight: manager ? 560 : update ? 220 : 600,
+    width: manager ? 700 : repair ? 760 : plugin ? 740 : update ? 480 : 1240,
+    height: manager ? 720 : repair ? 780 : plugin ? 700 : update ? 250 : 820,
+    minWidth: manager || repair ? 480 : plugin || update ? 420 : 820,
+    minHeight: manager ? 560 : plugin ? 520 : update ? 220 : 600,
     ...(update ? { closable: false, minimizable: false, maximizable: false, resizable: false } : {}),
     show: false,
     autoHideMenuBar: utility !== undefined,
@@ -180,6 +186,7 @@ async function openSettings(): Promise<void> {
 
 function broadcast(view: RuntimeView): void {
   latestView = view
+  installMenu()
   if (mainWindow !== undefined && view.phase === 'error') void showSetup(mainWindow)
   if (mainWindow !== undefined) sendView(mainWindow)
   if (managerWindow !== undefined) sendView(managerWindow)
@@ -215,6 +222,20 @@ async function openSessionRepair(): Promise<void> {
   await repairWindow.loadFile(repairPage)
 }
 
+async function openPluginManager(): Promise<void> {
+  if (controller?.installedRuntime() === undefined) {
+    await dialog.showMessageBox({ type: 'warning', title: '插件管理', message: 'DSH Runtime 尚未安装。' })
+    return
+  }
+  if (pluginWindow !== undefined && !pluginWindow.isDestroyed()) {
+    pluginWindow.focus()
+    return
+  }
+  pluginWindow = createWindow({ utility: 'plugin' })
+  pluginWindow.on('closed', () => { pluginWindow = undefined })
+  await pluginWindow.loadFile(pluginManagerPage)
+}
+
 async function showAbout(): Promise<void> {
   const runtimeVersion = latestView?.currentVersion === undefined
     ? '尚未启动'
@@ -238,6 +259,24 @@ function repairClient(event: IpcMainInvokeEvent): SessionRepairClient {
     throw new Error('DSH Runtime 尚未就绪，请等待启动完成后再试')
   }
   return new SessionRepairClient(new URL(trustedOrigin))
+}
+
+function runtimeClient(event: IpcMainInvokeEvent): RuntimeController {
+  if (mainWindow === undefined || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) {
+    throw new Error('Runtime 请求来源无效')
+  }
+  const url = new URL(event.sender.getURL())
+  if (url.protocol !== 'file:' || resolve(fileURLToPath(url)) !== resolve(setupPage)) throw new Error('Runtime 请求页面无效')
+  if (controller === undefined) throw new Error('DSH Runtime 控制器尚未初始化')
+  return controller
+}
+
+function pluginService(event: IpcMainInvokeEvent): PluginManager {
+  if (pluginWindow === undefined || pluginWindow.isDestroyed() || event.sender !== pluginWindow.webContents) {
+    throw new Error('插件管理请求来源无效')
+  }
+  if (pluginManager === undefined) throw new Error('插件管理器尚未初始化')
+  return pluginManager
 }
 
 function installMenu(): void {
@@ -265,6 +304,11 @@ function installMenu(): void {
         { label: '管理 DSH 版本', click: () => { void openVersionManager() } },
         { label: '刷新并应用版本策略', click: () => { void controller?.retry() } },
         { type: 'separator' },
+        {
+          label: '管理插件',
+          enabled: controller?.installedRuntime() !== undefined,
+          click: () => { void openPluginManager() },
+        },
         {
           label: '打开插件管理终端',
           enabled: cliDirectory !== undefined,
@@ -306,6 +350,8 @@ async function startApplication(): Promise<void> {
   mainWindow.on('closed', () => { mainWindow = undefined })
   await mainWindow.loadFile(setupPage)
   const store = new RuntimeStore(runtimeRoot())
+  const home = process.env.DSH_HOME ?? join(homedir(), '.dsh')
+  await mkdir(home, { recursive: true })
   controller = new RuntimeController({
     shellVersion: app.getVersion(),
     store,
@@ -321,7 +367,9 @@ async function startApplication(): Promise<void> {
     },
     onOpenSettingsDocument: openTextDocument,
   })
+  pluginManager = new PluginManager({ runtime: () => controller?.installedRuntime(), home })
   updater = new ShellUpdater(mainWindow, async () => {
+    pluginManager?.dispose()
     await controller?.stop()
     quitting = true
   }, showUpdateProgress)
@@ -338,14 +386,44 @@ function logFatalError(error: unknown): void {
   appendFileSync(join(directory, 'desktop.log'), `[${new Date().toISOString()}] ${detail}\n`, 'utf8')
 }
 
-ipcMain.handle('runtime:get-view', () => latestView)
-ipcMain.handle('runtime:retry', async () => {
-  if (mainWindow !== undefined) await showSetup(mainWindow)
-  await controller?.retry()
+ipcMain.handle('runtime:get-view', (event) => {
+  runtimeClient(event)
+  return latestView
 })
-ipcMain.handle('runtime:set-preference', async (_event, value: unknown) => {
+ipcMain.handle('runtime:retry', async (event) => {
+  const runtimeController = runtimeClient(event)
   if (mainWindow !== undefined) await showSetup(mainWindow)
-  await controller?.setPreference(parsePreference(value))
+  await runtimeController.retry()
+})
+ipcMain.handle('runtime:set-preference', async (event, value: unknown) => {
+  const runtimeController = runtimeClient(event)
+  if (mainWindow !== undefined) await showSetup(mainWindow)
+  await runtimeController.setPreference(parsePreference(value))
+})
+ipcMain.handle('runtime:recover-stale-local-plugins', async (event) => {
+  const runtimeController = runtimeClient(event)
+  if (mainWindow !== undefined) await showSetup(mainWindow)
+  await runtimeController.recoverStaleLocalPlugins()
+})
+ipcMain.handle('plugin-manager:list', async (event) => {
+  return pluginService(event).list()
+})
+ipcMain.handle('plugin-manager:start', (event, value: unknown) => {
+  return pluginService(event).start(value)
+})
+ipcMain.handle('plugin-manager:status', (event, operationId: unknown) => {
+  return pluginService(event).status(operationId)
+})
+ipcMain.handle('plugin-manager:restart', async (event, operationId: unknown) => {
+  const service = pluginService(event)
+  const runtimeController = controller
+  if (runtimeController === undefined) throw new Error('DSH Runtime 控制器尚未初始化')
+  return restartRuntimeAfterPluginMutation(operationId as string, {
+    status: id => service.status(id),
+    async showSetup() { if (mainWindow !== undefined) await showSetup(mainWindow) },
+    async retry() { await runtimeController.retry() },
+    currentView: () => latestView,
+  })
 })
 ipcMain.handle('session-repair:inspect', async (event, sessionId: unknown) => {
   return repairClient(event).inspect(sessionId)
@@ -372,6 +450,7 @@ else {
     if (quitting || controller === undefined) return
     event.preventDefault()
     quitting = true
+    pluginManager?.dispose()
     void controller.stop().finally(() => { app.quit() })
   })
   app.whenReady().then(startApplication).catch((error: unknown) => {

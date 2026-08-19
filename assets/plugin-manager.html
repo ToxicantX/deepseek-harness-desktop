@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>插件管理</title>
+  <style>
+    :root { color-scheme: light; font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif; color: #202124; background: #f5f6f8; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 360px; background: #f5f6f8; }
+    button, input { font: inherit; letter-spacing: 0; }
+    button { min-height: 34px; padding: 6px 14px; border: 1px solid #c8ccd2; border-radius: 6px; background: #fff; color: #202124; cursor: pointer; }
+    button:hover:not(:disabled) { background: #f0f2f5; }
+    button:focus-visible, input:focus-visible { outline: 2px solid #1769d2; outline-offset: 2px; }
+    button:disabled { cursor: default; opacity: .55; }
+    button.primary { border-color: #1769d2; background: #1769d2; color: #fff; }
+    button.primary:hover:not(:disabled) { background: #125ab6; }
+    button.danger { border-color: #c63838; color: #a92323; background: #fff; }
+    button.danger:hover:not(:disabled) { background: #fff1f1; }
+    main { width: min(100%, 760px); margin: 0 auto; padding: 24px; }
+    header { margin-bottom: 20px; }
+    h1 { margin: 0; font-size: 22px; font-weight: 650; letter-spacing: 0; }
+    h2 { margin: 0; font-size: 15px; font-weight: 650; letter-spacing: 0; }
+    .install-band { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: end; padding: 16px 0 20px; border-bottom: 1px solid #d9dde3; }
+    .field { display: grid; gap: 6px; min-width: 0; }
+    label { font-size: 13px; color: #4c5158; }
+    input { width: 100%; min-height: 36px; padding: 7px 10px; border: 1px solid #b9bec6; border-radius: 6px; background: #fff; color: #202124; }
+    .status-band { min-height: 58px; padding: 14px 0; display: grid; gap: 8px; }
+    #plugin-status { min-height: 20px; font-size: 13px; color: #4c5158; overflow-wrap: anywhere; }
+    #plugin-status[data-kind="success"] { color: #1f6b3a; }
+    #plugin-status[data-kind="error"] { color: #a92323; }
+    progress { width: 100%; height: 6px; accent-color: #1769d2; }
+    [hidden] { display: none !important; }
+    .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 6px 0 10px; }
+    #plugin-list { border-top: 1px solid #d9dde3; }
+    .plugin-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: center; min-height: 72px; padding: 12px 0; border-bottom: 1px solid #d9dde3; }
+    .plugin-main { min-width: 0; display: grid; gap: 4px; }
+    .plugin-name { font-size: 14px; font-weight: 650; overflow-wrap: anywhere; }
+    .plugin-meta { font-size: 12px; color: #626870; overflow-wrap: anywhere; }
+    .plugin-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+    #plugin-empty { margin: 0; padding: 30px 0; text-align: center; color: #737982; font-size: 13px; border-bottom: 1px solid #d9dde3; }
+    #plugin-log-section { margin-top: 22px; }
+    #plugin-log { max-height: 180px; margin: 10px 0 0; padding: 12px; overflow: auto; border: 1px solid #cfd3d9; border-radius: 6px; background: #fff; color: #30343a; font: 12px/1.55 Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+    @media (max-width: 520px) {
+      main { padding: 18px 16px; }
+      .install-band, .plugin-row { grid-template-columns: 1fr; align-items: stretch; }
+      .install-band button { width: 100%; }
+      .plugin-actions { justify-content: flex-start; }
+    }
+  </style>
+</head>
+<body>
+  <main id="plugin-manager-page">
+    <header><h1>插件管理</h1></header>
+    <section class="install-band" aria-label="安装插件">
+      <div class="field">
+        <label for="plugin-spec">插件包</label>
+        <input id="plugin-spec" type="text" maxlength="512" autocomplete="off" spellcheck="false" placeholder="包名或 GitHub 地址">
+      </div>
+      <button id="plugin-install" class="primary" type="button">安装</button>
+    </section>
+    <div class="status-band">
+      <div id="plugin-status" role="status" aria-live="polite">正在读取插件列表...</div>
+      <progress id="plugin-progress" hidden></progress>
+    </div>
+    <section aria-labelledby="installed-heading">
+      <div class="section-heading">
+        <h2 id="installed-heading">已安装插件</h2>
+        <button id="plugin-refresh" type="button">刷新</button>
+      </div>
+      <div id="plugin-list" role="list"></div>
+      <p id="plugin-empty" hidden>没有单独安装的插件</p>
+    </section>
+    <section id="plugin-log-section" hidden aria-labelledby="log-heading">
+      <h2 id="log-heading">操作日志</h2>
+      <pre id="plugin-log"></pre>
+    </section>
+  </main>
+</body>
+</html>

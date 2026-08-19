@@ -33,7 +33,13 @@ Runtime 默认位于：
 
 ## 插件
 
-Shell 在用户数据目录生成稳定的 `dsh.cmd`，将当前 runtime 中的标准 Node 和 pnpm 放到 `PATH`。通过 **Runtime → 打开插件管理终端** 使用原有命令：
+通过 **Runtime → 管理插件** 打开桌面插件管理器。管理器会列出当前 Web profile 中已安装的插件，并支持安装、更新和移除。安装时请输入受控的 npm package spec，或 GitHub HTTPS / `github:` spec；例如 `@scope/plugin@1.2.3`、`https://github.com/owner/repo.git` 或 `github:owner/repo`。更新和移除操作从已安装列表按包名执行。管理器会显示每项操作的进度和日志。
+
+安装、更新或移除成功后，Runtime 会自动重启，使插件变更生效。若插件加载失败导致 Web 无法就绪，由 Shell 独立提供的插件管理器仍保持可用，可移除或更新有问题的插件并再次重启 Runtime。
+
+若旧的 `%USERPROFILE%\.dsh` patch 仍引用已经删除的本地插件文件，启动页会提供 **禁用失效本地插件并重试**。确认后，Shell 只备份并移除与启动错误精确匹配的 loader 条目，不会清除会话、设置、凭据、其他插件或整个 profile。
+
+Shell 在用户数据目录生成稳定的 `dsh.cmd`，将当前 runtime 中的标准 Node 和 pnpm 放到 `PATH`。作为高级回退，也可以通过 **Runtime → 打开插件管理终端** 使用原有命令：
 
 ```powershell
 dsh plugin --profile web list

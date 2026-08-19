@@ -9,7 +9,7 @@ vi.mock('../src/cli-shell.ts', () => ({ prepareCliShim: vi.fn(async () => 'C:\\c
 
 import { startBackend, type RunningBackend } from '../src/backend.ts'
 import type { RuntimeCatalog, RuntimeManifest } from '../src/catalog.ts'
-import { RuntimeController, type RuntimeView } from '../src/runtime-controller.ts'
+import { RuntimeController, type RuntimeControllerOptions, type RuntimeView } from '../src/runtime-controller.ts'
 import { RuntimeStore, type InstalledRuntime, type RuntimeState } from '../src/runtime-store.ts'
 
 function manifest(version: string): RuntimeManifest {
@@ -54,7 +54,11 @@ function started(): RunningBackend {
   }
 }
 
-function harness(state: RuntimeState, catalog: RuntimeCatalog) {
+function harness(
+  state: RuntimeState,
+  catalog: RuntimeCatalog,
+  inspectStaleLocalPlugins: NonNullable<RuntimeControllerOptions['inspectStaleLocalPlugins']> = vi.fn(async () => undefined),
+) {
   const store = new RuntimeStore('C:\\store')
   const views: RuntimeView[] = []
   vi.spyOn(store, 'readState').mockResolvedValue(state)
@@ -67,11 +71,12 @@ function harness(state: RuntimeState, catalog: RuntimeCatalog) {
     shutdownHook: 'C:\\shutdown-hook.js',
     userData: 'C:\\user-data',
     environment: { DSH_HOME: process.cwd() },
+    inspectStaleLocalPlugins,
     onView: view => { views.push(view) },
     onReady: vi.fn(async () => {}),
     onOpenSettingsDocument: vi.fn(async () => {}),
   })
-  return { controller, store, views }
+  return { controller, store, views, inspectStaleLocalPlugins }
 }
 
 beforeEach(() => { vi.mocked(startBackend).mockReset() })
@@ -94,6 +99,75 @@ describe('RuntimeController', () => {
     expect(promote).toHaveBeenCalledWith(target.dshVersion)
     expect(vi.mocked(startBackend).mock.invocationCallOrder[0]).toBeLessThan(promote.mock.invocationCallOrder[0] ?? 0)
     expect(views.at(-1)).toMatchObject({ phase: 'ready', currentVersion: target.dshVersion })
+  })
+
+  it('retains the selected Runtime when Web readiness fails', async () => {
+    const target = manifest('0.1.0-rc.7')
+    const catalog = { schemaVersion: 1 as const, generatedAt: new Date().toISOString(), releases: [target] }
+    const { controller, store, views } = harness(
+      { schemaVersion: 1, preference: { mode: 'latest-compatible' } },
+      catalog,
+    )
+    vi.spyOn(store, 'installed').mockResolvedValue(installed(target))
+    vi.mocked(startBackend).mockRejectedValue(new Error('plugin readiness failed'))
+
+    await controller.start()
+
+    expect(controller.installedRuntime()).toEqual(installed(target))
+    expect(views.at(-1)).toMatchObject({ phase: 'error' })
+  })
+
+  it('offers exact stale local plugin recovery and retries only after apply', async () => {
+    const target = manifest('0.1.0-rc.7')
+    const catalog = { schemaVersion: 1 as const, generatedAt: new Date().toISOString(), releases: [target] }
+    const apply = vi.fn(async () => ({ removedEntryIds: ['web-search-exa-local'], count: 1 }))
+    const inspect = vi.fn(async () => ({ entryIds: ['web-search-exa-local'], count: 1, apply }))
+    const { controller, store, views } = harness(
+      { schemaVersion: 1, preference: { mode: 'latest-compatible' } },
+      catalog,
+      inspect,
+    )
+    vi.spyOn(store, 'installed').mockResolvedValue(installed(target))
+    vi.mocked(startBackend)
+      .mockRejectedValueOnce(new Error('failed to import loader entry web-search-exa-local'))
+      .mockResolvedValueOnce(started())
+
+    await controller.start()
+
+    expect(inspect).toHaveBeenCalledWith({
+      home: process.cwd(),
+      diagnostics: 'failed to import loader entry web-search-exa-local',
+    })
+    expect(apply).not.toHaveBeenCalled()
+    expect(views.at(-1)).toMatchObject({
+      phase: 'error',
+      recovery: { kind: 'stale-local-plugins', entryIds: ['web-search-exa-local'], count: 1 },
+    })
+
+    await controller.recoverStaleLocalPlugins()
+
+    expect(apply).toHaveBeenCalledOnce()
+    expect(startBackend).toHaveBeenCalledTimes(2)
+    expect(views.at(-1)).toMatchObject({ phase: 'ready' })
+    expect(views.at(-1)?.recovery).toBeUndefined()
+  })
+
+  it('does not replace the Runtime error when recovery inspection fails', async () => {
+    const target = manifest('0.1.0-rc.7')
+    const catalog = { schemaVersion: 1 as const, generatedAt: new Date().toISOString(), releases: [target] }
+    const inspect = vi.fn(async () => { throw new Error('recovery inspection failed') })
+    const { controller, store, views } = harness(
+      { schemaVersion: 1, preference: { mode: 'latest-compatible' } },
+      catalog,
+      inspect,
+    )
+    vi.spyOn(store, 'installed').mockResolvedValue(installed(target))
+    vi.mocked(startBackend).mockRejectedValue(new Error('original readiness failure'))
+
+    await controller.start()
+
+    expect(views.at(-1)).toMatchObject({ phase: 'error', error: 'original readiness failure' })
+    expect(views.at(-1)?.recovery).toBeUndefined()
   })
 
   it('restarts the previous revision when a same-version revision update fails', async () => {
