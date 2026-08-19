@@ -13,6 +13,7 @@ import {
   nativeImage,
   Tray,
   shell,
+  type IpcMainEvent,
   type IpcMainInvokeEvent,
   type MenuItemConstructorOptions,
 } from 'electron'
@@ -20,6 +21,7 @@ import { MINIMUM_DSH_VERSION, type RuntimePreference } from './catalog.ts'
 import { openPluginTerminal } from './cli-shell.ts'
 import { McpManager, type McpList } from './mcp-manager.ts'
 import { mutateMcpWithRuntime } from './mcp-restart.ts'
+import { PersonalizationManager } from './personalization-manager.ts'
 import { PluginManager } from './plugin-manager.ts'
 import { PluginRestartCoordinator } from './plugin-restart.ts'
 import { RuntimeController, type RuntimeView } from './runtime-controller.ts'
@@ -34,8 +36,9 @@ const setupPage = join(app.getAppPath(), 'assets', 'runtime.html')
 const repairPage = join(app.getAppPath(), 'assets', 'session-repair.html')
 const pluginManagerPage = join(app.getAppPath(), 'assets', 'plugin-manager.html')
 const mcpManagerPage = join(app.getAppPath(), 'assets', 'mcp-manager.html')
+const personalizationPage = join(app.getAppPath(), 'assets', 'personalization.html')
 const shellUpdatePage = join(app.getAppPath(), 'assets', 'shell-update.html')
-const allowedLocalPages = new Set([setupPage, repairPage, pluginManagerPage, mcpManagerPage, shellUpdatePage])
+const allowedLocalPages = new Set([setupPage, repairPage, pluginManagerPage, mcpManagerPage, personalizationPage, shellUpdatePage])
 const preload = join(moduleDirectory, 'preload.cjs')
 const shutdownHook = app.isPackaged
   ? join(process.resourcesPath, 'app.asar.unpacked', 'lib', 'shutdown-hook.js')
@@ -47,11 +50,16 @@ let managerWindow: BrowserWindow | undefined
 let repairWindow: BrowserWindow | undefined
 let pluginWindow: BrowserWindow | undefined
 let mcpWindow: BrowserWindow | undefined
+let personalizationWindow: BrowserWindow | undefined
 let updateWindow: BrowserWindow | undefined
 let latestUpdateProgress: ShellUpdateProgress | undefined
 let controller: RuntimeController | undefined
 let pluginManager: PluginManager | undefined
 let mcpManager: McpManager | undefined
+let personalizationManager: PersonalizationManager | undefined
+let personalizationDirty = false
+let personalizationClosePrompt = false
+let personalizationQuitPrompt = false
 let mcpMutationActive = false
 const pluginRestartCoordinator = new PluginRestartCoordinator()
 let updater: ShellUpdater | undefined
@@ -67,19 +75,20 @@ function runtimeRoot(): string {
   return join(local, 'DeepSeek Harness', 'runtime-manager')
 }
 
-function createWindow(options: { utility?: 'manager' | 'repair' | 'plugin' | 'mcp' | 'update' } = {}): BrowserWindow {
+function createWindow(options: { utility?: 'manager' | 'repair' | 'plugin' | 'mcp' | 'personalization' | 'update' } = {}): BrowserWindow {
   const utility = options.utility
   const manager = utility === 'manager'
   const repair = utility === 'repair'
   const plugin = utility === 'plugin'
   const mcp = utility === 'mcp'
+  const personalization = utility === 'personalization'
   const update = utility === 'update'
   const window = new BrowserWindow({
     ...(update && mainWindow !== undefined ? { parent: mainWindow, modal: true } : {}),
-    width: manager ? 700 : repair ? 760 : plugin ? 740 : mcp ? 860 : update ? 480 : 1240,
-    height: manager ? 720 : repair ? 780 : plugin ? 700 : mcp ? 760 : update ? 250 : 820,
-    minWidth: manager || repair ? 480 : plugin ? 420 : mcp ? 600 : update ? 420 : 820,
-    minHeight: manager ? 560 : plugin ? 520 : mcp ? 560 : update ? 220 : 600,
+    width: manager ? 700 : repair ? 760 : plugin ? 740 : mcp ? 860 : personalization ? 800 : update ? 480 : 1240,
+    height: manager ? 720 : repair ? 780 : plugin ? 700 : mcp ? 760 : personalization ? 720 : update ? 250 : 820,
+    minWidth: manager || repair ? 480 : plugin ? 420 : mcp ? 600 : personalization ? 520 : update ? 420 : 820,
+    minHeight: manager ? 560 : plugin ? 520 : mcp || personalization ? 560 : update ? 220 : 600,
     ...(update ? { closable: false, minimizable: false, maximizable: false, resizable: false } : {}),
     show: false,
     autoHideMenuBar: utility !== undefined,
@@ -155,6 +164,13 @@ async function showSetup(window: BrowserWindow): Promise<void> {
 
 function sendView(window: BrowserWindow): void {
   if (latestView !== undefined && !window.isDestroyed()) window.webContents.send('runtime:view', latestView)
+}
+
+async function retryRuntimeFromMenu(): Promise<void> {
+  const runtimeController = controller
+  if (runtimeController === undefined) return
+  if (mainWindow !== undefined) await showSetup(mainWindow)
+  await runtimeController.retry()
 }
 
 function showUpdateProgress(progress: ShellUpdateProgress): void {
@@ -237,7 +253,7 @@ async function openVersionManager(): Promise<void> {
   }
   managerWindow = createWindow({ utility: 'manager' })
   managerWindow.on('closed', () => { managerWindow = undefined })
-  await managerWindow.loadFile(setupPage)
+  await managerWindow.loadFile(setupPage, { query: { view: 'manager' } })
 }
 
 async function openSessionRepair(): Promise<void> {
@@ -278,10 +294,49 @@ async function openMcpManager(): Promise<void> {
   await mcpWindow.loadFile(mcpManagerPage)
 }
 
+async function openPersonalization(): Promise<void> {
+  if (personalizationWindow !== undefined && !personalizationWindow.isDestroyed()) {
+    personalizationWindow.focus()
+    return
+  }
+  personalizationDirty = false
+  personalizationClosePrompt = false
+  personalizationQuitPrompt = false
+  const window = createWindow({ utility: 'personalization' })
+  personalizationWindow = window
+  window.on('close', event => {
+    if (quitting || !personalizationDirty) return
+    event.preventDefault()
+    if (personalizationClosePrompt) return
+    personalizationClosePrompt = true
+    void dialog.showMessageBox(window, {
+      type: 'warning',
+      title: '个人化设置',
+      message: '个人化设置有尚未保存的更改。',
+      detail: '关闭窗口将放弃这些更改。',
+      buttons: ['继续编辑', '放弃更改'],
+      defaultId: 0,
+      cancelId: 0,
+    }).then(result => {
+      personalizationClosePrompt = false
+      if (result.response !== 1 || window.isDestroyed()) return
+      personalizationDirty = false
+      window.close()
+    })
+  })
+  window.on('closed', () => {
+    personalizationWindow = undefined
+    personalizationDirty = false
+    personalizationClosePrompt = false
+    personalizationQuitPrompt = false
+  })
+  await window.loadFile(personalizationPage)
+}
+
 async function showAbout(): Promise<void> {
   const runtimeVersion = latestView?.currentVersion === undefined
     ? '尚未启动'
-    : latestView.currentVersion + ' (desktop revision ' + String(latestView.currentRuntimeRevision ?? 0) + ')'
+    : latestView.currentVersion
   await dialog.showMessageBox({
     type: 'info',
     title: '关于 DeepSeek Harness',
@@ -304,9 +359,9 @@ function repairClient(event: IpcMainInvokeEvent): SessionRepairClient {
 }
 
 function runtimeClient(event: IpcMainInvokeEvent): RuntimeController {
-  if (mainWindow === undefined || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) {
-    throw new Error('Runtime 请求来源无效')
-  }
+  const fromMainWindow = mainWindow !== undefined && !mainWindow.isDestroyed() && event.sender === mainWindow.webContents
+  const fromManagerWindow = managerWindow !== undefined && !managerWindow.isDestroyed() && event.sender === managerWindow.webContents
+  if (!fromMainWindow && !fromManagerWindow) throw new Error('Runtime 请求来源无效')
   const url = new URL(event.sender.getURL())
   if (url.protocol !== 'file:' || resolve(fileURLToPath(url)) !== resolve(setupPage)) throw new Error('Runtime 请求页面无效')
   if (controller === undefined) throw new Error('DSH Runtime 控制器尚未初始化')
@@ -327,6 +382,18 @@ function mcpService(event: IpcMainInvokeEvent): McpManager {
   }
   if (mcpManager === undefined) throw new Error('MCP 管理器尚未初始化')
   return mcpManager
+}
+
+function personalizationService(event: IpcMainInvokeEvent): PersonalizationManager {
+  if (personalizationWindow === undefined || personalizationWindow.isDestroyed() || event.sender !== personalizationWindow.webContents) {
+    throw new Error('个人化设置请求来源无效')
+  }
+  if (personalizationManager === undefined) throw new Error('个人化设置管理器尚未初始化')
+  return personalizationManager
+}
+
+function isPersonalizationSender(event: IpcMainEvent): boolean {
+  return personalizationWindow !== undefined && !personalizationWindow.isDestroyed() && event.sender === personalizationWindow.webContents
 }
 
 async function setMcpEnabled(event: IpcMainInvokeEvent, value: unknown): Promise<McpList> {
@@ -361,6 +428,7 @@ function installMenu(): void {
     {
       label: '文件',
       submenu: [
+        { label: '个人化设置...', click: () => { void openPersonalization() } },
         { label: '设置', enabled: latestView?.phase === 'ready', click: () => { void openSettings() } },
         { label: '检查更新', click: () => { void updater?.check(true) } },
         { type: 'separator' },
@@ -377,7 +445,7 @@ function installMenu(): void {
       label: 'Runtime',
       submenu: [
         { label: '管理 DSH 版本', click: () => { void openVersionManager() } },
-        { label: '刷新并应用版本策略', click: () => { void controller?.retry() } },
+        { label: '刷新并应用版本策略', click: () => { void retryRuntimeFromMenu().catch(logFatalError) } },
         { type: 'separator' },
         {
           label: '管理插件',
@@ -461,6 +529,7 @@ async function startApplication(): Promise<void> {
       void controller.retry().catch(logFatalError)
     },
   })
+  personalizationManager = new PersonalizationManager({ home })
   mcpManager = new McpManager({
     home,
     codexConfigPath: join(homedir(), '.codex', 'config.toml'),
@@ -511,6 +580,15 @@ ipcMain.handle('runtime:recover-plugin-preset', async (event) => {
   if (mainWindow !== undefined) await showSetup(mainWindow)
   await runtimeController.recoverPluginPreset()
 })
+ipcMain.handle('personalization:read', async (event) => {
+  return personalizationService(event).read()
+})
+ipcMain.handle('personalization:save', async (event, value: unknown) => {
+  return personalizationService(event).save(value)
+})
+ipcMain.on('personalization:dirty', (event, value: unknown) => {
+  if (isPersonalizationSender(event) && typeof value === 'boolean') personalizationDirty = value
+})
 ipcMain.handle('mcp-manager:list', async (event) => {
   return mcpService(event).list()
 })
@@ -519,6 +597,9 @@ ipcMain.handle('mcp-manager:set-enabled', async (event, value: unknown) => {
 })
 ipcMain.handle('plugin-manager:list', async (event) => {
   return pluginService(event).list()
+})
+ipcMain.handle('plugin-manager:updates', async (event) => {
+  return pluginService(event).updates()
 })
 ipcMain.handle('plugin-manager:start', async (event, value: unknown) => {
   const service = pluginService(event)
@@ -567,7 +648,33 @@ else {
     showMainWindow()
   })
   app.on('before-quit', (event) => {
-    if (quitting || controller === undefined) {
+    if (quitting) {
+      tray?.destroy()
+      tray = undefined
+      return
+    }
+    if (personalizationDirty && personalizationWindow !== undefined && !personalizationWindow.isDestroyed()) {
+      event.preventDefault()
+      if (personalizationQuitPrompt || personalizationClosePrompt) return
+      const window = personalizationWindow
+      personalizationQuitPrompt = true
+      void dialog.showMessageBox(window, {
+        type: 'warning',
+        title: '退出 DeepSeek Harness',
+        message: '个人化设置有尚未保存的更改。',
+        detail: '退出应用将放弃这些更改。',
+        buttons: ['继续编辑', '放弃更改并退出'],
+        defaultId: 0,
+        cancelId: 0,
+      }).then(result => {
+        personalizationQuitPrompt = false
+        if (result.response !== 1 || window.isDestroyed()) return
+        personalizationDirty = false
+        app.quit()
+      })
+      return
+    }
+    if (controller === undefined) {
       tray?.destroy()
       tray = undefined
       return

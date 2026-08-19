@@ -1,7 +1,7 @@
 import { ipcRenderer } from 'electron'
 import type { RuntimePreference } from './catalog.ts'
 import type { McpEndpointView, McpEntryView, McpList } from './mcp-manager.ts'
-import type { PluginEntry, PluginList, PluginOperationStatus, PluginStartInput } from './plugin-manager.ts'
+import type { PluginEntry, PluginList, PluginOperationStatus, PluginStartInput, PluginUpdateList } from './plugin-manager.ts'
 import type { RuntimeView } from './runtime-controller.ts'
 import type { SessionRepairAnomalyKind, SessionRepairInspection, SessionRepairResult, SessionRepairRollbackResult } from './session-repair.ts'
 import type { ShellUpdateProgress } from './shell-updater.ts'
@@ -15,13 +15,50 @@ function element<T extends HTMLElement>(id: string): T {
 let runtimeRecoveryIds: string[] = []
 let runtimeRecoveryCount = 0
 let runtimePresetRecovery: { pluginName: string; presetId: string } | undefined
+let runtimeLatestView: RuntimeView | undefined
+let runtimeDraftMode: RuntimePreference['mode'] | undefined
+let runtimeDraftVersion: string | undefined
+let runtimePreferenceTouched = false
+let runtimeManagerMode = false
+
+const runtimePhaseLabels: Record<RuntimeView['phase'], string> = {
+  checking: '检查中',
+  downloading: '下载中',
+  starting: '启动中',
+  ready: '已就绪',
+  error: '需要处理',
+}
+
+function runtimePreferenceMatches(view: RuntimeView): boolean {
+  if (runtimeDraftMode !== view.preference.mode) return false
+  return runtimeDraftMode === 'latest-compatible'
+    || (view.preference.mode === 'pinned' && runtimeDraftVersion === view.preference.version)
+}
 
 function renderRuntime(view: RuntimeView): void {
+  runtimeLatestView = view
+  if (!runtimePreferenceTouched) {
+    runtimeDraftMode = view.preference.mode
+    runtimeDraftVersion = view.preference.mode === 'pinned' ? view.preference.version : undefined
+  }
+  runtimeDraftMode ??= 'latest-compatible'
+  const availableVersions = view.versions.filter((version, index, versions) =>
+    versions.findIndex(candidate => candidate.version === version.version) === index)
+  const fallbackVersion = availableVersions.find(version => version.current)?.version ?? availableVersions[0]?.version
+  runtimeDraftVersion ??= fallbackVersion
+
+  const busy = view.phase === 'checking' || view.phase === 'downloading' || view.phase === 'starting'
+  document.body.dataset.phase = view.phase
+  document.body.dataset.view = runtimeManagerMode ? 'manager' : 'startup'
+  element<HTMLElement>('version-settings').hidden = !runtimeManagerMode
+  element('runtime-page').setAttribute('aria-busy', String(busy))
+  element('phase-chip').textContent = runtimePhaseLabels[view.phase]
   element('shell-version').textContent = 'Shell ' + view.shellVersion + ' · 最低 DSH ' + view.minimumDshVersion
   element('message').textContent = view.message
+
   const versionDetail = view.currentVersion === undefined
     ? ''
-    : '当前运行版本：' + view.currentVersion + ' · desktop revision ' + String(view.currentRuntimeRevision ?? 0)
+    : '当前使用：DSH ' + view.currentVersion
   runtimeRecoveryIds = view.recovery?.kind === 'stale-local-plugins' ? view.recovery.entryIds : []
   runtimeRecoveryCount = view.recovery?.kind === 'stale-local-plugins' ? view.recovery.count : runtimeRecoveryIds.length
   runtimePresetRecovery = view.recovery?.kind === 'plugin-preset-conflict'
@@ -30,33 +67,92 @@ function renderRuntime(view: RuntimeView): void {
   const staleDetail = runtimeRecoveryIds.length === 0 ? '' : '检测到失效的本地插件：' + runtimeRecoveryIds.join('、')
   const presetDetail = runtimePresetRecovery === undefined ? '' : '检测到冲突的插件预设：' + runtimePresetRecovery.presetId
   element('detail').textContent = [versionDetail, staleDetail, presetDetail].filter(value => value.length > 0).join('\n')
-  const progress = view.progress === undefined || view.progress.total === 0 ? 0 : Math.min(100, (view.progress.received / view.progress.total) * 100)
-  element<HTMLDivElement>('progress-value').style.width = String(progress) + '%'
+
+  const progressElement = element('runtime-progress')
+  const progressRow = element('runtime-progress-row')
+  const progress = view.progress === undefined || view.progress.total === 0
+    ? undefined
+    : Math.max(0, Math.min(100, (view.progress.received / view.progress.total) * 100))
+  const indeterminate = busy && progress === undefined
+  progressRow.hidden = !busy
+  progressElement.dataset.indeterminate = String(indeterminate)
+  element<HTMLDivElement>('progress-value').style.width = String(progress ?? 0) + '%'
+  if (progress === undefined) progressElement.removeAttribute('aria-valuenow')
+  else progressElement.setAttribute('aria-valuenow', progress.toFixed(1))
+  element('progress-label').textContent = progress !== undefined
+    ? progress.toLocaleString('zh-CN', { maximumFractionDigits: 0 }) + '%'
+    : view.phase === 'checking' ? '正在检查' : view.phase === 'starting' ? '正在连接' : '正在准备'
+
   element('cache').style.display = view.cachedCatalog ? 'block' : 'none'
   const error = element('error')
   error.textContent = view.error ?? ''
   error.style.display = view.error === undefined ? 'none' : 'block'
+
+  const autoInput = element<HTMLInputElement>('version-mode-auto')
+  const pinnedInput = element<HTMLInputElement>('version-mode-pinned')
+  autoInput.checked = runtimeDraftMode === 'latest-compatible'
+  pinnedInput.checked = runtimeDraftMode === 'pinned'
+  autoInput.disabled = busy
+  pinnedInput.disabled = busy
+
   const select = element<HTMLSelectElement>('version')
-  const previous = select.value
   select.replaceChildren()
-  const latest = document.createElement('option')
-  latest.value = 'latest-compatible'
-  latest.textContent = '自动选择最新兼容版本'
-  select.append(latest)
-  for (const version of view.versions) {
+  const selectedAvailable = availableVersions.some(version => version.version === runtimeDraftVersion)
+  if (runtimeDraftVersion !== undefined && !selectedAvailable) {
+    const unavailable = document.createElement('option')
+    unavailable.value = runtimeDraftVersion
+    unavailable.textContent = runtimeDraftVersion + ' · 当前兼容目录中不可用'
+    select.append(unavailable)
+  }
+  for (const version of availableVersions) {
     const option = document.createElement('option')
     option.value = version.version
-    const flags = [version.current ? '当前' : '', version.installed ? '已安装' : ''].filter(Boolean).join(' · ')
-    const label = version.version + ' · desktop revision ' + String(version.runtimeRevision)
-    option.textContent = flags.length === 0 ? label : label + ' (' + flags + ')'
+    option.textContent = version.version + (version.current ? '（当前使用）' : '')
     select.append(option)
   }
-  const preferred = view.preference.mode === 'latest-compatible' ? 'latest-compatible' : view.preference.version
-  select.value = previous !== '' && [...select.options].some(option => option.value === previous) ? previous : preferred
-  const busy = view.phase === 'checking' || view.phase === 'downloading' || view.phase === 'starting'
-  select.disabled = busy
-  element<HTMLButtonElement>('apply').disabled = busy || view.versions.length === 0
+  if (runtimeDraftVersion !== undefined) select.value = runtimeDraftVersion
+
+  const pinned = runtimeDraftMode === 'pinned'
+  const selectedVersion = availableVersions.find(version => version.version === runtimeDraftVersion)
+  const targetVersion = pinned ? selectedVersion : availableVersions[0]
+  const pinnedField = element('pinned-version-field')
+  pinnedField.dataset.active = String(pinned)
+  select.disabled = busy || !pinned || availableVersions.length === 0
+  element('strategy-summary').textContent = pinned ? '保持在指定版本' : '自动跟随最新兼容版本'
+  element('version-meta').textContent = !pinned
+    ? '切换到固定版本后可选择'
+    : selectedVersion === undefined
+      ? '当前选择不可用'
+      : selectedVersion.current ? '当前使用' : ''
+
+  const selectionVersion = element('selection-version')
+  const selectionDetail = element('selection-detail')
+  if (targetVersion === undefined) {
+    selectionVersion.textContent = busy
+      ? '正在读取版本目录'
+      : pinned && runtimeDraftVersion !== undefined
+        ? '固定 · DSH ' + runtimeDraftVersion
+        : '尚无兼容版本'
+    selectionDetail.textContent = busy
+      ? '完成检查后将显示目标版本'
+      : pinned && runtimeDraftVersion !== undefined
+        ? '该版本不在当前兼容目录，请选择其他版本'
+        : '刷新版本目录后将显示可用版本'
+  } else {
+    selectionVersion.textContent = 'DSH ' + targetVersion.version
+    selectionDetail.textContent = targetVersion.current ? '当前使用' : ''
+  }
+
+  const applyButton = element<HTMLButtonElement>('apply')
+  applyButton.textContent = pinned && runtimeDraftVersion !== undefined
+    ? '固定到 ' + runtimeDraftVersion
+    : '使用自动策略'
+  applyButton.disabled = busy || targetVersion === undefined || runtimePreferenceMatches(view)
   element<HTMLButtonElement>('retry').disabled = busy
+
+  const startupRetry = element<HTMLButtonElement>('startup-retry')
+  startupRetry.hidden = runtimeManagerMode || view.phase !== 'error'
+  startupRetry.disabled = busy
   const recoverButton = element<HTMLButtonElement>('recover-stale-plugins')
   recoverButton.hidden = runtimeRecoveryIds.length === 0
   recoverButton.disabled = busy || runtimeRecoveryIds.length === 0
@@ -66,6 +162,7 @@ function renderRuntime(view: RuntimeView): void {
   const presetButton = element<HTMLButtonElement>('recover-plugin-preset')
   presetButton.hidden = runtimePresetRecovery === undefined
   presetButton.disabled = busy || runtimePresetRecovery === undefined
+  element<HTMLElement>('startup-actions').hidden = startupRetry.hidden && recoverButton.hidden && presetButton.hidden
 }
 
 function initializeShellUpdatePage(): void {
@@ -100,17 +197,45 @@ function initializeShellUpdatePage(): void {
 }
 
 function initializeRuntimePage(): void {
+  runtimeManagerMode = new URLSearchParams(window.location.search).get('view') === 'manager'
+  document.body.dataset.view = runtimeManagerMode ? 'manager' : 'startup'
+  element<HTMLElement>('version-settings').hidden = !runtimeManagerMode
+  const showError = (error: unknown): void => {
+    const errorElement = element('error')
+    errorElement.textContent = errorMessage(error)
+    errorElement.style.display = 'block'
+  }
+  const rerender = (): void => { if (runtimeLatestView !== undefined) renderRuntime(runtimeLatestView) }
+
   ipcRenderer.on('runtime:view', (_event, view: RuntimeView) => { renderRuntime(view) })
-  element<HTMLButtonElement>('retry').addEventListener('click', () => { void ipcRenderer.invoke('runtime:retry') })
+  element<HTMLInputElement>('version-mode-auto').addEventListener('change', event => {
+    if (!(event.currentTarget as HTMLInputElement).checked) return
+    runtimePreferenceTouched = true
+    runtimeDraftMode = 'latest-compatible'
+    rerender()
+  })
+  element<HTMLInputElement>('version-mode-pinned').addEventListener('change', event => {
+    if (!(event.currentTarget as HTMLInputElement).checked) return
+    runtimePreferenceTouched = true
+    runtimeDraftMode = 'pinned'
+    runtimeDraftVersion ??= runtimeLatestView?.versions.find(version => version.current)?.version
+      ?? runtimeLatestView?.versions[0]?.version
+    rerender()
+  })
+  element<HTMLSelectElement>('version').addEventListener('change', event => {
+    runtimePreferenceTouched = true
+    runtimeDraftMode = 'pinned'
+    runtimeDraftVersion = (event.currentTarget as HTMLSelectElement).value
+    rerender()
+  })
+  const retry = (): void => { void ipcRenderer.invoke('runtime:retry').catch(showError) }
+  element<HTMLButtonElement>('retry').addEventListener('click', retry)
+  element<HTMLButtonElement>('startup-retry').addEventListener('click', retry)
   element<HTMLButtonElement>('recover-stale-plugins').addEventListener('click', () => {
     if (runtimeRecoveryIds.length === 0) return
     const names = runtimeRecoveryIds.join('、')
     if (!window.confirm('将备份配置并禁用 ' + String(runtimeRecoveryCount) + ' 个失效本地插件：' + names + '。会话、设置和其他插件不会被删除。是否继续？')) return
-    void ipcRenderer.invoke('runtime:recover-stale-local-plugins').catch((error: unknown) => {
-      const errorElement = element('error')
-      errorElement.textContent = errorMessage(error)
-      errorElement.style.display = 'block'
-    })
+    void ipcRenderer.invoke('runtime:recover-stale-local-plugins').catch(showError)
   })
   element<HTMLButtonElement>('recover-plugin-preset').addEventListener('click', () => {
     const recovery = runtimePresetRecovery
@@ -118,18 +243,18 @@ function initializeRuntimePage(): void {
     const message = '将完整备份预设 ' + recovery.presetId + '，再用插件 ' + recovery.pluginName
       + ' 当前打包版本重置该预设。人工修改不会被删除，但会移入带 desktop-backup 标记的备份目录。是否继续？'
     if (!window.confirm(message)) return
-    void ipcRenderer.invoke('runtime:recover-plugin-preset').catch((error: unknown) => {
-      const errorElement = element('error')
-      errorElement.textContent = errorMessage(error)
-      errorElement.style.display = 'block'
-    })
+    void ipcRenderer.invoke('runtime:recover-plugin-preset').catch(showError)
   })
   element<HTMLButtonElement>('apply').addEventListener('click', () => {
-    const value = element<HTMLSelectElement>('version').value
-    const preference: RuntimePreference = value === 'latest-compatible' ? { mode: 'latest-compatible' } : { mode: 'pinned', version: value }
-    void ipcRenderer.invoke('runtime:set-preference', preference)
+    if (runtimeDraftMode === 'pinned' && runtimeDraftVersion === undefined) return
+    const preference: RuntimePreference = runtimeDraftMode === 'pinned'
+      ? { mode: 'pinned', version: runtimeDraftVersion as string }
+      : { mode: 'latest-compatible' }
+    void ipcRenderer.invoke('runtime:set-preference', preference).then(() => {
+      runtimePreferenceTouched = false
+    }).catch(showError)
   })
-  void (ipcRenderer.invoke('runtime:get-view') as Promise<RuntimeView>).then(renderRuntime)
+  void (ipcRenderer.invoke('runtime:get-view') as Promise<RuntimeView>).then(renderRuntime).catch(showError)
 }
 
 function setHidden(id: string, hidden: boolean): void { element(id).hidden = hidden }
@@ -163,6 +288,9 @@ function initializePluginManagerPage(): void {
   const logSection = element('plugin-log-section')
   const logElement = element('plugin-log')
   let busy = false
+  let currentEntries: PluginEntry[] = []
+  let updateVersions = new Map<string, string>()
+  let listGeneration = 0
 
   const setStatus = (message: string, kind: 'normal' | 'success' | 'error' = 'normal'): void => {
     statusElement.textContent = message
@@ -195,15 +323,21 @@ function initializePluginManagerPage(): void {
       name.textContent = entry.name
       const meta = document.createElement('div')
       meta.className = 'plugin-meta'
+      const latestVersion = updateVersions.get(entry.name)
       meta.textContent = (entry.version === undefined ? '未解析版本' : '版本 ' + entry.version)
+        + (latestVersion === undefined ? '' : ' · 可更新至 ' + latestVersion)
         + (entry.spec === undefined ? '' : ' · ' + entry.spec)
       main.append(name, meta)
       const actions = document.createElement('div')
       actions.className = 'plugin-actions'
-      const updateButton = document.createElement('button')
-      updateButton.type = 'button'
-      updateButton.textContent = '更新'
-      updateButton.addEventListener('click', () => { void runOperation({ action: 'update', packageName: entry.name }, '更新 ' + entry.name) })
+      if (latestVersion !== undefined) {
+        const updateButton = document.createElement('button')
+        updateButton.type = 'button'
+        updateButton.textContent = '更新至 ' + latestVersion
+        updateButton.disabled = busy
+        updateButton.addEventListener('click', () => { void runOperation({ action: 'update', packageName: entry.name }, '更新 ' + entry.name) })
+        actions.append(updateButton)
+      }
       const removeButton = document.createElement('button')
       removeButton.type = 'button'
       removeButton.className = 'danger'
@@ -211,14 +345,25 @@ function initializePluginManagerPage(): void {
       removeButton.addEventListener('click', () => {
         if (window.confirm('确认卸载 ' + entry.name + '？')) void runOperation({ action: 'remove', packageName: entry.name }, '卸载 ' + entry.name)
       })
-      actions.append(updateButton, removeButton)
+      removeButton.disabled = busy
+      actions.append(removeButton)
       row.append(main, actions)
       listElement.append(row)
     }
   }
   const loadEntries = async (): Promise<void> => {
+    const generation = ++listGeneration
     const value = await ipcRenderer.invoke('plugin-manager:list') as PluginList
-    renderEntries(value.entries)
+    currentEntries = value.entries
+    updateVersions = new Map()
+    renderEntries(currentEntries)
+    void (ipcRenderer.invoke('plugin-manager:updates') as Promise<PluginUpdateList>).then(updates => {
+      if (generation !== listGeneration) return
+      updateVersions = new Map(updates.entries
+        .filter(update => currentEntries.some(entry => entry.name === update.name && entry.version === update.currentVersion))
+        .map(update => [update.name, update.latestVersion]))
+      renderEntries(currentEntries)
+    }).catch(() => undefined)
   }
   const waitForOperation = async (operationId: string): Promise<PluginOperationStatus> => {
     for (;;) {
@@ -539,6 +684,152 @@ function initializeMcpManagerPage(): void {
   void load()
 }
 
+interface PersonalizationDocument {
+  path: string
+  content: string
+  exists: boolean
+  revision: string
+  maxBytes: number
+}
+
+const PERSONALIZATION_TEMPLATE = [
+  '# 全局 Agent 个人化',
+  '',
+  '## 沟通方式',
+  '',
+  '- 默认使用中文沟通。',
+  '- 先给出明确结论，再提供必要依据。',
+  '- 对假设、风险和未验证事项明确说明。',
+  '',
+  '## 工程方式',
+  '',
+  '- 修改前先阅读现有实现、测试和项目约定。',
+  '- 优先使用项目已有模式，避免无关重构。',
+  '- 根据改动风险补充测试，并报告实际验证结果。',
+  '',
+  '## 操作边界',
+  '',
+  '- 遵从当前 Agent 预设提供的角色、工具、能力与工作流程。',
+  '- 不假定当前预设拥有未提供的工具。',
+  '- 未明确要求时，不创建提交、Tag 或发布版本。',
+  '- 不修改与当前任务无关的用户变更。',
+  '',
+].join('\n')
+
+function initializePersonalizationPage(): void {
+  const editor = element<HTMLTextAreaElement>('personalization-content')
+  const templateButton = element<HTMLButtonElement>('personalization-template')
+  const reloadButton = element<HTMLButtonElement>('personalization-reload')
+  const saveButton = element<HTMLButtonElement>('personalization-save')
+  const state = element('personalization-state')
+  const path = element('personalization-path')
+  const count = element('personalization-count')
+  const status = element('personalization-status')
+  const progress = element<HTMLProgressElement>('personalization-progress')
+  const encoder = new TextEncoder()
+  let snapshot: PersonalizationDocument | undefined
+  let baseline = ''
+  let busy = false
+  let reportedDirty = false
+
+  const byteLength = (): number => encoder.encode(editor.value).byteLength
+  const isDirty = (): boolean => editor.value !== baseline
+  const reportDirty = (value: boolean): void => {
+    if (reportedDirty === value) return
+    reportedDirty = value
+    ipcRenderer.send('personalization:dirty', value)
+  }
+  const setStatus = (message: string, kind: 'normal' | 'success' | 'error' = 'normal'): void => {
+    status.textContent = message
+    status.dataset.kind = kind
+  }
+  const updateControls = (): void => {
+    const bytes = byteLength()
+    const maximum = snapshot?.maxBytes ?? 65_536
+    const dirty = isDirty()
+    const over = bytes > maximum
+    count.textContent = bytes.toLocaleString('zh-CN') + ' / ' + maximum.toLocaleString('zh-CN') + ' B'
+    count.dataset.over = String(over)
+    state.textContent = dirty ? '有未保存更改' : snapshot?.exists === true ? '已保存' : '未创建'
+    state.dataset.kind = dirty ? 'dirty' : snapshot === undefined ? 'normal' : 'saved'
+    editor.disabled = busy
+    templateButton.disabled = busy
+    reloadButton.disabled = busy
+    saveButton.disabled = busy || snapshot === undefined || !dirty || over
+    progress.hidden = !busy
+    reportDirty(dirty)
+    if (over) setStatus('内容超过 ' + maximum.toLocaleString('zh-CN') + ' B 限制', 'error')
+  }
+  const updateAfterEdit = (): void => {
+    updateControls()
+    if (byteLength() <= (snapshot?.maxBytes ?? 65_536)) setStatus('更改尚未保存')
+  }
+  const setBusy = (value: boolean): void => { busy = value; updateControls() }
+
+  const load = async (confirmDiscard: boolean): Promise<void> => {
+    if (busy) return
+    if (confirmDiscard && isDirty() && !window.confirm('放弃尚未保存的更改并重新加载？')) return
+    setBusy(true)
+    setStatus('正在读取全局个人化设置...')
+    try {
+      snapshot = await ipcRenderer.invoke('personalization:read') as PersonalizationDocument
+      editor.value = snapshot.content
+      baseline = editor.value
+      path.textContent = snapshot.path
+      setStatus(snapshot.exists ? '已加载全局个人化设置' : '尚未创建全局个人化设置', 'success')
+    } catch (error: unknown) {
+      setStatus(errorMessage(error), 'error')
+    } finally {
+      setBusy(false)
+      editor.focus()
+    }
+  }
+
+  const save = async (): Promise<void> => {
+    const current = snapshot
+    if (busy || current === undefined || !isDirty() || byteLength() > current.maxBytes) return
+    setBusy(true)
+    setStatus(editor.value.trim().length === 0 ? '正在移除全局个人化设置...' : '正在保存全局个人化设置...')
+    try {
+      snapshot = await ipcRenderer.invoke('personalization:save', {
+        content: editor.value,
+        expectedRevision: current.revision,
+      }) as PersonalizationDocument
+      editor.value = snapshot.content
+      baseline = editor.value
+      path.textContent = snapshot.path
+      setStatus(snapshot.exists ? '已保存；后续新会话将使用该设置' : '已移除全局个人化设置', 'success')
+    } catch (error: unknown) {
+      setStatus(errorMessage(error), 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  editor.addEventListener('input', updateAfterEdit)
+  editor.addEventListener('keydown', event => {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase('en-US') === 's') {
+      event.preventDefault()
+      void save()
+      return
+    }
+    if (event.key === 'Tab' && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      event.preventDefault()
+      editor.setRangeText('  ', editor.selectionStart, editor.selectionEnd, 'end')
+      updateAfterEdit()
+    }
+  })
+  templateButton.addEventListener('click', () => {
+    if (editor.value.trim().length > 0 && !window.confirm('使用推荐模板替换编辑器中的当前内容？')) return
+    editor.value = PERSONALIZATION_TEMPLATE
+    updateAfterEdit()
+    editor.focus()
+  })
+  reloadButton.addEventListener('click', () => { void load(true) })
+  saveButton.addEventListener('click', () => { void save() })
+  void load(false)
+}
+
 function anomalyLabel(kind: SessionRepairAnomalyKind): string {
   if (kind === 'branch-reset') return '分支重置'
   if (kind === 'stale-single-event') return '陈旧单条事件'
@@ -689,6 +980,7 @@ function initializeRepairPage(): void {
 
 window.addEventListener('DOMContentLoaded', () => {
   if (document.querySelector('#shell-update-page') !== null) initializeShellUpdatePage()
+  else if (document.querySelector('#personalization-page') !== null) initializePersonalizationPage()
   else if (document.querySelector('#mcp-manager-page') !== null) initializeMcpManagerPage()
   else if (document.querySelector('#plugin-manager-page') !== null) initializePluginManagerPage()
   else if (document.querySelector('#version') !== null) initializeRuntimePage()

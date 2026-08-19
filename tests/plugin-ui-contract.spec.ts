@@ -28,6 +28,11 @@ describe('plugin manager UI contract', () => {
 
   it('keeps all plugin UI behavior in the sandboxed preload without HTML sinks', () => {
     expect(preload).toContain("ipcRenderer.invoke('plugin-manager:list')")
+    expect(preload).toContain("ipcRenderer.invoke('plugin-manager:updates')")
+    expect(main).toContain("ipcMain.handle('plugin-manager:updates'")
+    expect(preload).toContain('if (latestVersion !== undefined)')
+    expect(preload).toContain("updateButton.textContent = '更新至 ' + latestVersion")
+    expect(preload).not.toContain('actions.append(updateButton, removeButton)')
     expect(preload).toContain("ipcRenderer.invoke('plugin-manager:start'")
     expect(preload).toContain("ipcRenderer.invoke('plugin-manager:status'")
     expect(preload).toContain("ipcRenderer.invoke('plugin-manager:current')")
@@ -45,7 +50,9 @@ describe('plugin manager UI contract', () => {
     expect(preload).toContain("ipcRenderer.invoke('runtime:recover-plugin-preset')")
     expect(preload).toContain('window.confirm(message)')
     expect(main).toContain("ipcMain.handle('runtime:recover-plugin-preset'")
-    expect(main).toContain('event.sender !== mainWindow.webContents')
+    expect(main).toContain('event.sender === mainWindow.webContents')
+    expect(main).toContain('event.sender === managerWindow.webContents')
+    expect(main).toContain('if (!fromMainWindow && !fromManagerWindow)')
     expect(main).toContain("url.protocol !== 'file:'")
     expect(main).toContain('resolve(fileURLToPath(url)) !== resolve(setupPage)')
   })

@@ -6,58 +6,177 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self'; style-src 'unsafe-inline'; script-src 'none'">
   <title>DeepSeek Harness</title>
   <style>
-    :root { color-scheme: light; font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif; background: #f5f6f8; color: #1d2028; }
+    :root {
+      color-scheme: light;
+      font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif;
+      background: #f3f5f8;
+      color: #1c2028;
+    }
     * { box-sizing: border-box; letter-spacing: 0; }
+    [hidden] { display: none !important; }
     html, body { width: 100%; min-width: 320px; min-height: 100%; margin: 0; }
-    body { display: grid; min-height: 100vh; place-items: center; padding: 28px; }
-    main { width: min(620px, 100%); background: #ffffff; border: 1px solid #dfe2e8; border-radius: 8px; box-shadow: 0 12px 36px rgba(25, 30, 45, 0.10); overflow: hidden; }
-    header { display: flex; align-items: center; gap: 14px; padding: 22px 24px 18px; border-bottom: 1px solid #e7e9ee; }
-    header img { width: 44px; height: 44px; border-radius: 8px; }
-    h1 { margin: 0; font-size: 20px; font-weight: 650; }
-    #shell-version { margin-top: 3px; color: #686e7c; font-size: 12px; }
-    .content { padding: 22px 24px 24px; }
-    #message { margin: 0; font-size: 15px; font-weight: 600; }
-    #detail { min-height: 20px; margin: 8px 0 0; color: #686e7c; font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
-    .progress { height: 6px; margin-top: 18px; overflow: hidden; border-radius: 3px; background: #e7e9ee; }
-    #progress-value { width: 0; height: 100%; background: #5068e8; transition: width 160ms ease; }
-    .versions { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; margin-top: 22px; padding-top: 20px; border-top: 1px solid #e7e9ee; }
-    label { grid-column: 1 / -1; color: #4d5360; font-size: 12px; font-weight: 600; }
-    select, button { min-height: 38px; border: 1px solid #cbd0da; border-radius: 6px; background: #fff; color: #1d2028; font: inherit; }
-    select { min-width: 0; padding: 0 34px 0 10px; }
+    body { min-height: 100vh; padding: 34px 28px; }
+    button, select, input { font: inherit; }
+    button, select { min-height: 40px; border: 1px solid #c8ced8; border-radius: 6px; background: #fff; color: #1c2028; }
     button { padding: 0 16px; cursor: pointer; font-weight: 600; }
-    button.primary { border-color: #5068e8; background: #5068e8; color: #fff; }
-    button:hover:not(:disabled) { border-color: #5068e8; }
-    button:disabled { cursor: default; opacity: 0.55; }
-    .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
-    #recover-stale-plugins, #recover-plugin-preset { border-color: #a96b18; color: #7a4a0d; background: #fff8ed; }
-    #error { display: none; margin-top: 16px; padding: 12px; border-left: 3px solid #c63f48; background: #fff3f4; color: #80272e; font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+    button:hover:not(:disabled) { border-color: #3f5fd9; }
+    button:focus-visible, select:focus-visible, .strategy-option input:focus-visible + .strategy-body { outline: 3px solid rgba(63, 95, 217, 0.22); outline-offset: 2px; }
+    button:disabled, select:disabled { cursor: default; opacity: 0.52; }
+    button.primary { border-color: #3f5fd9; background: #3f5fd9; color: #fff; }
+    main { width: min(760px, 100%); margin: 0 auto; }
+    body[data-view="startup"] main { display: flex; min-height: calc(100vh - 68px); flex-direction: column; }
+    .shell-header { display: flex; align-items: center; gap: 18px; min-height: 82px; animation: shell-enter 380ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+    .launch-mark { position: relative; display: grid; flex: 0 0 62px; width: 62px; height: 62px; place-items: center; }
+    .launch-mark img { width: 50px; height: 50px; border-radius: 11px; box-shadow: 0 7px 18px rgba(31, 45, 92, 0.16); animation: mark-enter 560ms cubic-bezier(0.2, 0.9, 0.25, 1.2) both; }
+    .activity-ring { position: absolute; inset: 0; border: 2px solid #d2d7e1; border-top-color: #3f5fd9; border-radius: 16px; animation: activity-spin 1050ms linear infinite; transition: opacity 180ms ease, border-color 180ms ease; }
+    body[data-phase="ready"] .activity-ring { opacity: 0; animation: none; }
+    body[data-phase="error"] .activity-ring { border-color: #cf7a80; animation: none; }
+    .brand-copy { min-width: 0; flex: 1; }
+    h1 { margin: 0; font-size: 22px; font-weight: 680; }
+    #shell-version { margin-top: 4px; color: #69707d; font-size: 12px; overflow-wrap: anywhere; }
+    #phase-chip { flex: 0 0 auto; min-width: 64px; padding: 5px 9px; border: 1px solid #cbd4f4; border-radius: 6px; background: #eef2ff; color: #29479f; font-size: 12px; text-align: center; }
+    body[data-phase="ready"] #phase-chip { border-color: #b9d9c5; background: #edf8f1; color: #176a3a; }
+    body[data-phase="error"] #phase-chip { border-color: #e4bec1; background: #fff1f2; color: #9b3039; }
+    .startup-status { margin-top: 24px; padding: 22px 0 24px; border-top: 1px solid #dce0e7; border-bottom: 1px solid #dce0e7; }
+    body[data-view="startup"] .startup-status { display: flex; flex: 1; flex-direction: column; border-bottom: 0; }
+    body[data-view="startup"] .status-copy { margin: auto 0; }
+    body[data-view="startup"] .progress-row { margin-top: auto; padding-top: 28px; }
+    #message { margin: 0; font-size: 17px; font-weight: 650; }
+    #detail { min-height: 20px; margin: 7px 0 0; color: #69707d; font-size: 13px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .progress-row { display: flex; align-items: center; gap: 14px; margin-top: 18px; }
+    .progress-track { position: relative; flex: 1; height: 6px; overflow: hidden; border-radius: 3px; background: #dde1e8; }
+    #progress-value { width: 0; height: 100%; border-radius: 3px; background: #3f5fd9; transition: width 180ms ease; }
+    .progress-track[data-indeterminate="true"] #progress-value { width: 34% !important; animation: progress-scan 1150ms ease-in-out infinite; }
+    #progress-label { flex: 0 0 auto; min-width: 76px; color: #69707d; font-size: 12px; text-align: right; }
     #cache { display: none; margin-top: 12px; color: #8a6421; font-size: 12px; }
-    @media (max-width: 520px) { body { padding: 0; place-items: stretch; } main { min-height: 100vh; border: 0; border-radius: 0; box-shadow: none; } .versions { grid-template-columns: 1fr; } }
+    #error { display: none; margin-top: 16px; padding: 11px 13px; border-left: 3px solid #c63f48; background: #fff1f2; color: #80272e; font-size: 12px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .version-section { padding: 24px 0 4px; }
+    .section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+    h2 { margin: 0; font-size: 15px; font-weight: 680; }
+    #strategy-summary { color: #69707d; font-size: 12px; text-align: right; }
+    fieldset { min-width: 0; margin: 14px 0 0; padding: 0; border: 0; }
+    .strategy-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .strategy-option { position: relative; min-width: 0; cursor: pointer; }
+    .strategy-option input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+    .strategy-body { display: block; min-height: 68px; padding: 12px 14px; border: 1px solid #cbd0d9; border-radius: 6px; background: #fff; transition: border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease; }
+    .strategy-option:hover .strategy-body { border-color: #8090c8; }
+    .strategy-option input:disabled + .strategy-body { cursor: default; opacity: 0.56; }
+    .strategy-option input:checked + .strategy-body { border-color: #3f5fd9; background: #f3f6ff; box-shadow: inset 3px 0 0 #3f5fd9; }
+    .strategy-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 14px; font-weight: 650; }
+    .recommended { color: #2b59bd; font-size: 11px; font-weight: 600; }
+    .strategy-description { display: block; margin-top: 4px; color: #69707d; font-size: 12px; line-height: 1.4; }
+    .version-picker { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px 14px; margin-top: 16px; transition: opacity 150ms ease; }
+    .version-picker[data-active="false"] { opacity: 0.58; }
+    .version-picker label { color: #4d5360; font-size: 12px; font-weight: 650; }
+    #version-meta { color: #69707d; font-size: 12px; text-align: right; }
+    #version { grid-column: 1 / -1; width: 100%; min-width: 0; padding: 0 36px 0 11px; }
+    .selection-summary { display: flex; align-items: center; justify-content: space-between; gap: 18px; min-height: 52px; margin-top: 14px; padding: 10px 0; border-top: 1px solid #e2e5ea; border-bottom: 1px solid #e2e5ea; }
+    #selection-version { flex: 0 0 auto; color: #263b75; font-size: 13px; font-weight: 650; }
+    #selection-detail { min-width: 0; color: #69707d; font-size: 12px; line-height: 1.45; text-align: right; overflow-wrap: anywhere; }
+    .section-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+    .startup-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+    #recover-stale-plugins, #recover-plugin-preset { border-color: #a96b18; color: #7a4a0d; background: #fff8ed; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+    @keyframes shell-enter { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes mark-enter { from { opacity: 0; transform: scale(0.82); } to { opacity: 1; transform: scale(1); } }
+    @keyframes activity-spin { to { transform: rotate(360deg); } }
+    @keyframes progress-scan { from { transform: translateX(-125%); } to { transform: translateX(390%); } }
+    @media (max-width: 560px) {
+      body { padding: 24px 20px; }
+      body[data-view="startup"] main { min-height: calc(100vh - 48px); }
+      .shell-header { gap: 13px; }
+      .launch-mark { flex-basis: 54px; width: 54px; height: 54px; }
+      .launch-mark img { width: 43px; height: 43px; }
+      h1 { font-size: 19px; }
+      .strategy-options { grid-template-columns: 1fr; }
+      .section-heading, .selection-summary { align-items: flex-start; flex-direction: column; gap: 6px; }
+      #strategy-summary, #selection-detail { text-align: left; }
+      .version-picker { grid-template-columns: 1fr; }
+      #version-meta, #version { grid-column: 1; text-align: left; }
+      .section-actions button { flex: 1 1 150px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .shell-header, .launch-mark img, .activity-ring, .progress-track[data-indeterminate="true"] #progress-value { animation: none; }
+      .activity-ring { border-color: #9aa8df; }
+      #progress-value { transition: none; }
+    }
   </style>
 </head>
-<body>
-  <main>
-    <header>
-      <img src="icon.png" alt="">
-      <div><h1>DeepSeek Harness</h1><div id="shell-version"></div></div>
+<body data-phase="checking" data-view="startup">
+  <main id="runtime-page" aria-busy="true">
+    <header class="shell-header">
+      <div class="launch-mark" aria-hidden="true">
+        <img src="icon.png" alt="">
+        <span class="activity-ring"></span>
+      </div>
+      <div class="brand-copy">
+        <h1>DeepSeek Harness</h1>
+        <div id="shell-version"></div>
+      </div>
+      <span id="phase-chip">检查中</span>
     </header>
-    <div class="content">
-      <p id="message">正在检查可用的 DSH 版本</p>
-      <p id="detail"></p>
-      <div class="progress" aria-hidden="true"><div id="progress-value"></div></div>
-      <div id="cache">当前使用缓存的版本目录</div>
-      <div id="error"></div>
-      <div class="versions">
-        <label for="version">DSH 版本</label>
-        <select id="version" aria-label="DSH 版本"></select>
-        <button id="apply" class="primary" type="button">应用并启动</button>
+
+    <section class="startup-status" aria-live="polite">
+      <div class="status-copy">
+        <p id="message">正在检查可用的 DSH 版本</p>
+        <p id="detail"></p>
+        <div id="cache">当前使用缓存的版本目录</div>
+        <div id="error" role="alert"></div>
+        <div id="startup-actions" class="startup-actions" hidden>
+          <button id="startup-retry" type="button" hidden>重新检查并启动</button>
+          <button id="recover-stale-plugins" type="button" hidden>禁用失效本地插件并重试</button>
+          <button id="recover-plugin-preset" type="button" hidden>备份并重置冲突插件预设</button>
+        </div>
       </div>
-      <div class="actions">
-        <button id="retry" type="button">刷新版本</button>
-        <button id="recover-stale-plugins" type="button" hidden>禁用失效本地插件并重试</button>
-        <button id="recover-plugin-preset" type="button" hidden>备份并重置冲突插件预设</button>
+      <div id="runtime-progress-row" class="progress-row">
+        <div id="runtime-progress" class="progress-track" data-indeterminate="true" role="progressbar" aria-label="启动进度" aria-valuemin="0" aria-valuemax="100">
+          <div id="progress-value"></div>
+        </div>
+        <span id="progress-label">正在检查</span>
       </div>
-    </div>
+    </section>
+
+    <section id="version-settings" class="version-section" aria-labelledby="version-heading" hidden>
+      <div class="section-heading">
+        <h2 id="version-heading">DSH 版本策略</h2>
+        <span id="strategy-summary">自动跟随最新兼容版本</span>
+      </div>
+      <fieldset>
+        <legend class="sr-only">选择 DSH 版本策略</legend>
+        <div class="strategy-options">
+          <label class="strategy-option">
+            <input id="version-mode-auto" type="radio" name="version-mode" value="latest-compatible" checked>
+            <span class="strategy-body">
+              <span class="strategy-title">自动选择 <span class="recommended">推荐</span></span>
+              <span class="strategy-description">始终使用当前 Shell 支持的最新 DSH</span>
+            </span>
+          </label>
+          <label class="strategy-option">
+            <input id="version-mode-pinned" type="radio" name="version-mode" value="pinned">
+            <span class="strategy-body">
+              <span class="strategy-title">固定版本</span>
+              <span class="strategy-description">保持指定版本，直到手动更改策略</span>
+            </span>
+          </label>
+        </div>
+      </fieldset>
+
+      <div id="pinned-version-field" class="version-picker" data-active="false">
+        <label for="version">固定到具体版本</label>
+        <span id="version-meta">切换到固定版本后可选择</span>
+        <select id="version" aria-label="固定的 DSH 版本" disabled></select>
+      </div>
+
+      <div class="selection-summary" aria-live="polite">
+        <span id="selection-version">正在读取版本目录</span>
+        <span id="selection-detail">版本信息准备中</span>
+      </div>
+
+      <div class="section-actions">
+        <button id="apply" class="primary" type="button" disabled>应用版本策略</button>
+        <button id="retry" type="button">刷新版本目录</button>
+      </div>
+    </section>
   </main>
 </body>
 </html>

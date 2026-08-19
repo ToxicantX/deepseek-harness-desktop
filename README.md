@@ -15,13 +15,13 @@ DeepSeek Harness 的 Windows 桌面壳。Shell 与 DSH runtime 独立版本化�
 - **Runtime revision** 表示同一上游 DSH tag 的不可变桌面构建修订；旧 manifest 缺省为 revision `0`，后续重构建必须递增。
 - Shell 声明最低 DSH 版本；每个 runtime manifest 声明 `requiredShellRange`、`runtimeProtocolVersion` 和 `runtimeRevision`。
 - 默认策略是 `latest-compatible`：仅在已有预构建产物且兼容当前 Shell 的版本中选择最高版本。
-- 用户可以在 **Runtime → 管理 DSH 版本** 中固定具体版本。固定后不会自动切换到更高版本，直到恢复自动策略。
+- 用户可以在 **Runtime → 管理 DSH 版本** 中明确选择“自动选择”或“固定版本”。固定后不会自动切换到更高版本，直到恢复自动策略；列表只显示 DSH 版本号，并标记当前使用的版本。
 
 上游刚发布 tag、桌面 runtime 尚未构建时，该版本不会进入 catalog，因此不会破坏现有安装。Shell 和 DSH 的 Release 通道互不覆盖：`shell-v*` 发布 Shell，`runtime-dsh-v*-desktop.<revision>` 发布不可变 runtime，`runtime-catalog` 提供机器可读目录。
 
 ## 安装与更新
 
-第一次启动需要网络。Shell 下载 `runtime-catalog.json`，选择版本，下载 Windows x64 runtime ZIP，并同时验证声明大小和 SHA-256。ZIP 先解压到 staging 目录；Node、pnpm 和 DSH 入口全部存在且 Web readiness 成功后，Shell 才更新当前版本。下载、校验或启动失败时，旧 runtime 保持可用。
+正常打开应用时，Shell 本地启动页只显示状态环和目录检查、Runtime 下载或启动状态，不提供版本选择。首次安装、自动升级或从版本管理器切换 DSH 时，目标版本的下载进度固定显示在启动页底部；版本选择只在 **Runtime → 管理 DSH 版本** 窗口中出现。系统启用减少动态效果时会自动停用动画。第一次启动需要网络。Shell 下载 `runtime-catalog.json`，选择版本，下载 Windows x64 runtime ZIP，并同时验证声明大小和 SHA-256。ZIP 先解压到 staging 目录；Node、pnpm 和 DSH 入口全部存在且 Web readiness 成功后，Shell 才更新当前版本。下载、校验或启动失败时，旧 runtime 保持可用。
 
 Runtime 默认位于：
 
@@ -31,9 +31,15 @@ Runtime 默认位于：
 
 用户 profile、会话、设置和插件仍位于 `%USERPROFILE%\.dsh`，或由 `DSH_HOME` 覆盖。切换 DSH runtime、更新 Shell 或重新安装都不会删除该目录。
 
+## Agent 个人化
+
+通过 **文件 → 个人化设置...** 打开全局 Agent 个人化编辑器。编辑器直接管理 `$DSH_HOME/AGENTS.md`（默认是 `%USERPROFILE%\.dsh\AGENTS.md`），支持从推荐模板开始、重新加载、UTF-8 字节计数和快捷保存。空白内容保存为移除该文件；写入前会校验已观察到的 revision，并通过同目录临时文件原子替换；检测到已发生的外部修改时会拒绝保存并要求重新加载。
+
+这份文档是用户级偏好，不会修改 Agent 预设，也不能增加预设未提供的工具或权限。装配了 `@deepseek-ai/dsh-agent-instructions` 的预设会在后续新会话中加载它，并继续遵从预设的角色、工具、能力和安全边界；项目目录中的 `AGENTS.md` 可以提供更具体的项目规则。个人化文档会进入模型上下文，不应存放 API Key、Token、密码或其他凭据。
+
 ## 插件
 
-通过 **Runtime → 管理插件** 打开桌面插件管理器。管理器会列出当前 Web profile 中已安装的插件，并支持安装、更新和移除。安装时请输入受控的 npm package spec，或 GitHub HTTPS / `github:` spec；例如 `@scope/plugin@1.2.3`、`https://github.com/owner/repo.git` 或 `github:owner/repo`。更新和移除操作从已安装列表按包名执行。管理器会显示每项操作的进度和日志。
+通过 **Runtime → 管理插件** 打开桌面插件管理器。管理器会列出当前 Web profile 中已安装的插件，并支持安装和移除。安装时请输入受控的 npm package spec，或 GitHub HTTPS / `github:` spec；例如 `@scope/plugin@1.2.3`、`https://github.com/owner/repo.git` 或 `github:owner/repo`。后台确认 npm 插件存在可执行的新版本后，列表才会显示对应的更新按钮；Git 来源、固定版本、网络失败或无法确认更新状态时不显示。管理器会显示每项操作的进度和日志。
 
 安装、更新或移除前，Shell 会先停止 Runtime，避免 Web/HMR 在 `node_modules` 变更过程中加载不完整文件。操作成功后 Runtime 自动重启；操作失败时 Shell 也会恢复 Runtime。关闭并重新打开插件管理器不会丢失正在执行的操作或待完成的 Runtime 重启，窗口会继续显示同一操作的进度和日志。若插件加载失败导致 Web 无法就绪，由 Shell 独立提供的插件管理器仍保持可用，可移除或更新有问题的插件并再次重启 Runtime。
 

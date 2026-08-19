@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>个人化设置</title>
+  <style>
+    :root { color-scheme: light; font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif; color: #202124; background: #f5f6f8; }
+    * { box-sizing: border-box; }
+    html, body { min-width: 420px; min-height: 100%; }
+    body { margin: 0; background: #f5f6f8; }
+    button, textarea { font: inherit; letter-spacing: 0; }
+    button { min-height: 36px; padding: 7px 14px; border: 1px solid #c7ccd3; border-radius: 6px; background: #fff; color: #202124; cursor: pointer; }
+    button:hover:not(:disabled) { background: #edf0f3; }
+    button:focus-visible, textarea:focus-visible { outline: 2px solid #1769d2; outline-offset: 2px; }
+    button:disabled, textarea:disabled { cursor: default; opacity: .55; }
+    [hidden] { display: none !important; }
+    main { width: min(100%, 940px); min-height: 100vh; margin: 0 auto; padding: 22px 26px 24px; display: grid; grid-template-rows: auto auto auto minmax(320px, 1fr) auto; gap: 14px; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    h1 { margin: 0; font-size: 22px; font-weight: 650; letter-spacing: 0; }
+    .scope { margin: 3px 0 0; color: #686e76; font-size: 12px; }
+    .state { display: inline-flex; min-height: 24px; align-items: center; padding: 2px 8px; border: 1px solid #cbd1d8; border-radius: 5px; background: #fff; color: #5d636b; font-size: 12px; white-space: nowrap; }
+    .state[data-kind="saved"] { border-color: #a8cfb4; background: #edf8f0; color: #21683a; }
+    .state[data-kind="dirty"] { border-color: #d7c38c; background: #fff8e7; color: #715713; }
+    .toolbar { display: flex; align-items: center; gap: 9px; padding-bottom: 14px; border-bottom: 1px solid #d9dde3; }
+    .toolbar-spacer { flex: 1; }
+    .primary { border-color: #1769d2; background: #1769d2; color: #fff; font-weight: 600; }
+    .primary:hover:not(:disabled) { background: #1259b4; }
+    .document-meta { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 18px; align-items: center; color: #686e76; font-size: 12px; }
+    .path { min-width: 0; font-family: Consolas, "Microsoft YaHei UI", monospace; overflow-wrap: anywhere; }
+    .count { white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .count[data-over="true"] { color: #a92323; font-weight: 600; }
+    .editor-wrap { min-height: 320px; display: grid; }
+    textarea { width: 100%; min-height: 320px; resize: none; padding: 15px 16px; border: 1px solid #b9bec6; border-radius: 6px; background: #fff; color: #202124; font-family: Consolas, "Microsoft YaHei UI", monospace; font-size: 13px; line-height: 1.65; tab-size: 2; }
+    footer { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px 20px; align-items: center; min-height: 44px; padding-top: 2px; }
+    .warning { margin: 0; color: #825b16; font-size: 12px; }
+    .status-area { display: flex; align-items: center; justify-content: flex-end; gap: 10px; min-width: 0; }
+    #personalization-status { min-height: 20px; color: #4c5158; font-size: 12px; text-align: right; overflow-wrap: anywhere; }
+    #personalization-status[data-kind="success"] { color: #1f6b3a; }
+    #personalization-status[data-kind="error"] { color: #a92323; }
+    progress { width: 80px; height: 6px; accent-color: #1769d2; }
+    @media (max-width: 620px) {
+      html, body { min-width: 360px; }
+      main { padding: 18px 16px 20px; grid-template-rows: auto auto auto minmax(300px, 1fr) auto; }
+      .toolbar { flex-wrap: wrap; }
+      .toolbar-spacer { display: none; }
+      .primary { margin-left: auto; }
+      .document-meta { grid-template-columns: 1fr; }
+      .count { justify-self: start; }
+      footer { grid-template-columns: 1fr; }
+      .status-area { justify-content: flex-start; }
+      #personalization-status { text-align: left; }
+    }
+  </style>
+</head>
+<body>
+  <main id="personalization-page">
+    <header>
+      <div>
+        <h1>个人化设置</h1>
+        <p class="scope">全局偏好 · 遵从当前 Agent 预设</p>
+      </div>
+      <span id="personalization-state" class="state">正在读取</span>
+    </header>
+    <div class="toolbar" role="group" aria-label="个人化文档操作">
+      <button id="personalization-template" type="button">使用模板</button>
+      <button id="personalization-reload" type="button">重新加载</button>
+      <span class="toolbar-spacer"></span>
+      <button id="personalization-save" class="primary" type="button">保存</button>
+    </div>
+    <div class="document-meta">
+      <span id="personalization-path" class="path">C:\Users\&lt;用户&gt;\.dsh\AGENTS.md</span>
+      <span id="personalization-count" class="count">0 / 65,536 B</span>
+    </div>
+    <div class="editor-wrap">
+      <textarea id="personalization-content" aria-label="全局 Agent 个人化内容" autocomplete="off" spellcheck="false" placeholder="输入全局偏好（Markdown）"></textarea>
+    </div>
+    <footer>
+      <p id="personalization-warning" class="warning">不要填写 API Key、Token、密码或其他凭据</p>
+      <div class="status-area">
+        <progress id="personalization-progress" hidden></progress>
+        <span id="personalization-status" role="status" aria-live="polite">正在读取全局个人化设置...</span>
+      </div>
+    </footer>
+  </main>
+</body>
+</html>

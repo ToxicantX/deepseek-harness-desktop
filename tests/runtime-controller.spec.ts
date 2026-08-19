@@ -259,7 +259,7 @@ describe('RuntimeController', () => {
 
     expect(store.install).toHaveBeenCalledWith(selected, expect.any(Function))
     expect(startBackend).toHaveBeenCalledWith(expect.objectContaining({ runtime: expect.objectContaining({ manifest: previous }) }))
-    expect(views.some(view => view.phase === 'starting' && view.message.includes('revision 0'))).toBe(true)
+    expect(views.some(view => view.phase === 'starting' && view.message.includes('继续使用 DSH 0.1.0-rc.7'))).toBe(true)
     expect(views.at(-1)).toMatchObject({ phase: 'ready', currentVersion: previous.dshVersion })
   })
 

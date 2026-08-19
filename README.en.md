@@ -15,13 +15,13 @@ Download the Windows x64 installer or portable build from the [Latest Release](h
 - **Runtime revision** identifies an immutable desktop build of the same upstream DSH tag. Legacy manifests default to revision `0`; rebuilt artifacts must increment it.
 - The Shell declares its minimum DSH version. Each runtime manifest declares `requiredShellRange`, `runtimeProtocolVersion`, and `runtimeRevision`.
 - The default `latest-compatible` policy selects the highest version that has a prebuilt artifact and is compatible with the current Shell.
-- Users can pin an exact version under **Runtime → Manage DSH versions**. A pin remains selected until the user restores the automatic policy.
+- Users can explicitly choose **Automatic** or **Pinned version** under **Runtime → Manage DSH versions**. A pin remains selected until the user restores the automatic policy; the list shows only DSH version numbers and marks the version currently in use.
 
 A new upstream tag does not enter the catalog until its desktop runtime passes the build, compatibility, and smoke gates, so an unprepared version cannot break an existing installation. Release channels stay separate: `shell-v*` publishes the Shell, `runtime-dsh-v*-desktop.<revision>` publishes immutable runtimes, and `runtime-catalog` carries the machine-readable catalog.
 
 ## Installation and updates
 
-First launch requires network access. The Shell downloads `runtime-catalog.json`, selects a version, downloads the Windows x64 runtime ZIP, and verifies both its declared size and SHA-256. Extraction occurs in a staging directory. The Shell updates the current version only after Node, pnpm, and DSH are present and Web readiness succeeds. Download, verification, and startup failures leave the previous runtime available.
+On a normal application launch, the local Shell startup page shows only the status ring and catalog, Runtime download, or startup state; it does not expose version selection. For first install, automatic upgrade, or a DSH switch initiated from the version manager, target-version download progress stays at the bottom of the startup page. Version selection appears only under **Runtime → Manage DSH versions**. Animation is disabled when the system requests reduced motion. First launch requires network access. The Shell downloads `runtime-catalog.json`, selects a version, downloads the Windows x64 runtime ZIP, and verifies both its declared size and SHA-256. Extraction occurs in a staging directory. The Shell updates the current version only after Node, pnpm, and DSH are present and Web readiness succeeds. Download, verification, and startup failures leave the previous runtime available.
 
 Runtimes are stored by default under:
 
@@ -31,9 +31,15 @@ Runtimes are stored by default under:
 
 Profiles, sessions, settings, and plugins remain under `%USERPROFILE%\.dsh`, or the existing `DSH_HOME` override. Runtime switching, Shell updates, and reinstallation do not remove that directory.
 
+## Agent personalization
+
+Open the global Agent personalization editor from **File → Personalization...**. It directly manages `$DSH_HOME/AGENTS.md` (`%USERPROFILE%\.dsh\AGENTS.md` by default) and supports a starter template, reload, a UTF-8 byte counter, and keyboard save. Saving blank content removes the file. Every mutation checks the observed document revision and uses a same-directory temporary file with atomic replacement. When an external change has already been detected, saving is rejected until the document is reloaded.
+
+This document is a user-preference layer. It does not modify an Agent preset or grant tools and permissions the preset does not provide. Presets composed with `@deepseek-ai/dsh-agent-instructions` load it for subsequent new sessions while retaining their own role, tools, capabilities, and security boundaries; a workspace `AGENTS.md` can add more specific project rules. Personalization text enters model context, so it must not contain API keys, tokens, passwords, or other credentials.
+
 ## Plugins
 
-Open the desktop plugin manager from **Runtime → Manage Plugins**. It lists plugins installed in the current Web profile and supports installing, updating, and removing them. For installation, enter a controlled npm package spec or a GitHub HTTPS / `github:` spec, such as `@scope/plugin@1.2.3`, `https://github.com/owner/repo.git`, or `github:owner/repo`. Update and removal actions use package names from the installed list. The manager shows operation progress and logs.
+Open the desktop plugin manager from **Runtime → Manage Plugins**. It lists plugins installed in the current Web profile and supports installing and removing them. For installation, enter a controlled npm package spec or a GitHub HTTPS / `github:` spec, such as `@scope/plugin@1.2.3`, `https://github.com/owner/repo.git`, or `github:owner/repo`. An update action appears only after the bundled pnpm confirms an actionable newer npm version; Git sources, pinned versions, network failures, and unresolved update states show no update action. The manager shows operation progress and logs.
 
 Before an install, update, or removal, the Shell stops the Runtime so Web/HMR cannot load partially changed files from `node_modules`. The Runtime restarts after success and is also restored after a failed mutation. Closing and reopening the plugin manager does not lose an active operation or a pending Runtime restart; the reopened window resumes the same progress and log. If a plugin fails to load and prevents Web readiness, the Shell-owned plugin manager remains available so you can remove or update the problematic plugin and restart the Runtime again.
 

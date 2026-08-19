@@ -225,7 +225,7 @@ export class RuntimeController {
         || target.manifest.archive.sha256 !== selected.archive.sha256) {
         const previous = target
         await this.stopBackend()
-        this.update('downloading', `正在安装 DSH ${selected.dshVersion} desktop revision ${selected.runtimeRevision}`)
+        this.update('downloading', `正在下载 DSH ${selected.dshVersion}`)
         try {
           target = await this.store.install(selected, progress => {
             this.progress = progress
@@ -234,7 +234,7 @@ export class RuntimeController {
           this.installedVersions.add(selected.dshVersion)
         } catch (error: unknown) {
           if (previous !== undefined && isReleaseCompatible(previous.manifest, this.shellVersion)) {
-            const message = `DSH desktop revision 更新未完成，继续使用 revision ${previous.manifest.runtimeRevision}`
+            const message = `DSH ${selected.dshVersion} 更新未完成，继续使用 DSH ${previous.manifest.dshVersion}`
             await this.launch(previous, message)
             return
           }

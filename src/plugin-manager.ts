@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { readFile, rm } from 'node:fs/promises'
 import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path'
+import { gt, valid } from 'semver'
 import type { InstalledRuntime } from './runtime-store.ts'
 
 const MAX_PACKAGE_NAME = 214
@@ -10,6 +11,8 @@ const MAX_LIST_BYTES = 1024 * 1024
 const MAX_OUTPUT_CHARS = 64 * 1024
 const MAX_ENTRIES = 1_000
 const OPERATION_TIMEOUT_MS = 15 * 60_000
+const UPDATE_CHECK_TIMEOUT_MS = 8_000
+const MAX_UPDATE_BYTES = 256 * 1024
 const VIRTUAL_STORE_MISMATCH = 'ERR_PNPM_VIRTUAL_STORE_DIR_MAX_LENGTH_DIFF'
 
 export type PluginAction = 'add' | 'update' | 'remove'
@@ -22,6 +25,16 @@ export interface PluginEntry {
 
 export interface PluginList {
   entries: PluginEntry[]
+}
+
+export interface PluginUpdateEntry {
+  name: string
+  currentVersion: string
+  latestVersion: string
+}
+
+export interface PluginUpdateList {
+  entries: PluginUpdateEntry[]
 }
 
 export type PluginStartInput =
@@ -214,6 +227,27 @@ async function parsePluginList(
   return { entries }
 }
 
+
+export function parsePluginUpdates(stdout: string): PluginUpdateList {
+  if (stdout.trim().length === 0) return { entries: [] }
+  if (Buffer.byteLength(stdout, 'utf8') > MAX_LIST_BYTES) throw new Error('plugin update output is too large')
+  const parsed = object(JSON.parse(stdout) as unknown, 'plugin update list')
+  const names = Object.keys(parsed)
+  if (names.length > MAX_ENTRIES) throw new Error('plugin update list is too large')
+  const entries: PluginUpdateEntry[] = []
+  for (const name of names) {
+    validatePackageName(name)
+    const detail = object(parsed[name], 'plugin update')
+    const currentVersion = stringField(detail.current, 'current plugin version', 256)
+    const latestVersion = stringField(detail.wanted ?? detail.latest, 'latest plugin version', 256)
+    if (currentVersion === undefined || latestVersion === undefined) continue
+    if (valid(currentVersion) === null || valid(latestVersion) === null || !gt(latestVersion, currentVersion)) continue
+    entries.push({ name, currentVersion, latestVersion })
+  }
+  entries.sort((left, right) => left.name.localeCompare(right.name))
+  return { entries }
+}
+
 export class PluginManager {
   private readonly runtimeProvider: () => InstalledRuntime | undefined
   private readonly home: string
@@ -248,6 +282,21 @@ export class PluginManager {
       return await parsePluginList(result.stdout, join(this.home, 'profiles', 'web'), this.readText)
     } catch (error: unknown) {
       throw new Error(this.redact(error instanceof Error ? error.message : String(error)))
+    }
+  }
+
+  async updates(): Promise<PluginUpdateList> {
+    this.assertAvailable()
+    if (this.activeOperationId !== undefined) return { entries: [] }
+    const runtime = this.requireRuntime()
+    try {
+      const result = await this.execute(runtime, [
+        'plugin', '--profile', 'web', 'outdated', '--format', 'json', '--prod', '--compatible', '--silent',
+      ], MAX_UPDATE_BYTES, UPDATE_CHECK_TIMEOUT_MS, 'plugin update check')
+      if (result.code !== 0 && result.code !== 1) throw new Error('plugin update check failed')
+      return parsePluginUpdates(result.stdout)
+    } catch {
+      throw new Error('无法检查插件更新')
     }
   }
 
@@ -381,16 +430,25 @@ export class PluginManager {
     this.activeOperationId = undefined
   }
 
-  private execute(runtime: InstalledRuntime, args: readonly string[], limit: number): Promise<ProcessResult> {
-    const child = this.spawn(runtime, args)
+  private execute(
+    runtime: InstalledRuntime,
+    args: readonly string[],
+    limit: number,
+    timeoutMs = 60_000,
+    label = 'plugin list',
+  ): Promise<ProcessResult> {
+    return this.collect(this.spawn(runtime, args), limit, timeoutMs, label)
+  }
+
+  private collect(child: PluginProcess, limit: number, timeoutMs: number, label: string): Promise<ProcessResult> {
     return new Promise((resolve, reject) => {
       let stdout = ''
       let stderr = ''
       let settled = false
       const timer = setTimeout(() => {
         child.kill('SIGTERM')
-        finish(new Error('plugin list timed out'))
-      }, 60_000)
+        finish(new Error(label + ' timed out'))
+      }, timeoutMs)
       timer.unref()
       const finish = (error?: Error, result?: ProcessResult): void => {
         if (settled) return
@@ -403,30 +461,32 @@ export class PluginManager {
         stdout += String(chunk)
         if (Buffer.byteLength(stdout, 'utf8') > limit) {
           child.kill('SIGTERM')
-          finish(new Error('plugin list output is too large'))
+          finish(new Error(label + ' output is too large'))
         }
       })
-      child.stderr.on('data', chunk => {
-        stderr = appendOutput(stderr, chunk)
-      })
+      child.stderr.on('data', chunk => { stderr = appendOutput(stderr, chunk) })
       child.once('error', error => { finish(error) })
       child.once('close', (code, signal) => { finish(undefined, { stdout, stderr, code, signal }) })
     })
   }
 
   private spawn(runtime: InstalledRuntime, args: readonly string[]): PluginProcess {
+    return this.runProcess(runtime.nodeExecutable, [runtime.dshBin, ...args], this.processOptions(runtime, this.home))
+  }
+
+  private processOptions(runtime: InstalledRuntime, cwd: string): PluginProcessOptions {
     const inheritedPath = Object.entries(this.environment).find(([key]) => key.toUpperCase() === 'PATH')?.[1] ?? ''
     const path = [dirname(runtime.pnpmExecutable), dirname(runtime.nodeExecutable), inheritedPath]
       .filter(value => value.length > 0)
       .join(delimiter)
     const env = { ...this.environment }
     for (const key of Object.keys(env)) if (key.toUpperCase() === 'PATH') delete env[key]
-    return this.runProcess(runtime.nodeExecutable, [runtime.dshBin, ...args], {
-      cwd: this.home,
+    return {
+      cwd,
       env: { ...env, DSH_HOME: this.home, PATH: path },
       shell: false,
       windowsHide: true,
-    })
+    }
   }
 
   private processFailure(operation: string, result: ProcessResult): string {

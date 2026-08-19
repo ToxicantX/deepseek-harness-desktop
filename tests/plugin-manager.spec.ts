@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import {
   PluginManager,
+  parsePluginUpdates,
   validatePackageName,
   validatePackageSpec,
   type PluginProcess,
@@ -107,6 +108,25 @@ describe('plugin package validation', () => {
   })
 })
 
+describe('plugin update parsing', () => {
+  it('returns only confirmed semver upgrades and prefers the actionable wanted version', () => {
+    expect(parsePluginUpdates(JSON.stringify({
+      'update-plugin': { current: '1.2.3', wanted: '1.4.0', latest: '2.0.0' },
+      current: { current: '2.0.0', wanted: '2.0.0', latest: '2.0.0' },
+      downgrade: { current: '3.0.0', wanted: '2.5.0', latest: '2.5.0' },
+      git: { current: 'main', wanted: 'next', latest: 'next' },
+    }))).toEqual({ entries: [{
+      name: 'update-plugin',
+      currentVersion: '1.2.3',
+      latestVersion: '1.4.0',
+    }] })
+  })
+
+  it('treats empty output as no confirmed updates', () => {
+    expect(parsePluginUpdates('')).toEqual({ entries: [] })
+  })
+})
+
 describe('PluginManager', () => {
   it('lists direct profile dependencies without returning profile paths', async () => {
     const value = harness()
@@ -141,6 +161,41 @@ describe('PluginManager', () => {
     })
     expect(value.calls[0]?.options.env.DSH_HOME).toBe('C:/Users/test/.dsh')
     expect(value.calls[0]?.options.env.PATH).toContain('C:/runtime/tools')
+  })
+
+  it('checks actionable updates with the bundled pnpm and accepts its outdated exit code', async () => {
+    const value = harness()
+    const pending = value.manager.updates()
+    const child = value.children[0]
+    child?.stdout.write(JSON.stringify({
+      'example-plugin': { current: '1.2.3', wanted: '1.3.0', latest: '2.0.0' },
+    }))
+    child?.close(1)
+
+    await expect(pending).resolves.toEqual({ entries: [{
+      name: 'example-plugin',
+      currentVersion: '1.2.3',
+      latestVersion: '1.3.0',
+    }] })
+    expect(value.calls[0]).toMatchObject({
+      command: runtime.nodeExecutable,
+      args: [
+        runtime.dshBin,
+        'plugin', '--profile', 'web', 'outdated', '--format', 'json', '--prod', '--compatible', '--silent',
+      ],
+      options: { cwd: 'C:/Users/test/.dsh', shell: false, windowsHide: true },
+    })
+  })
+
+  it('does not expose registry errors or credentials when update checks fail', async () => {
+    const value = harness()
+    const pending = value.manager.updates()
+    value.children[0]?.stderr.write('401 https://token:secret@registry.example.test/private')
+    value.children[0]?.close(2)
+
+    await expect(pending).rejects.toThrow('无法检查插件更新')
+    await expect(pending).rejects.not.toThrow('token')
+    await expect(pending).rejects.not.toThrow('registry.example.test')
   })
 
   it('does not expose local dependency specs to the renderer', async () => {
