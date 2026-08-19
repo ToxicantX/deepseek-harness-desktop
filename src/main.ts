@@ -19,7 +19,7 @@ import {
 import { MINIMUM_DSH_VERSION, type RuntimePreference } from './catalog.ts'
 import { openPluginTerminal } from './cli-shell.ts'
 import { PluginManager } from './plugin-manager.ts'
-import { restartRuntimeAfterPluginMutation } from './plugin-restart.ts'
+import { PluginRestartCoordinator } from './plugin-restart.ts'
 import { RuntimeController, type RuntimeView } from './runtime-controller.ts'
 import { SessionRepairClient } from './session-repair.ts'
 import { SettingsDocumentClient } from './settings-document.ts'
@@ -47,6 +47,7 @@ let updateWindow: BrowserWindow | undefined
 let latestUpdateProgress: ShellUpdateProgress | undefined
 let controller: RuntimeController | undefined
 let pluginManager: PluginManager | undefined
+const pluginRestartCoordinator = new PluginRestartCoordinator()
 let updater: ShellUpdater | undefined
 let latestView: RuntimeView | undefined
 let cliDirectory: string | undefined
@@ -391,7 +392,14 @@ async function startApplication(): Promise<void> {
     },
     onOpenSettingsDocument: openTextDocument,
   })
-  pluginManager = new PluginManager({ runtime: () => controller?.installedRuntime(), home })
+  pluginManager = new PluginManager({
+    runtime: () => controller?.installedRuntime(),
+    home,
+    onOperationFinished(operation) {
+      if (operation.state !== 'failed' || controller === undefined) return
+      void controller.retry().catch(logFatalError)
+    },
+  })
   updater = new ShellUpdater(mainWindow, async () => {
     pluginManager?.dispose()
     await controller?.stop()
@@ -429,25 +437,39 @@ ipcMain.handle('runtime:recover-stale-local-plugins', async (event) => {
   if (mainWindow !== undefined) await showSetup(mainWindow)
   await runtimeController.recoverStaleLocalPlugins()
 })
+ipcMain.handle('runtime:recover-plugin-preset', async (event) => {
+  const runtimeController = runtimeClient(event)
+  if (mainWindow !== undefined) await showSetup(mainWindow)
+  await runtimeController.recoverPluginPreset()
+})
 ipcMain.handle('plugin-manager:list', async (event) => {
   return pluginService(event).list()
 })
-ipcMain.handle('plugin-manager:start', (event, value: unknown) => {
-  return pluginService(event).start(value)
+ipcMain.handle('plugin-manager:start', async (event, value: unknown) => {
+  const service = pluginService(event)
+  const runtimeController = controller
+  if (runtimeController === undefined) throw new Error('DSH Runtime 控制器尚未初始化')
+  return service.start(value, async () => {
+    if (mainWindow !== undefined) await showSetup(mainWindow)
+    await runtimeController.pauseForPluginMutation()
+  })
 })
 ipcMain.handle('plugin-manager:status', (event, operationId: unknown) => {
   return pluginService(event).status(operationId)
+})
+ipcMain.handle('plugin-manager:current', (event) => {
+  return pluginService(event).current()
 })
 ipcMain.handle('plugin-manager:restart', async (event, operationId: unknown) => {
   const service = pluginService(event)
   const runtimeController = controller
   if (runtimeController === undefined) throw new Error('DSH Runtime 控制器尚未初始化')
-  return restartRuntimeAfterPluginMutation(operationId as string, {
+  return pluginRestartCoordinator.restart(operationId as string, {
     status: id => service.status(id),
     async showSetup() { if (mainWindow !== undefined) await showSetup(mainWindow) },
     async retry() { await runtimeController.retry() },
     currentView: () => latestView,
-  })
+  }, id => { service.markRestarted(id) })
 })
 ipcMain.handle('session-repair:inspect', async (event, sessionId: unknown) => {
   return repairClient(event).inspect(sessionId)

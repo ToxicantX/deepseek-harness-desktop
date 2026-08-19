@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { PluginOperationStatus } from '../src/plugin-manager.ts'
-import { restartRuntimeAfterPluginMutation, type PluginRestartOptions } from '../src/plugin-restart.ts'
+import { PluginRestartCoordinator, restartRuntimeAfterPluginMutation, type PluginRestartOptions } from '../src/plugin-restart.ts'
 import type { RuntimeView } from '../src/runtime-controller.ts'
 
 const operationId = '00000000-0000-4000-8000-000000000000'
@@ -60,5 +60,41 @@ describe('restartRuntimeAfterPluginMutation', () => {
   it('uses a useful fallback when no Runtime view is available', async () => {
     const value = options({ currentView: () => undefined })
     await expect(restartRuntimeAfterPluginMutation(operationId, value)).rejects.toThrow('DSH Runtime 重启失败')
+  })
+})
+
+describe('PluginRestartCoordinator', () => {
+  it('shares one Runtime restart for the same operation across reopened windows', async () => {
+    const coordinator = new PluginRestartCoordinator()
+    let releaseRetry: (() => void) | undefined
+    const retrying = new Promise<void>(resolve => { releaseRetry = resolve })
+    const value = options({ retry: vi.fn(async () => { await retrying }) })
+    const completed = vi.fn()
+
+    const first = coordinator.restart(operationId, value, completed)
+    const second = coordinator.restart(operationId, value, completed)
+    expect(second).toBe(first)
+    await vi.waitFor(() => { expect(value.retry).toHaveBeenCalledOnce() })
+    releaseRetry?.()
+    await expect(Promise.all([first, second])).resolves.toHaveLength(2)
+    expect(completed).toHaveBeenCalledOnce()
+    expect(completed).toHaveBeenCalledWith(operationId)
+  })
+
+  it('rejects a different operation during restart and allows retry after failure', async () => {
+    const coordinator = new PluginRestartCoordinator()
+    let releaseRetry: (() => void) | undefined
+    const retrying = new Promise<void>(resolve => { releaseRetry = resolve })
+    const first = coordinator.restart(operationId, options({ retry: async () => { await retrying } }), vi.fn())
+    const otherId = '11111111-1111-4111-8111-111111111111'
+    await expect(coordinator.restart(otherId, options(), vi.fn())).rejects.toThrow('另一个插件操作')
+    releaseRetry?.()
+    await first
+
+    const completed = vi.fn()
+    await expect(coordinator.restart(operationId, options({ retry: async () => { throw new Error('restart failed') } }), completed)).rejects.toThrow('restart failed')
+    expect(completed).not.toHaveBeenCalled()
+    await expect(coordinator.restart(operationId, options(), completed)).resolves.toMatchObject({ phase: 'ready' })
+    expect(completed).toHaveBeenCalledOnce()
   })
 })

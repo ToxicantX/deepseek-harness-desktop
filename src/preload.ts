@@ -13,6 +13,7 @@ function element<T extends HTMLElement>(id: string): T {
 
 let runtimeRecoveryIds: string[] = []
 let runtimeRecoveryCount = 0
+let runtimePresetRecovery: { pluginName: string; presetId: string } | undefined
 
 function renderRuntime(view: RuntimeView): void {
   element('shell-version').textContent = 'Shell ' + view.shellVersion + ' · 最低 DSH ' + view.minimumDshVersion
@@ -20,10 +21,14 @@ function renderRuntime(view: RuntimeView): void {
   const versionDetail = view.currentVersion === undefined
     ? ''
     : '当前运行版本：' + view.currentVersion + ' · desktop revision ' + String(view.currentRuntimeRevision ?? 0)
-  runtimeRecoveryIds = view.recovery?.entryIds ?? []
-  runtimeRecoveryCount = view.recovery?.count ?? runtimeRecoveryIds.length
-  const recoveryDetail = runtimeRecoveryIds.length === 0 ? '' : '检测到失效的本地插件：' + runtimeRecoveryIds.join('、')
-  element('detail').textContent = [versionDetail, recoveryDetail].filter(value => value.length > 0).join('\n')
+  runtimeRecoveryIds = view.recovery?.kind === 'stale-local-plugins' ? view.recovery.entryIds : []
+  runtimeRecoveryCount = view.recovery?.kind === 'stale-local-plugins' ? view.recovery.count : runtimeRecoveryIds.length
+  runtimePresetRecovery = view.recovery?.kind === 'plugin-preset-conflict'
+    ? { pluginName: view.recovery.pluginName, presetId: view.recovery.presetId }
+    : undefined
+  const staleDetail = runtimeRecoveryIds.length === 0 ? '' : '检测到失效的本地插件：' + runtimeRecoveryIds.join('、')
+  const presetDetail = runtimePresetRecovery === undefined ? '' : '检测到冲突的插件预设：' + runtimePresetRecovery.presetId
+  element('detail').textContent = [versionDetail, staleDetail, presetDetail].filter(value => value.length > 0).join('\n')
   const progress = view.progress === undefined || view.progress.total === 0 ? 0 : Math.min(100, (view.progress.received / view.progress.total) * 100)
   element<HTMLDivElement>('progress-value').style.width = String(progress) + '%'
   element('cache').style.display = view.cachedCatalog ? 'block' : 'none'
@@ -57,6 +62,9 @@ function renderRuntime(view: RuntimeView): void {
   recoverButton.textContent = runtimeRecoveryCount <= 1
     ? '禁用失效本地插件并重试'
     : '禁用 ' + String(runtimeRecoveryCount) + ' 个失效本地插件并重试'
+  const presetButton = element<HTMLButtonElement>('recover-plugin-preset')
+  presetButton.hidden = runtimePresetRecovery === undefined
+  presetButton.disabled = busy || runtimePresetRecovery === undefined
 }
 
 function initializeShellUpdatePage(): void {
@@ -98,6 +106,18 @@ function initializeRuntimePage(): void {
     const names = runtimeRecoveryIds.join('、')
     if (!window.confirm('将备份配置并禁用 ' + String(runtimeRecoveryCount) + ' 个失效本地插件：' + names + '。会话、设置和其他插件不会被删除。是否继续？')) return
     void ipcRenderer.invoke('runtime:recover-stale-local-plugins').catch((error: unknown) => {
+      const errorElement = element('error')
+      errorElement.textContent = errorMessage(error)
+      errorElement.style.display = 'block'
+    })
+  })
+  element<HTMLButtonElement>('recover-plugin-preset').addEventListener('click', () => {
+    const recovery = runtimePresetRecovery
+    if (recovery === undefined) return
+    const message = '将完整备份预设 ' + recovery.presetId + '，再用插件 ' + recovery.pluginName
+      + ' 当前打包版本重置该预设。人工修改不会被删除，但会移入带 desktop-backup 标记的备份目录。是否继续？'
+    if (!window.confirm(message)) return
+    void ipcRenderer.invoke('runtime:recover-plugin-preset').catch((error: unknown) => {
       const errorElement = element('error')
       errorElement.textContent = errorMessage(error)
       errorElement.style.display = 'block'
@@ -199,25 +219,36 @@ function initializePluginManagerPage(): void {
     const value = await ipcRenderer.invoke('plugin-manager:list') as PluginList
     renderEntries(value.entries)
   }
-  const refresh = async (): Promise<void> => {
-    if (busy) return
-    setBusy(true)
-    setStatus('正在读取插件列表...')
-    try {
-      await loadEntries()
-      setStatus('插件列表已刷新', 'success')
-    } catch (error: unknown) {
-      setStatus(errorMessage(error), 'error')
-    } finally {
-      setBusy(false)
-    }
-  }
   const waitForOperation = async (operationId: string): Promise<PluginOperationStatus> => {
     for (;;) {
       const value = await ipcRenderer.invoke('plugin-manager:status', operationId) as PluginOperationStatus
       showLog(value.output)
       if (value.state !== 'running') return value
       await new Promise<void>(resolve => { setTimeout(resolve, 350) })
+    }
+  }
+  const resumeOrRefresh = async (): Promise<void> => {
+    if (busy) return
+    setBusy(true)
+    setStatus('正在读取插件状态...')
+    try {
+      const current = await ipcRenderer.invoke('plugin-manager:current') as PluginOperationStatus | undefined
+      if (current === undefined) {
+        await loadEntries()
+        setStatus('插件列表已刷新', 'success')
+        return
+      }
+      showLog(current.output)
+      setStatus(current.state === 'running' ? '检测到尚未完成的插件操作，正在继续等待...' : '插件操作已完成，正在重启 Runtime...')
+      const result = current.state === 'running' ? await waitForOperation(current.operationId) : current
+      if (result.state === 'failed') throw new Error(result.error ?? '插件操作失败')
+      await ipcRenderer.invoke('plugin-manager:restart', result.operationId)
+      await loadEntries()
+      setStatus('插件操作已完成', 'success')
+    } catch (error: unknown) {
+      setStatus(errorMessage(error), 'error')
+    } finally {
+      setBusy(false)
     }
   }
   async function runOperation(input: PluginStartInput, label: string): Promise<void> {
@@ -249,8 +280,8 @@ function initializePluginManagerPage(): void {
   specInput.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') installButton.click()
   })
-  refreshButton.addEventListener('click', () => { void refresh() })
-  void refresh()
+  refreshButton.addEventListener('click', () => { void resumeOrRefresh() })
+  void resumeOrRefresh()
 }
 
 function anomalyLabel(kind: SessionRepairAnomalyKind): string {

@@ -12,6 +12,7 @@ import {
 } from './catalog.ts'
 import { desktopEnvironment, startBackend, type RunningBackend } from './backend.ts'
 import { prepareCliShim } from './cli-shell.ts'
+import { inspectPluginPresetRecovery, type PluginPresetRecoveryPlan } from './plugin-preset-recovery.ts'
 import { RuntimeStore, type InstalledRuntime, type RuntimeState } from './runtime-store.ts'
 import {
   inspectStaleLocalPluginRecovery,
@@ -29,11 +30,9 @@ export interface RuntimeVersionView {
   current: boolean
 }
 
-export interface RuntimeRecoveryView {
-  kind: 'stale-local-plugins'
-  entryIds: string[]
-  count: number
-}
+export type RuntimeRecoveryView =
+  | { kind: 'stale-local-plugins'; entryIds: string[]; count: number }
+  | { kind: 'plugin-preset-conflict'; pluginName: string; presetId: string }
 
 export interface RuntimeView {
   phase: RuntimePhase
@@ -51,6 +50,10 @@ export interface RuntimeView {
 }
 
 type StaleLocalPluginRecoveryInspector = typeof inspectStaleLocalPluginRecovery
+type PluginPresetRecoveryInspector = typeof inspectPluginPresetRecovery
+type RuntimeRecoveryPlan =
+  | { kind: 'stale-local-plugins'; plan: StaleLocalPluginRecoveryPlan }
+  | { kind: 'plugin-preset-conflict'; plan: PluginPresetRecoveryPlan }
 
 export interface RuntimeControllerOptions {
   shellVersion: string
@@ -60,6 +63,7 @@ export interface RuntimeControllerOptions {
   catalogUrl?: string
   environment?: NodeJS.ProcessEnv
   inspectStaleLocalPlugins?: StaleLocalPluginRecoveryInspector
+  inspectPluginPreset?: PluginPresetRecoveryInspector
   onView(view: RuntimeView): void
   onReady(url: URL, runtime: InstalledRuntime, cliDirectory: string): Promise<void>
   onOpenSettingsDocument(path: string): Promise<void>
@@ -73,6 +77,7 @@ export class RuntimeController {
   private readonly catalogUrl: string
   private readonly environment: NodeJS.ProcessEnv
   private readonly inspectStaleLocalPlugins: StaleLocalPluginRecoveryInspector
+  private readonly inspectPluginPreset: PluginPresetRecoveryInspector
   private readonly onView: (view: RuntimeView) => void
   private readonly onReady: (url: URL, runtime: InstalledRuntime, cliDirectory: string) => Promise<void>
   private readonly onOpenSettingsDocument: (path: string) => Promise<void>
@@ -80,7 +85,7 @@ export class RuntimeController {
   private state: RuntimeState = { schemaVersion: 1, preference: { mode: 'latest-compatible' } }
   private backend: RunningBackend | undefined
   private selectedRuntime: InstalledRuntime | undefined
-  private recoveryPlan: StaleLocalPluginRecoveryPlan | undefined
+  private recoveryPlan: RuntimeRecoveryPlan | undefined
   private expectedStop = false
   private currentRuntimeRevision: number | undefined
   private installedVersions = new Set<string>()
@@ -99,6 +104,7 @@ export class RuntimeController {
     this.catalogUrl = options.catalogUrl ?? DEFAULT_CATALOG_URL
     this.environment = options.environment ?? process.env
     this.inspectStaleLocalPlugins = options.inspectStaleLocalPlugins ?? inspectStaleLocalPluginRecovery
+    this.inspectPluginPreset = options.inspectPluginPreset ?? inspectPluginPresetRecovery
     this.onView = options.onView
     this.onReady = options.onReady
     this.onOpenSettingsDocument = options.onOpenSettingsDocument
@@ -114,11 +120,28 @@ export class RuntimeController {
 
   recoverStaleLocalPlugins(): Promise<void> {
     return this.enqueue(async () => {
-      const plan = this.recoveryPlan
-      if (plan === undefined) throw new Error('没有可恢复的失效本地插件')
-      await plan.apply()
+      const recovery = this.recoveryPlan
+      if (recovery?.kind !== 'stale-local-plugins') throw new Error('没有可恢复的失效本地插件')
+      await recovery.plan.apply()
       this.recoveryPlan = undefined
       await this.boot()
+    })
+  }
+
+  recoverPluginPreset(): Promise<void> {
+    return this.enqueue(async () => {
+      const recovery = this.recoveryPlan
+      if (recovery?.kind !== 'plugin-preset-conflict') throw new Error('没有可恢复的冲突插件预设')
+      await recovery.plan.apply()
+      this.recoveryPlan = undefined
+      await this.boot()
+    })
+  }
+
+  pauseForPluginMutation(): Promise<void> {
+    return this.enqueue(async () => {
+      await this.stopBackend()
+      this.update('starting', '正在应用插件变更')
     })
   }
 
@@ -161,11 +184,17 @@ export class RuntimeController {
       cachedCatalog: this.cachedCatalog,
       ...(this.progress === undefined ? {} : { progress: this.progress }),
       ...(this.phase !== 'error' || this.recoveryPlan === undefined ? {} : {
-        recovery: {
-          kind: 'stale-local-plugins' as const,
-          entryIds: [...this.recoveryPlan.entryIds],
-          count: this.recoveryPlan.count,
-        },
+        recovery: this.recoveryPlan.kind === 'stale-local-plugins'
+          ? {
+              kind: 'stale-local-plugins' as const,
+              entryIds: [...this.recoveryPlan.plan.entryIds],
+              count: this.recoveryPlan.plan.count,
+            }
+          : {
+              kind: 'plugin-preset-conflict' as const,
+              pluginName: this.recoveryPlan.plan.pluginName,
+              presetId: this.recoveryPlan.plan.presetId,
+            },
       }),
       ...(this.error === undefined ? {} : { error: this.error }),
     }
@@ -256,7 +285,7 @@ export class RuntimeController {
       })
     } catch (error: unknown) {
       const diagnostics = error instanceof Error ? error.message : String(error)
-      await this.detectStaleLocalPlugins(home, diagnostics)
+      await this.detectRecovery(home, runtime, diagnostics)
       throw error
     }
     this.recoveryPlan = undefined
@@ -275,10 +304,19 @@ export class RuntimeController {
     })
   }
 
-  private async detectStaleLocalPlugins(home: string, diagnostics: string): Promise<void> {
+  private async detectRecovery(home: string, runtime: InstalledRuntime, diagnostics: string): Promise<void> {
     try {
       const plan = await this.inspectStaleLocalPlugins({ home, diagnostics })
-      if (plan !== undefined) this.recoveryPlan = plan
+      if (plan !== undefined) {
+        this.recoveryPlan = { kind: 'stale-local-plugins', plan }
+        return
+      }
+    } catch {
+      // One recovery inspector must not hide the startup failure or other exact recovery options.
+    }
+    try {
+      const plan = await this.inspectPluginPreset({ home, runtime, diagnostics, environment: this.environment })
+      if (plan !== undefined) this.recoveryPlan = { kind: 'plugin-preset-conflict', plan }
     } catch {
       // Recovery inspection must not replace the Runtime startup failure.
     }

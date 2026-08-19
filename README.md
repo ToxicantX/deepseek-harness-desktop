@@ -35,11 +35,13 @@ Runtime 默认位于：
 
 通过 **Runtime → 管理插件** 打开桌面插件管理器。管理器会列出当前 Web profile 中已安装的插件，并支持安装、更新和移除。安装时请输入受控的 npm package spec，或 GitHub HTTPS / `github:` spec；例如 `@scope/plugin@1.2.3`、`https://github.com/owner/repo.git` 或 `github:owner/repo`。更新和移除操作从已安装列表按包名执行。管理器会显示每项操作的进度和日志。
 
-安装、更新或移除成功后，Runtime 会自动重启，使插件变更生效。若插件加载失败导致 Web 无法就绪，由 Shell 独立提供的插件管理器仍保持可用，可移除或更新有问题的插件并再次重启 Runtime。
+安装、更新或移除前，Shell 会先停止 Runtime，避免 Web/HMR 在 `node_modules` 变更过程中加载不完整文件。操作成功后 Runtime 自动重启；操作失败时 Shell 也会恢复 Runtime。关闭并重新打开插件管理器不会丢失正在执行的操作或待完成的 Runtime 重启，窗口会继续显示同一操作的进度和日志。若插件加载失败导致 Web 无法就绪，由 Shell 独立提供的插件管理器仍保持可用，可移除或更新有问题的插件并再次重启 Runtime。
 
 若旧 Web profile 由不同 pnpm `virtual-store-dir-max-length` 创建，管理器会在精确识别该兼容性错误后移除可再生的 `.modules.yaml`，并自动重试原操作一次；profile manifest、lockfile、插件配置和其他用户数据不会被删除。
 
 若旧的 `%USERPROFILE%\.dsh` patch 仍引用已经删除的本地插件文件，启动页会提供 **禁用失效本地插件并重试**。确认后，Shell 只备份并移除与启动错误精确匹配的 loader 条目，不会清除会话、设置、凭据、其他插件或整个 profile。
+
+若 `dsh-multi-model-orchestrator` 因已管理预设与当前插件包冲突而拒绝启动，启动页会提供独立的确认操作。Shell 只在 loader、插件、目标和冲突原因全部精确匹配时启用该操作；确认后会先将整个 `multi-model-orchestrator` 预设目录移动到同级 `desktop-backup` 备份，再通过已安装插件的安装器执行固定的 `--force --target` 重置。重置或校验失败时会自动恢复原目录。
 
 Shell 在用户数据目录生成稳定的 `dsh.cmd`，将当前 runtime 中的标准 Node 和 pnpm 放到 `PATH`。作为高级回退，也可以通过 **Runtime → 打开插件管理终端** 使用原有命令：
 

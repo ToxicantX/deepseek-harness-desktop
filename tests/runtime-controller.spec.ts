@@ -58,6 +58,7 @@ function harness(
   state: RuntimeState,
   catalog: RuntimeCatalog,
   inspectStaleLocalPlugins: NonNullable<RuntimeControllerOptions['inspectStaleLocalPlugins']> = vi.fn(async () => undefined),
+  inspectPluginPreset: NonNullable<RuntimeControllerOptions['inspectPluginPreset']> = vi.fn(async () => undefined),
 ) {
   const store = new RuntimeStore('C:\\store')
   const views: RuntimeView[] = []
@@ -72,11 +73,12 @@ function harness(
     userData: 'C:\\user-data',
     environment: { DSH_HOME: process.cwd() },
     inspectStaleLocalPlugins,
+    inspectPluginPreset,
     onView: view => { views.push(view) },
     onReady: vi.fn(async () => {}),
     onOpenSettingsDocument: vi.fn(async () => {}),
   })
-  return { controller, store, views, inspectStaleLocalPlugins }
+  return { controller, store, views, inspectStaleLocalPlugins, inspectPluginPreset }
 }
 
 beforeEach(() => { vi.mocked(startBackend).mockReset() })
@@ -150,6 +152,73 @@ describe('RuntimeController', () => {
     expect(startBackend).toHaveBeenCalledTimes(2)
     expect(views.at(-1)).toMatchObject({ phase: 'ready' })
     expect(views.at(-1)?.recovery).toBeUndefined()
+  })
+
+  it('offers exact plugin preset recovery, applies it only after confirmation, and retries', async () => {
+    const target = manifest('0.1.0-rc.7')
+    const catalog = { schemaVersion: 1 as const, generatedAt: new Date().toISOString(), releases: [target] }
+    const apply = vi.fn(async () => ({ pluginName: 'dsh-multi-model-orchestrator', presetId: 'multi-model-orchestrator' }))
+    const inspectPreset = vi.fn(async () => ({
+      pluginName: 'dsh-multi-model-orchestrator',
+      presetId: 'multi-model-orchestrator',
+      apply,
+    }))
+    const inspectStale = vi.fn(async () => undefined)
+    const { controller, store, views } = harness(
+      { schemaVersion: 1, preference: { mode: 'latest-compatible' } },
+      catalog,
+      inspectStale,
+      inspectPreset,
+    )
+    vi.spyOn(store, 'installed').mockResolvedValue(installed(target))
+    vi.mocked(startBackend)
+      .mockRejectedValueOnce(new Error('agent.cordis.yml does not match the packaged preset'))
+      .mockResolvedValueOnce(started())
+
+    await controller.start()
+
+    expect(inspectPreset).toHaveBeenCalledWith({
+      home: process.cwd(),
+      runtime: installed(target),
+      diagnostics: 'agent.cordis.yml does not match the packaged preset',
+      environment: { DSH_HOME: process.cwd() },
+    })
+    expect(apply).not.toHaveBeenCalled()
+    expect(views.at(-1)).toMatchObject({
+      phase: 'error',
+      recovery: {
+        kind: 'plugin-preset-conflict',
+        pluginName: 'dsh-multi-model-orchestrator',
+        presetId: 'multi-model-orchestrator',
+      },
+    })
+    await expect(controller.recoverStaleLocalPlugins()).rejects.toThrow('失效本地插件')
+
+    await controller.recoverPluginPreset()
+
+    expect(apply).toHaveBeenCalledOnce()
+    expect(startBackend).toHaveBeenCalledTimes(2)
+    expect(views.at(-1)).toMatchObject({ phase: 'ready' })
+    expect(views.at(-1)?.recovery).toBeUndefined()
+  })
+
+  it('stops a ready backend before plugin files are mutated', async () => {
+    const target = manifest('0.1.0-rc.7')
+    const catalog = { schemaVersion: 1 as const, generatedAt: new Date().toISOString(), releases: [target] }
+    const { controller, store, views } = harness(
+      { schemaVersion: 1, preference: { mode: 'latest-compatible' } },
+      catalog,
+    )
+    vi.spyOn(store, 'installed').mockResolvedValue(installed(target))
+    const backend = started()
+    vi.mocked(startBackend).mockResolvedValue(backend)
+    await controller.start()
+
+    await controller.pauseForPluginMutation()
+
+    expect(backend.stop).toHaveBeenCalledOnce()
+    expect(controller.installedRuntime()).toEqual(installed(target))
+    expect(views.at(-1)).toMatchObject({ phase: 'starting', message: '正在应用插件变更' })
   })
 
   it('does not replace the Runtime error when recovery inspection fails', async () => {

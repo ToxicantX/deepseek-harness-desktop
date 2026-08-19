@@ -35,11 +35,13 @@ Profiles, sessions, settings, and plugins remain under `%USERPROFILE%\.dsh`, or 
 
 Open the desktop plugin manager from **Runtime → Manage Plugins**. It lists plugins installed in the current Web profile and supports installing, updating, and removing them. For installation, enter a controlled npm package spec or a GitHub HTTPS / `github:` spec, such as `@scope/plugin@1.2.3`, `https://github.com/owner/repo.git`, or `github:owner/repo`. Update and removal actions use package names from the installed list. The manager shows operation progress and logs.
 
-After a successful install, update, or removal, the Runtime restarts automatically so the change takes effect. If a plugin fails to load and prevents Web readiness, the Shell-owned plugin manager remains available so you can remove or update the problematic plugin and restart the Runtime again.
+Before an install, update, or removal, the Shell stops the Runtime so Web/HMR cannot load partially changed files from `node_modules`. The Runtime restarts after success and is also restored after a failed mutation. Closing and reopening the plugin manager does not lose an active operation or a pending Runtime restart; the reopened window resumes the same progress and log. If a plugin fails to load and prevents Web readiness, the Shell-owned plugin manager remains available so you can remove or update the problematic plugin and restart the Runtime again.
 
 If an older Web profile was created with a different pnpm `virtual-store-dir-max-length`, the manager removes the regenerable `.modules.yaml` only after matching that exact compatibility error, then retries the original operation once. It does not delete the profile manifest, lockfile, plugin configuration, or other user data.
 
 If a patch under an existing `%USERPROFILE%\.dsh` still references a deleted local plugin file, the setup page offers **Disable stale local plugins and retry**. After confirmation, the Shell backs up and removes only loader entries that exactly match the startup error; it does not clear sessions, settings, credentials, other plugins, or the profile.
+
+If `dsh-multi-model-orchestrator` refuses startup because its managed preset conflicts with the currently installed package, the setup page offers a separate confirmed recovery. It is enabled only when the loader entry, package, target, and conflict reason all match exactly. After confirmation, the Shell moves the complete `multi-model-orchestrator` preset directory to a sibling `desktop-backup`, then runs the installed plugin's installer with fixed `--force --target` arguments. If reset or validation fails, the original directory is restored automatically.
 
 The Shell writes a stable `dsh.cmd` under its user-data directory and puts the active runtime's standard Node and pnpm on `PATH`. As an advanced fallback, open **Runtime → Open plugin management terminal** and use the existing commands:
 

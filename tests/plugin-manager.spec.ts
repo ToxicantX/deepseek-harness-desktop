@@ -43,12 +43,14 @@ const runtime: InstalledRuntime = {
 function harness(
   readText = vi.fn(async () => JSON.stringify({ dependencies: { 'example-plugin': 'github:owner/example-plugin' } })),
   removeFile = vi.fn(async () => {}),
+  onOperationFinished = vi.fn(),
 ): {
   manager: PluginManager
   children: FakeProcess[]
   calls: { command: string; args: readonly string[]; options: PluginProcessOptions }[]
   readText: typeof readText
   removeFile: typeof removeFile
+  onOperationFinished: typeof onOperationFinished
 } {
   const children: FakeProcess[] = []
   const calls: { command: string; args: readonly string[]; options: PluginProcessOptions }[] = []
@@ -58,6 +60,7 @@ function harness(
     environment: { PATH: 'C:/Windows/System32', SAFE: 'yes' },
     readText,
     removeFile,
+    onOperationFinished,
     runProcess(command, args, options) {
       calls.push({ command, args, options })
       const child = new FakeProcess()
@@ -65,7 +68,7 @@ function harness(
       return child
     },
   })
-  return { manager, children, calls, readText, removeFile }
+  return { manager, children, calls, readText, removeFile, onOperationFinished }
 }
 
 describe('plugin package validation', () => {
@@ -161,12 +164,12 @@ describe('PluginManager', () => {
     await expect(pending).resolves.toEqual({ entries: [{ name: 'broken-plugin', spec: 'broken-plugin@1.0.0' }] })
   })
 
-  it('starts only fixed mutation argv and reports sanitized success output', () => {
+  it('starts only fixed mutation argv and reports sanitized success output', async () => {
     const value = harness()
-    const started = value.manager.start({ action: 'add', spec: 'github:owner/example-plugin#main' })
+    const started = await value.manager.start({ action: 'add', spec: 'github:owner/example-plugin#main' })
     const child = value.children[0]
     child?.stdout.write('installing\u001b[32m ok\u001b[0m\rprogress\u0000 at C:/Users/test/.dsh/profiles/web')
-    expect(() => value.manager.start({ action: 'remove', packageName: 'example-plugin' })).toThrow('already running')
+    await expect(value.manager.start({ action: 'remove', packageName: 'example-plugin' })).rejects.toThrow('already running')
     child?.close(0)
 
     expect(value.calls[0]?.args).toEqual([
@@ -184,9 +187,47 @@ describe('PluginManager', () => {
     })
   })
 
+  it('keeps the operation resumable while Runtime preparation and restart are pending', async () => {
+    const value = harness()
+    let releasePreparation: (() => void) | undefined
+    const preparation = new Promise<void>(resolve => { releasePreparation = resolve })
+    const starting = value.manager.start(
+      { action: 'update', packageName: 'example-plugin' },
+      async () => { await preparation },
+    )
+
+    expect(value.manager.current()).toMatchObject({ state: 'running', action: 'update' })
+    expect(value.children).toHaveLength(0)
+    await expect(value.manager.list()).rejects.toThrow('already running')
+    await expect(value.manager.start({ action: 'remove', packageName: 'example-plugin' })).rejects.toThrow('already running')
+
+    releasePreparation?.()
+    const started = await starting
+    expect(value.children).toHaveLength(1)
+    value.children[0]?.close(0)
+    expect(value.manager.current()).toMatchObject({ operationId: started.operationId, state: 'succeeded' })
+    await expect(value.manager.start({ action: 'remove', packageName: 'example-plugin' })).rejects.toThrow('already running')
+    value.manager.markRestarted(started.operationId)
+    expect(value.manager.current()).toBeUndefined()
+  })
+
+  it('releases a reserved operation when Runtime preparation fails', async () => {
+    const value = harness()
+    const started = await value.manager.start(
+      { action: 'remove', packageName: 'example-plugin' },
+      async () => { throw new Error('simulated stop failure') },
+    )
+    expect(value.children).toHaveLength(0)
+    expect(value.manager.status(started.operationId)).toMatchObject({
+      state: 'failed',
+      error: expect.stringContaining('simulated stop failure'),
+    })
+    expect(value.manager.current()).toBeUndefined()
+  })
+
   it('repairs an old pnpm modules metadata file and retries the same mutation once', async () => {
     const value = harness()
-    const started = value.manager.start({ action: 'remove', packageName: 'example-plugin' })
+    const started = await value.manager.start({ action: 'remove', packageName: 'example-plugin' })
     const first = value.children[0]
     first?.stderr.write('[ERR_PNPM_VIRTUAL_STORE_DIR_MAX_LENGTH_DIFF] at C:/Users/test/.dsh/profiles/web')
     first?.close(1)
@@ -218,7 +259,7 @@ describe('PluginManager', () => {
 
   it('retries a virtual store mismatch only once', async () => {
     const value = harness()
-    const started = value.manager.start({ action: 'update', packageName: 'example-plugin' })
+    const started = await value.manager.start({ action: 'update', packageName: 'example-plugin' })
     value.children[0]?.stderr.write('[ERR_PNPM_VIRTUAL_STORE_DIR_MAX_LENGTH_DIFF] first')
     value.children[0]?.close(1)
     await vi.waitFor(() => { expect(value.children).toHaveLength(2) })
@@ -233,7 +274,7 @@ describe('PluginManager', () => {
   it('reports a sanitized error when generated metadata cannot be removed', async () => {
     const removeFile = vi.fn(async () => { throw new Error('EPERM C:/Users/test/.dsh/profiles/web/node_modules/.modules.yaml') })
     const value = harness(undefined, removeFile)
-    const started = value.manager.start({ action: 'remove', packageName: 'example-plugin' })
+    const started = await value.manager.start({ action: 'remove', packageName: 'example-plugin' })
     value.children[0]?.stderr.write('[ERR_PNPM_VIRTUAL_STORE_DIR_MAX_LENGTH_DIFF]')
     value.children[0]?.close(1)
 
@@ -244,9 +285,9 @@ describe('PluginManager', () => {
     expect(value.children).toHaveLength(1)
   })
 
-  it('reports process failures and bounds retained output', () => {
+  it('reports process failures and bounds retained output', async () => {
     const value = harness()
-    const started = value.manager.start({ action: 'update', packageName: '@scope/example-plugin' })
+    const started = await value.manager.start({ action: 'update', packageName: '@scope/example-plugin' })
     value.children[0]?.stderr.write('x'.repeat(70_000))
     value.children[0]?.close(7)
     const status = value.manager.status(started.operationId)
@@ -255,6 +296,8 @@ describe('PluginManager', () => {
     expect(status.output.length).toBeLessThanOrEqual(64 * 1024)
     expect(status.output).toContain('较早的输出已省略')
     expect(value.removeFile).not.toHaveBeenCalled()
+    expect(value.onOperationFinished).toHaveBeenCalledOnce()
+    expect(value.onOperationFinished).toHaveBeenCalledWith(expect.objectContaining({ state: 'failed', action: 'update' }))
   })
 
   it('redacts Runtime paths from list process errors', async () => {
@@ -267,7 +310,7 @@ describe('PluginManager', () => {
 
   it('rejects malformed operations, ids, list data, and unavailable runtimes', async () => {
     const value = harness()
-    expect(() => value.manager.start({ action: 'remove', packageName: 'example-plugin', extra: true })).toThrow('unsupported')
+    await expect(value.manager.start({ action: 'remove', packageName: 'example-plugin', extra: true })).rejects.toThrow('unsupported')
     expect(() => value.manager.status('not-an-id')).toThrow('operationId')
 
     const pending = value.manager.list()
@@ -277,18 +320,32 @@ describe('PluginManager', () => {
 
     const unavailable = new PluginManager({ runtime: () => undefined, home: 'C:/Users/test/.dsh' })
     await expect(unavailable.list()).rejects.toThrow('尚未安装')
-    expect(() => unavailable.start({ action: 'remove', packageName: 'example-plugin' })).toThrow('尚未安装')
+    await expect(unavailable.start({ action: 'remove', packageName: 'example-plugin' })).rejects.toThrow('尚未安装')
   })
 
-  it('kills the active process on disposal and rejects later requests', () => {
+  it('does not spawn a mutation after disposal during Runtime preparation', async () => {
     const value = harness()
-    value.manager.start({ action: 'remove', packageName: 'example-plugin' })
+    let releasePreparation: (() => void) | undefined
+    const preparation = new Promise<void>(resolve => { releasePreparation = resolve })
+    const starting = value.manager.start(
+      { action: 'update', packageName: 'example-plugin' },
+      async () => { await preparation },
+    )
+    value.manager.dispose()
+    releasePreparation?.()
+    await starting
+    expect(value.children).toHaveLength(0)
+  })
+
+  it('kills the active process on disposal and rejects later requests', async () => {
+    const value = harness()
+    await value.manager.start({ action: 'remove', packageName: 'example-plugin' })
     const child = value.children[0]
     child?.stderr.write('[ERR_PNPM_VIRTUAL_STORE_DIR_MAX_LENGTH_DIFF]')
     value.manager.dispose()
     child?.close(1)
     expect(child?.kill).toHaveBeenCalledWith('SIGTERM')
     expect(value.removeFile).not.toHaveBeenCalled()
-    expect(() => value.manager.start({ action: 'remove', packageName: 'example-plugin' })).toThrow('disposed')
+    await expect(value.manager.start({ action: 'remove', packageName: 'example-plugin' })).rejects.toThrow('disposed')
   })
 })

@@ -64,6 +64,7 @@ export interface PluginManagerOptions {
   runProcess?: PluginProcessRunner
   readText?: (filename: string) => Promise<string>
   removeFile?: (filename: string) => Promise<void>
+  onOperationFinished?: (status: PluginOperationStatus) => void
 }
 
 interface OperationRecord extends PluginOperationStatus {
@@ -220,8 +221,10 @@ export class PluginManager {
   private readonly runProcess: PluginProcessRunner
   private readonly readText: (filename: string) => Promise<string>
   private readonly removeFile: (filename: string) => Promise<void>
+  private readonly onOperationFinished: (status: PluginOperationStatus) => void
   private readonly operations = new Map<string, OperationRecord>()
   private activeOperationId: string | undefined
+  private pendingRestartOperationId: string | undefined
   private disposed = false
 
   constructor(options: PluginManagerOptions) {
@@ -232,6 +235,7 @@ export class PluginManager {
     this.runProcess = options.runProcess ?? defaultRunProcess
     this.readText = options.readText ?? (async filename => readFile(filename, 'utf8'))
     this.removeFile = options.removeFile ?? (async filename => rm(filename, { force: true }))
+    this.onOperationFinished = options.onOperationFinished ?? (() => {})
   }
 
   async list(): Promise<PluginList> {
@@ -247,9 +251,11 @@ export class PluginManager {
     }
   }
 
-  start(value: unknown): { operationId: string } {
+  async start(value: unknown, prepare: () => Promise<void> = async () => {}): Promise<{ operationId: string }> {
     this.assertAvailable()
-    if (this.activeOperationId !== undefined) throw new Error('plugin operation is already running')
+    if (this.activeOperationId !== undefined || this.pendingRestartOperationId !== undefined) {
+      throw new Error('plugin operation is already running')
+    }
     const input = parseStartInput(value)
     const runtime = this.requireRuntime()
     const operationId = randomUUID()
@@ -268,12 +274,20 @@ export class PluginManager {
       delete record.timer
       delete record.child
       record.state = state
+      if (state === 'succeeded') this.pendingRestartOperationId = operationId
       if (error === undefined) delete record.error
       else record.error = error
       if (this.activeOperationId === operationId) this.activeOperationId = undefined
+      if (!this.disposed) {
+        try { this.onOperationFinished(this.status(operationId)) } catch {}
+      }
     }
     const runAttempt = (): void => {
       if (settled) return
+      if (this.disposed) {
+        finish('failed', 'plugin manager is disposed')
+        return
+      }
       try {
         const child = this.spawn(runtime, args)
         record.child = child
@@ -318,6 +332,11 @@ export class PluginManager {
       finish('failed', '插件操作超时')
     }, OPERATION_TIMEOUT_MS)
     record.timer.unref()
+    try {
+      await prepare()
+    } catch (error: unknown) {
+      finish('failed', '无法准备插件变更：' + (error instanceof Error ? error.message : String(error)))
+    }
     runAttempt()
     return { operationId }
   }
@@ -337,6 +356,20 @@ export class PluginManager {
       output: this.redact(record.output),
       ...(record.error === undefined ? {} : { error: this.redact(record.error) }),
     }
+  }
+
+  current(): PluginOperationStatus | undefined {
+    this.assertAvailable()
+    const operationId = this.activeOperationId ?? this.pendingRestartOperationId
+    return operationId === undefined ? undefined : this.status(operationId)
+  }
+
+  markRestarted(value: unknown): void {
+    const operation = this.status(value)
+    if (this.pendingRestartOperationId !== operation.operationId) {
+      throw new Error('plugin operation is not pending Runtime restart')
+    }
+    this.pendingRestartOperationId = undefined
   }
 
   dispose(): void {
