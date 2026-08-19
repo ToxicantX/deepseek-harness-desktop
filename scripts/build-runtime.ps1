@@ -75,8 +75,12 @@ Push-Location $App
 try {
   pnpm install --prod --no-frozen-lockfile
   if ($LASTEXITCODE -ne 0) { throw 'Published DSH runtime installation failed.' }
-  $InstalledVersion = node -e "const p=require(process.argv[1]); process.stdout.write(p.version)" (Join-Path $App 'node_modules/@deepseek-ai/dsh/package.json')
+  $DshManifest = Join-Path $App 'node_modules/@deepseek-ai/dsh/package.json'
+  $InstalledVersion = node -e "const p=require(process.argv[1]); process.stdout.write(p.version)" $DshManifest
   if ($InstalledVersion -ne $DshVersion) { throw "Installed DSH version $InstalledVersion does not match $DshVersion." }
+  # DSH links its manifest dependency closure into each profile for bare plugin resolution.
+  node -e 'const fs=require("node:fs"); const path=process.argv[1]; const value=JSON.parse(fs.readFileSync(path, "utf8")); value.dependencies ??= {}; value.dependencies["@deepseek-ai/dsh-desktop-session-repair"] = "0.1.0"; fs.writeFileSync(path, JSON.stringify(value, null, 2) + "\n")' $DshManifest
+  if ($LASTEXITCODE -ne 0) { throw 'Failed to register the desktop plugin in the packaged DSH dependency closure.' }
 } finally {
   Pop-Location
 }
