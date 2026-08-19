@@ -11,6 +11,7 @@ import {
   ipcMain,
   Menu,
   nativeImage,
+  Tray,
   shell,
   type IpcMainInvokeEvent,
   type MenuItemConstructorOptions,
@@ -38,6 +39,7 @@ const shutdownHook = app.isPackaged
   : join(moduleDirectory, 'shutdown-hook.js')
 
 let mainWindow: BrowserWindow | undefined
+let tray: Tray | undefined
 let managerWindow: BrowserWindow | undefined
 let repairWindow: BrowserWindow | undefined
 let pluginWindow: BrowserWindow | undefined
@@ -117,6 +119,24 @@ function createWindow(options: { utility?: 'manager' | 'repair' | 'plugin' | 'up
   window.once('ready-to-show', () => { window.show() })
   window.webContents.on('did-finish-load', () => { sendView(window) })
   return window
+}
+
+function showMainWindow(): void {
+  if (mainWindow === undefined || mainWindow.isDestroyed()) return
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+}
+
+function createTray(): void {
+  tray = new Tray(nativeImage.createFromPath(join(app.getAppPath(), 'assets', 'icon.png')))
+  tray.setToolTip('DeepSeek Harness')
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: '显示 DeepSeek Harness', click: showMainWindow },
+    { type: 'separator' },
+    { label: '退出', click: () => { app.quit() } },
+  ]))
+  tray.on('click', showMainWindow)
 }
 
 async function showSetup(window: BrowserWindow): Promise<void> {
@@ -294,8 +314,6 @@ function installMenu(): void {
             void mkdir(home, { recursive: true }).then(() => shell.openPath(home))
           },
         },
-        { type: 'separator' },
-        { role: 'quit', label: '退出' },
       ],
     },
     {
@@ -347,7 +365,13 @@ async function startApplication(): Promise<void> {
     cachedCatalog: false,
   }
   mainWindow = createWindow()
+  mainWindow.on('close', (event) => {
+    if (quitting) return
+    event.preventDefault()
+    mainWindow?.hide()
+  })
   mainWindow.on('closed', () => { mainWindow = undefined })
+  createTray()
   await mainWindow.loadFile(setupPage)
   const store = new RuntimeStore(runtimeRoot())
   const home = process.env.DSH_HOME ?? join(homedir(), '.dsh')
@@ -442,15 +466,19 @@ ipcMain.handle('session-repair:rollback', async (event, sessionId: unknown, expe
 if (!app.requestSingleInstanceLock()) app.quit()
 else {
   app.on('second-instance', () => {
-    if (mainWindow === undefined) return
-    if (mainWindow.isMinimized()) mainWindow.restore()
-    mainWindow.focus()
+    showMainWindow()
   })
   app.on('before-quit', (event) => {
-    if (quitting || controller === undefined) return
+    if (quitting || controller === undefined) {
+      tray?.destroy()
+      tray = undefined
+      return
+    }
     event.preventDefault()
     quitting = true
     pluginManager?.dispose()
+    tray?.destroy()
+    tray = undefined
     void controller.stop().finally(() => { app.quit() })
   })
   app.whenReady().then(startApplication).catch((error: unknown) => {
@@ -458,5 +486,4 @@ else {
     dialog.showErrorBox('DeepSeek Harness 启动失败', error instanceof Error ? error.message : String(error))
     app.quit()
   })
-  app.on('window-all-closed', () => { app.quit() })
 }
