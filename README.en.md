@@ -37,6 +37,8 @@ Open the desktop plugin manager from **Runtime → Manage Plugins**. It lists pl
 
 After a successful install, update, or removal, the Runtime restarts automatically so the change takes effect. If a plugin fails to load and prevents Web readiness, the Shell-owned plugin manager remains available so you can remove or update the problematic plugin and restart the Runtime again.
 
+If an older Web profile was created with a different pnpm `virtual-store-dir-max-length`, the manager removes the regenerable `.modules.yaml` only after matching that exact compatibility error, then retries the original operation once. It does not delete the profile manifest, lockfile, plugin configuration, or other user data.
+
 If a patch under an existing `%USERPROFILE%\.dsh` still references a deleted local plugin file, the setup page offers **Disable stale local plugins and retry**. After confirmation, the Shell backs up and removes only loader entries that exactly match the startup error; it does not clear sessions, settings, credentials, other plugins, or the profile.
 
 The Shell writes a stable `dsh.cmd` under its user-data directory and puts the active runtime's standard Node and pnpm on `PATH`. As an advanced fallback, open **Runtime → Open plugin management terminal** and use the existing commands:

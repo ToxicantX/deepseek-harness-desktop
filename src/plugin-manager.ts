@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
+import { readFile, rm } from 'node:fs/promises'
 import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path'
 import type { InstalledRuntime } from './runtime-store.ts'
 
@@ -10,6 +10,7 @@ const MAX_LIST_BYTES = 1024 * 1024
 const MAX_OUTPUT_CHARS = 64 * 1024
 const MAX_ENTRIES = 1_000
 const OPERATION_TIMEOUT_MS = 15 * 60_000
+const VIRTUAL_STORE_MISMATCH = 'ERR_PNPM_VIRTUAL_STORE_DIR_MAX_LENGTH_DIFF'
 
 export type PluginAction = 'add' | 'update' | 'remove'
 
@@ -62,6 +63,7 @@ export interface PluginManagerOptions {
   environment?: NodeJS.ProcessEnv
   runProcess?: PluginProcessRunner
   readText?: (filename: string) => Promise<string>
+  removeFile?: (filename: string) => Promise<void>
 }
 
 interface OperationRecord extends PluginOperationStatus {
@@ -217,6 +219,7 @@ export class PluginManager {
   private readonly environment: NodeJS.ProcessEnv
   private readonly runProcess: PluginProcessRunner
   private readonly readText: (filename: string) => Promise<string>
+  private readonly removeFile: (filename: string) => Promise<void>
   private readonly operations = new Map<string, OperationRecord>()
   private activeOperationId: string | undefined
   private disposed = false
@@ -228,6 +231,7 @@ export class PluginManager {
     this.environment = options.environment ?? process.env
     this.runProcess = options.runProcess ?? defaultRunProcess
     this.readText = options.readText ?? (async filename => readFile(filename, 'utf8'))
+    this.removeFile = options.removeFile ?? (async filename => rm(filename, { force: true }))
   }
 
   async list(): Promise<PluginList> {
@@ -250,42 +254,71 @@ export class PluginManager {
     const runtime = this.requireRuntime()
     const operationId = randomUUID()
     const argument = input.action === 'add' ? input.spec : input.packageName
+    const args = ['plugin', '--profile', 'web', input.action, argument]
     const record: OperationRecord = { operationId, state: 'running', action: input.action, output: '' }
     this.operations.set(operationId, record)
     this.activeOperationId = operationId
     this.trimOperations()
-    try {
-      const child = this.spawn(runtime, ['plugin', '--profile', 'web', input.action, argument])
-      record.child = child
-      child.stdout.on('data', chunk => { record.output = appendOutput(record.output, chunk) })
-      child.stderr.on('data', chunk => { record.output = appendOutput(record.output, chunk) })
-      let settled = false
-      const finish = (state: 'succeeded' | 'failed', error?: string): void => {
-        if (settled) return
-        settled = true
-        if (record.timer !== undefined) clearTimeout(record.timer)
-        delete record.timer
-        delete record.child
-        record.state = state
-        if (error === undefined) delete record.error
-        else record.error = error
-        if (this.activeOperationId === operationId) this.activeOperationId = undefined
-      }
-      child.once('error', error => { finish('failed', '无法启动插件管理进程：' + error.message) })
-      child.once('close', (code, signal) => {
-        if (code === 0) finish('succeeded')
-        else finish('failed', signal === null ? '插件操作退出码：' + String(code ?? 'unknown') : '插件操作被终止：' + signal)
-      })
-      record.timer = setTimeout(() => {
-        child.kill('SIGTERM')
-        finish('failed', '插件操作超时')
-      }, OPERATION_TIMEOUT_MS)
-      record.timer.unref()
-    } catch (error: unknown) {
-      this.activeOperationId = undefined
-      record.state = 'failed'
-      record.error = error instanceof Error ? error.message : String(error)
+    let settled = false
+    let repairAttempted = false
+    const finish = (state: 'succeeded' | 'failed', error?: string): void => {
+      if (settled) return
+      settled = true
+      if (record.timer !== undefined) clearTimeout(record.timer)
+      delete record.timer
+      delete record.child
+      record.state = state
+      if (error === undefined) delete record.error
+      else record.error = error
+      if (this.activeOperationId === operationId) this.activeOperationId = undefined
     }
+    const runAttempt = (): void => {
+      if (settled) return
+      try {
+        const child = this.spawn(runtime, args)
+        record.child = child
+        child.stdout.on('data', chunk => { record.output = appendOutput(record.output, chunk) })
+        child.stderr.on('data', chunk => { record.output = appendOutput(record.output, chunk) })
+        child.once('error', error => { finish('failed', '无法启动插件管理进程：' + error.message) })
+        child.once('close', (code, signal) => {
+          if (settled) return
+          delete record.child
+          if (code === 0) {
+            finish('succeeded')
+            return
+          }
+          if (signal === null
+            && !repairAttempted
+            && !this.disposed
+            && this.activeOperationId === operationId
+            && record.output.includes(VIRTUAL_STORE_MISMATCH)) {
+            repairAttempted = true
+            record.output = appendOutput(record.output, '\n检测到旧版 pnpm 元数据不兼容，正在重建后重试...\n')
+            const metadata = join(this.home, 'profiles', 'web', 'node_modules', '.modules.yaml')
+            void this.removeFile(metadata).then(
+              () => {
+                if (this.disposed || this.activeOperationId !== operationId) return
+                runAttempt()
+              },
+              (error: unknown) => {
+                const detail = error instanceof Error ? error.message : String(error)
+                finish('failed', '无法重建旧插件目录：' + detail)
+              },
+            )
+            return
+          }
+          finish('failed', signal === null ? '插件操作退出码：' + String(code ?? 'unknown') : '插件操作被终止：' + signal)
+        })
+      } catch (error: unknown) {
+        finish('failed', error instanceof Error ? error.message : String(error))
+      }
+    }
+    record.timer = setTimeout(() => {
+      record.child?.kill('SIGTERM')
+      finish('failed', '插件操作超时')
+    }, OPERATION_TIMEOUT_MS)
+    record.timer.unref()
+    runAttempt()
     return { operationId }
   }
 

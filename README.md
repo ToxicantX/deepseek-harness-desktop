@@ -37,6 +37,8 @@ Runtime 默认位于：
 
 安装、更新或移除成功后，Runtime 会自动重启，使插件变更生效。若插件加载失败导致 Web 无法就绪，由 Shell 独立提供的插件管理器仍保持可用，可移除或更新有问题的插件并再次重启 Runtime。
 
+若旧 Web profile 由不同 pnpm `virtual-store-dir-max-length` 创建，管理器会在精确识别该兼容性错误后移除可再生的 `.modules.yaml`，并自动重试原操作一次；profile manifest、lockfile、插件配置和其他用户数据不会被删除。
+
 若旧的 `%USERPROFILE%\.dsh` patch 仍引用已经删除的本地插件文件，启动页会提供 **禁用失效本地插件并重试**。确认后，Shell 只备份并移除与启动错误精确匹配的 loader 条目，不会清除会话、设置、凭据、其他插件或整个 profile。
 
 Shell 在用户数据目录生成稳定的 `dsh.cmd`，将当前 runtime 中的标准 Node 和 pnpm 放到 `PATH`。作为高级回退，也可以通过 **Runtime → 打开插件管理终端** 使用原有命令：

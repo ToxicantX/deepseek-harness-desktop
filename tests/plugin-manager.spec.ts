@@ -40,13 +40,15 @@ const runtime: InstalledRuntime = {
   dshBin: 'C:/runtime/app/bin.js',
 }
 
-function harness(readText = vi.fn(async () => JSON.stringify({
-  dependencies: { 'example-plugin': 'github:owner/example-plugin' },
-}))): {
+function harness(
+  readText = vi.fn(async () => JSON.stringify({ dependencies: { 'example-plugin': 'github:owner/example-plugin' } })),
+  removeFile = vi.fn(async () => {}),
+): {
   manager: PluginManager
   children: FakeProcess[]
   calls: { command: string; args: readonly string[]; options: PluginProcessOptions }[]
   readText: typeof readText
+  removeFile: typeof removeFile
 } {
   const children: FakeProcess[] = []
   const calls: { command: string; args: readonly string[]; options: PluginProcessOptions }[] = []
@@ -55,6 +57,7 @@ function harness(readText = vi.fn(async () => JSON.stringify({
     home: 'C:/Users/test/.dsh',
     environment: { PATH: 'C:/Windows/System32', SAFE: 'yes' },
     readText,
+    removeFile,
     runProcess(command, args, options) {
       calls.push({ command, args, options })
       const child = new FakeProcess()
@@ -62,7 +65,7 @@ function harness(readText = vi.fn(async () => JSON.stringify({
       return child
     },
   })
-  return { manager, children, calls, readText }
+  return { manager, children, calls, readText, removeFile }
 }
 
 describe('plugin package validation', () => {
@@ -181,6 +184,66 @@ describe('PluginManager', () => {
     })
   })
 
+  it('repairs an old pnpm modules metadata file and retries the same mutation once', async () => {
+    const value = harness()
+    const started = value.manager.start({ action: 'remove', packageName: 'example-plugin' })
+    const first = value.children[0]
+    first?.stderr.write('[ERR_PNPM_VIRTUAL_STORE_DIR_MAX_LENGTH_DIFF] at C:/Users/test/.dsh/profiles/web')
+    first?.close(1)
+
+    await vi.waitFor(() => { expect(value.children).toHaveLength(2) })
+    expect(value.removeFile).toHaveBeenCalledOnce()
+    expect(value.removeFile).toHaveBeenCalledWith(join(
+      'C:/Users/test/.dsh',
+      'profiles',
+      'web',
+      'node_modules',
+      '.modules.yaml',
+    ))
+    expect(value.calls[1]?.args).toEqual(value.calls[0]?.args)
+    const retrying = value.manager.status(started.operationId)
+    expect(retrying).toMatchObject({
+      state: 'running',
+      output: expect.stringContaining('正在重建后重试'),
+    })
+    expect(retrying.output).not.toContain('C:/Users')
+
+    value.children[1]?.stdout.write('removed example-plugin')
+    value.children[1]?.close(0)
+    expect(value.manager.status(started.operationId)).toMatchObject({
+      state: 'succeeded',
+      output: expect.stringContaining('removed example-plugin'),
+    })
+  })
+
+  it('retries a virtual store mismatch only once', async () => {
+    const value = harness()
+    const started = value.manager.start({ action: 'update', packageName: 'example-plugin' })
+    value.children[0]?.stderr.write('[ERR_PNPM_VIRTUAL_STORE_DIR_MAX_LENGTH_DIFF] first')
+    value.children[0]?.close(1)
+    await vi.waitFor(() => { expect(value.children).toHaveLength(2) })
+    value.children[1]?.stderr.write('[ERR_PNPM_VIRTUAL_STORE_DIR_MAX_LENGTH_DIFF] second')
+    value.children[1]?.close(1)
+
+    expect(value.removeFile).toHaveBeenCalledOnce()
+    expect(value.calls).toHaveLength(2)
+    expect(value.manager.status(started.operationId)).toMatchObject({ state: 'failed' })
+  })
+
+  it('reports a sanitized error when generated metadata cannot be removed', async () => {
+    const removeFile = vi.fn(async () => { throw new Error('EPERM C:/Users/test/.dsh/profiles/web/node_modules/.modules.yaml') })
+    const value = harness(undefined, removeFile)
+    const started = value.manager.start({ action: 'remove', packageName: 'example-plugin' })
+    value.children[0]?.stderr.write('[ERR_PNPM_VIRTUAL_STORE_DIR_MAX_LENGTH_DIFF]')
+    value.children[0]?.close(1)
+
+    await vi.waitFor(() => { expect(value.manager.status(started.operationId).state).toBe('failed') })
+    const status = value.manager.status(started.operationId)
+    expect(status.error).toContain('EPERM [路径已隐藏]')
+    expect(status.error).not.toContain('C:/Users')
+    expect(value.children).toHaveLength(1)
+  })
+
   it('reports process failures and bounds retained output', () => {
     const value = harness()
     const started = value.manager.start({ action: 'update', packageName: '@scope/example-plugin' })
@@ -191,6 +254,7 @@ describe('PluginManager', () => {
     expect(status.error).toContain('退出码')
     expect(status.output.length).toBeLessThanOrEqual(64 * 1024)
     expect(status.output).toContain('较早的输出已省略')
+    expect(value.removeFile).not.toHaveBeenCalled()
   })
 
   it('redacts Runtime paths from list process errors', async () => {
@@ -220,8 +284,11 @@ describe('PluginManager', () => {
     const value = harness()
     value.manager.start({ action: 'remove', packageName: 'example-plugin' })
     const child = value.children[0]
+    child?.stderr.write('[ERR_PNPM_VIRTUAL_STORE_DIR_MAX_LENGTH_DIFF]')
     value.manager.dispose()
+    child?.close(1)
     expect(child?.kill).toHaveBeenCalledWith('SIGTERM')
+    expect(value.removeFile).not.toHaveBeenCalled()
     expect(() => value.manager.start({ action: 'remove', packageName: 'example-plugin' })).toThrow('disposed')
   })
 })
