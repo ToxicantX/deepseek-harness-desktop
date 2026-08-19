@@ -195,22 +195,29 @@ export class RuntimeStore {
   ): Promise<InstalledRuntime> {
     const existing = await this.installed(manifest.dshVersion)
     if (existing !== undefined) {
-      if (existing.manifest.archive.sha256 === manifest.archive.sha256) return existing
-      throw new Error(`installed DSH ${manifest.dshVersion} differs from the immutable catalog release`)
+      if (existing.manifest.runtimeRevision === manifest.runtimeRevision && existing.manifest.archive.sha256 === manifest.archive.sha256) return existing
+      if (existing.manifest.runtimeRevision === manifest.runtimeRevision) throw new Error(`installed DSH ${manifest.dshVersion} differs from the immutable catalog release`)
+      if (existing.manifest.runtimeRevision > manifest.runtimeRevision) throw new Error(`runtime revision downgrade is not allowed for DSH ${manifest.dshVersion}`)
     }
     const finalDirectory = join(this.runtimesDirectory, manifest.dshVersion)
-    await rm(finalDirectory, { recursive: true, force: true })
+    const backupDirectory = `${finalDirectory}.backup-${randomUUID()}`
     await mkdir(this.downloadsDirectory, { recursive: true })
     await mkdir(this.runtimesDirectory, { recursive: true })
     const archiveFile = join(this.downloadsDirectory, `${manifest.dshVersion}.${randomUUID()}.zip.part`)
     const staging = join(this.runtimesDirectory, `${manifest.dshVersion}.staging-${randomUUID()}`)
+    let backupPresent = false
     try {
       await this.download(manifest, archiveFile, onProgress)
       await mkdir(staging, { recursive: true })
       await extract(archiveFile, { dir: staging })
       await writeFile(join(staging, MANIFEST_FILE), `${JSON.stringify(manifest, undefined, 2)}\n`, 'utf8')
-      await rename(staging, finalDirectory)
+      const hadExisting = await pathExists(finalDirectory)
+      if (hadExisting) {
+        await rename(finalDirectory, backupDirectory)
+        backupPresent = true
+      }
       try {
+        await rename(staging, finalDirectory)
         await this.materializeLinks(finalDirectory)
         const installed = this.resolveInstalled(finalDirectory, manifest)
         await Promise.all([
@@ -218,14 +225,22 @@ export class RuntimeStore {
           access(installed.pnpmExecutable),
           access(installed.dshBin),
         ])
+        await rm(backupDirectory, { recursive: true, force: true })
+        backupPresent = false
         return installed
       } catch (error: unknown) {
         await rm(finalDirectory, { recursive: true, force: true })
+        if (backupPresent) {
+          await rename(backupDirectory, finalDirectory)
+          backupPresent = false
+        }
         throw error
       }
     } finally {
       await rm(archiveFile, { force: true })
       await rm(staging, { recursive: true, force: true })
+      // A remaining backup means restoration failed; retain it for manual recovery.
+      if (!backupPresent) await rm(backupDirectory, { recursive: true, force: true })
     }
   }
 

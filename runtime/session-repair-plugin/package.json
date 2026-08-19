@@ -1,0 +1,19 @@
+{
+  "name": "@deepseek-ai/dsh-desktop-session-repair",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "index.js",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/dsh-host-apiproxy": "*",
+    "@deepseek-ai/dsh-host-webserver": "*",
+    "@deepseek-ai/dsh-session": "*",
+    "@deepseek-ai/dsh-session-persistence": "*",
+    "@deepseek-ai/dsh-settings": "*",
+    "@deepseek-ai/dsh-storage-domain": "*"
+  },
+  "dependencies": {
+    "koffi": "^3.1.0"
+  }
+}

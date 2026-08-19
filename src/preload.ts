@@ -1,27 +1,27 @@
 import { ipcRenderer } from 'electron'
 import type { RuntimePreference } from './catalog.ts'
 import type { RuntimeView } from './runtime-controller.ts'
+import type { SessionRepairAnomalyKind, SessionRepairInspection, SessionRepairResult, SessionRepairRollbackResult } from './session-repair.ts'
+import type { ShellUpdateProgress } from './shell-updater.ts'
 
 function element<T extends HTMLElement>(id: string): T {
-  const value = document.querySelector<T>(`#${id}`)
-  if (value === null) throw new Error(`runtime page is missing #${id}`)
+  const value = document.querySelector<T>('#' + id)
+  if (value === null) throw new Error('page is missing #' + id)
   return value
 }
 
-function render(view: RuntimeView): void {
-  element('shell-version').textContent = `Shell ${view.shellVersion} · 最低 DSH ${view.minimumDshVersion}`
+function renderRuntime(view: RuntimeView): void {
+  element('shell-version').textContent = 'Shell ' + view.shellVersion + ' · 最低 DSH ' + view.minimumDshVersion
   element('message').textContent = view.message
-  const detail = view.currentVersion === undefined ? '' : `当前运行版本：${view.currentVersion}`
-  element('detail').textContent = detail
-  const progress = view.progress === undefined || view.progress.total === 0
-    ? 0
-    : Math.min(100, (view.progress.received / view.progress.total) * 100)
-  element<HTMLDivElement>('progress-value').style.width = `${progress}%`
+  element('detail').textContent = view.currentVersion === undefined
+    ? ''
+    : '当前运行版本：' + view.currentVersion + ' · desktop revision ' + String(view.currentRuntimeRevision ?? 0)
+  const progress = view.progress === undefined || view.progress.total === 0 ? 0 : Math.min(100, (view.progress.received / view.progress.total) * 100)
+  element<HTMLDivElement>('progress-value').style.width = String(progress) + '%'
   element('cache').style.display = view.cachedCatalog ? 'block' : 'none'
   const error = element('error')
   error.textContent = view.error ?? ''
   error.style.display = view.error === undefined ? 'none' : 'block'
-
   const select = element<HTMLSelectElement>('version')
   const previous = select.value
   select.replaceChildren()
@@ -33,7 +33,8 @@ function render(view: RuntimeView): void {
     const option = document.createElement('option')
     option.value = version.version
     const flags = [version.current ? '当前' : '', version.installed ? '已安装' : ''].filter(Boolean).join(' · ')
-    option.textContent = flags.length === 0 ? version.version : `${version.version} (${flags})`
+    const label = version.version + ' · desktop revision ' + String(version.runtimeRevision)
+    option.textContent = flags.length === 0 ? label : label + ' (' + flags + ')'
     select.append(option)
   }
   const preferred = view.preference.mode === 'latest-compatible' ? 'latest-compatible' : view.preference.version
@@ -44,22 +45,218 @@ function render(view: RuntimeView): void {
   element<HTMLButtonElement>('retry').disabled = busy
 }
 
-async function currentView(): Promise<RuntimeView> {
-  return ipcRenderer.invoke('runtime:get-view') as Promise<RuntimeView>
+function initializeShellUpdatePage(): void {
+  ipcRenderer.on('shell-update:progress', (_event, progress: ShellUpdateProgress) => {
+    const downloading = progress.state === 'downloading'
+    const preparing = progress.state === 'preparing-restart'
+    const version = downloading || preparing ? progress.version : ''
+    const progressElement = element<HTMLProgressElement>('progress')
+    element('version').textContent = version.length === 0 ? 'Shell 更新' : 'Shell ' + version
+    if (downloading) {
+      const percent = Math.max(0, Math.min(100, progress.percent))
+      progressElement.value = percent
+      element('percent').textContent = percent.toFixed(1) + '%'
+      element('transferred').textContent = formatBytes(progress.transferred)
+      element('total').textContent = formatBytes(progress.total)
+      element('speed').textContent = formatBytes(progress.bytesPerSecond) + '/s'
+    } else {
+      progressElement.removeAttribute('value')
+      element('percent').textContent = preparing ? '完成' : ''
+      element('transferred').textContent = ''
+      element('total').textContent = ''
+      element('speed').textContent = ''
+    }
+    element('status').textContent = progress.state === 'error'
+      ? progress.message
+      : preparing
+        ? '下载完成，正在关闭 Runtime 并准备重启...'
+        : downloading
+          ? '正在下载更新，完成后将自动安装并重启。'
+          : progress.state === 'checking' ? '正在检查更新...' : '当前已是最新版本。'
+  })
+}
+
+function initializeRuntimePage(): void {
+  ipcRenderer.on('runtime:view', (_event, view: RuntimeView) => { renderRuntime(view) })
+  element<HTMLButtonElement>('retry').addEventListener('click', () => { void ipcRenderer.invoke('runtime:retry') })
+  element<HTMLButtonElement>('apply').addEventListener('click', () => {
+    const value = element<HTMLSelectElement>('version').value
+    const preference: RuntimePreference = value === 'latest-compatible' ? { mode: 'latest-compatible' } : { mode: 'pinned', version: value }
+    void ipcRenderer.invoke('runtime:set-preference', preference)
+  })
+  void (ipcRenderer.invoke('runtime:get-view') as Promise<RuntimeView>).then(renderRuntime)
+}
+
+function setHidden(id: string, hidden: boolean): void { element(id).hidden = hidden }
+
+function formatBytes(value: number | undefined): string {
+  if (value === undefined) return 'Runtime 未返回'
+  if (value < 1024) return String(value) + ' B'
+  const units = ['KB', 'MB', 'GB', 'TB']
+  let amount = value / 1024
+  let unit = units[0] ?? 'KB'
+  for (let index = 1; index < units.length && amount >= 1024; index += 1) {
+    amount /= 1024
+    unit = units[index] ?? unit
+  }
+  return amount.toLocaleString('zh-CN', { maximumFractionDigits: 2 }) + ' ' + unit
+}
+
+function errorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+  return message.replace(/^Error invoking remote method '[^']+': Error: /u, '')
+}
+
+function anomalyLabel(kind: SessionRepairAnomalyKind): string {
+  if (kind === 'branch-reset') return '分支重置'
+  if (kind === 'stale-single-event') return '陈旧单条事件'
+  return '无法明确判断'
+}
+
+function isSafeInspection(value: SessionRepairInspection | undefined): boolean {
+  return value !== undefined && value.repairable && value.eventCount !== undefined && value.fileSize !== undefined
+    && value.backupPath !== undefined && value.preservesAllEvents === true
+    && value.strategy === 'renumber-preserve-physical-order' && value.anomalies.length > 0
+    && value.anomalies.every(anomaly => anomaly.kind !== 'ambiguous')
+}
+
+function initializeRepairPage(): void {
+  const sessionInput = element<HTMLInputElement>('repair-session-id')
+  const inspectButton = element<HTMLButtonElement>('repair-inspect')
+  const confirm = element<HTMLInputElement>('repair-confirm')
+  const applyButton = element<HTMLButtonElement>('repair-apply')
+  const rollbackButton = element<HTMLButtonElement>('repair-rollback')
+  const status = element<HTMLParagraphElement>('repair-status')
+  let inspection: SessionRepairInspection | undefined
+  let repairResult: SessionRepairResult | undefined
+  let busy = false
+
+  function setStatus(message: string, state: 'normal' | 'error' | 'success' = 'normal'): void {
+    status.textContent = message
+    status.className = state === 'normal' ? 'status' : 'status ' + state
+  }
+
+  function updateControls(): void {
+    sessionInput.disabled = busy
+    inspectButton.disabled = busy
+    confirm.disabled = busy || !isSafeInspection(inspection) || repairResult !== undefined
+    applyButton.disabled = busy || !confirm.checked || !isSafeInspection(inspection) || repairResult !== undefined
+    rollbackButton.disabled = busy || repairResult === undefined
+    setHidden('repair-progress', !busy)
+  }
+
+  function setBusy(value: boolean): void { busy = value; updateControls() }
+
+  function renderAnomalies(value: SessionRepairInspection): void {
+    const rows = element<HTMLTableSectionElement>('anomaly-rows')
+    rows.replaceChildren()
+    for (const anomaly of value.anomalies) {
+      const row = document.createElement('tr')
+      for (const text of [anomalyLabel(anomaly.kind), String(anomaly.eventIndex), String(anomaly.expectedSeq), String(anomaly.actualSeq), String(anomaly.runLength)]) {
+        const cell = document.createElement('td')
+        cell.textContent = text
+        row.append(cell)
+      }
+      rows.append(row)
+    }
+    element('anomaly-count').textContent = String(value.anomalies.length) + ' 处'
+    setHidden('repair-anomalies', value.anomalies.length === 0)
+  }
+
+  function renderInspection(value: SessionRepairInspection): void {
+    inspection = value
+    repairResult = undefined
+    confirm.checked = false
+    element('inspection-session-id').textContent = value.sessionId
+    element('inspection-revision').textContent = value.revision
+    element('inspection-file-size').textContent = formatBytes(value.fileSize)
+    element('inspection-event-count').textContent = value.eventCount === undefined ? 'Runtime 未返回' : value.eventCount.toLocaleString('zh-CN')
+    element('inspection-strategy').textContent = value.strategy === 'renumber-preserve-physical-order' ? '保持物理顺序并统一重编号' : '无自动修复策略'
+    element('inspection-preserves').textContent = value.preservesAllEvents === true ? '是' : value.preservesAllEvents === false ? '否' : 'Runtime 未确认'
+    element('inspection-backup').textContent = value.backupPath ?? 'Runtime 未返回（禁止自动修复）'
+    element('inspection-reason').textContent = value.reason ?? '无'
+    const safe = isSafeInspection(value)
+    element('repairability').textContent = safe ? '可安全修复' : value.anomalies.length === 0 ? '无需修复' : '禁止自动修复'
+    setHidden('repair-inspection', false)
+    setHidden('repair-result', true)
+    renderAnomalies(value)
+    updateControls()
+  }
+
+  function renderRepairResult(value: SessionRepairResult): void {
+    repairResult = value
+    inspection = undefined
+    element('result-event-count').textContent = value.eventCount.toLocaleString('zh-CN')
+    element('result-last-seq').textContent = value.lastSeq.toLocaleString('zh-CN')
+    element('result-message-count').textContent = value.derivedMessageCount.toLocaleString('zh-CN')
+    element('result-previous-revision').textContent = value.previousRevision
+    element('result-new-revision').textContent = value.newRevision
+    element('result-backup').textContent = '备份：' + value.backupPath
+    setHidden('repair-result', false)
+    updateControls()
+  }
+
+  async function inspectSession(): Promise<void> {
+    const sessionId = sessionInput.value.trim()
+    if (sessionId.length === 0) { setStatus('请输入会话 ID。', 'error'); sessionInput.focus(); return }
+    inspection = undefined
+    repairResult = undefined
+    confirm.checked = false
+    setHidden('repair-inspection', true)
+    setHidden('repair-anomalies', true)
+    setHidden('repair-result', true)
+    setStatus('正在读取并诊断会话日志…')
+    setBusy(true)
+    try {
+      const value = await ipcRenderer.invoke('session-repair:inspect', sessionId) as SessionRepairInspection
+      renderInspection(value)
+      if (isSafeInspection(value)) setStatus('诊断完成。请核对信息后确认修复。', 'success')
+      else if (value.anomalies.length === 0) setStatus(value.reason ?? '日志健康，无需修复。', 'success')
+      else setStatus(value.reason ?? '诊断结果不满足自动修复条件。', 'error')
+    } catch (error: unknown) { setStatus(errorMessage(error), 'error') }
+    finally { setBusy(false) }
+  }
+
+  inspectButton.addEventListener('click', () => { void inspectSession() })
+  sessionInput.addEventListener('keydown', event => { if (event.key === 'Enter' && !busy) void inspectSession() })
+  confirm.addEventListener('change', updateControls)
+  applyButton.addEventListener('click', () => {
+    const current = inspection
+    if (current === undefined || !confirm.checked || !isSafeInspection(current)) return
+    setStatus('正在修复并执行完整语义重放验证…')
+    setBusy(true)
+    void (async () => {
+      try {
+        const value = await ipcRenderer.invoke('session-repair:apply', current.sessionId, current.revision) as SessionRepairResult
+        renderRepairResult(value)
+        setStatus('修复成功，历史会话已刷新。', 'success')
+      } catch (error: unknown) { setStatus(errorMessage(error), 'error') }
+      finally { setBusy(false) }
+    })()
+  })
+  rollbackButton.addEventListener('click', () => {
+    const current = repairResult
+    if (current === undefined || !window.confirm('确认使用保留的备份回滚此会话？')) return
+    setStatus('正在回滚会话备份…')
+    setBusy(true)
+    void (async () => {
+      try {
+        const value = await ipcRenderer.invoke('session-repair:rollback', current.sessionId, current.newRevision) as SessionRepairRollbackResult
+        repairResult = undefined
+        setHidden('repair-inspection', true)
+        setHidden('repair-anomalies', true)
+        setHidden('repair-result', true)
+        setStatus('回滚成功，新 revision：' + value.newRevision, 'success')
+      } catch (error: unknown) { setStatus(errorMessage(error), 'error') }
+      finally { setBusy(false) }
+    })()
+  })
+  updateControls()
+  sessionInput.focus()
 }
 
 window.addEventListener('DOMContentLoaded', () => {
-  if (document.querySelector('#version') === null) return
-  ipcRenderer.on('runtime:view', (_event, view: RuntimeView) => { render(view) })
-  element<HTMLButtonElement>('retry').addEventListener('click', () => {
-    void ipcRenderer.invoke('runtime:retry')
-  })
-  element<HTMLButtonElement>('apply').addEventListener('click', () => {
-    const value = element<HTMLSelectElement>('version').value
-    const preference: RuntimePreference = value === 'latest-compatible'
-      ? { mode: 'latest-compatible' }
-      : { mode: 'pinned', version: value }
-    void ipcRenderer.invoke('runtime:set-preference', preference)
-  })
-  void currentView().then(render)
+  if (document.querySelector('#shell-update-page') !== null) initializeShellUpdatePage()
+  else if (document.querySelector('#version') !== null) initializeRuntimePage()
+  else if (document.querySelector('#repair-session-id') !== null) initializeRepairPage()
 })

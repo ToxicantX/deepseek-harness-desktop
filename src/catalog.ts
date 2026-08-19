@@ -11,6 +11,7 @@ export interface RuntimeManifest {
   schemaVersion: 1
   runtimeProtocolVersion: 1
   dshVersion: string
+  runtimeRevision: number
   requiredShellRange: string
   platform: 'win32'
   arch: 'x64'
@@ -72,6 +73,8 @@ function parseManifest(value: unknown): RuntimeManifest {
 
   const dshVersion = text(input.dshVersion, 'dshVersion')
   if (valid(dshVersion) === null) throw new Error(`invalid dshVersion: ${dshVersion}`)
+  const runtimeRevision = input.runtimeRevision === undefined ? 0 : input.runtimeRevision
+  if (typeof runtimeRevision !== 'number' || !Number.isSafeInteger(runtimeRevision) || runtimeRevision < 0) throw new Error('runtimeRevision must be a nonnegative safe integer')
   const requiredShellRange = text(input.requiredShellRange, 'requiredShellRange')
   const source = record(input.source, 'source')
   const repository = text(source.repository, 'source.repository')
@@ -96,6 +99,7 @@ function parseManifest(value: unknown): RuntimeManifest {
     schemaVersion: RUNTIME_CATALOG_SCHEMA,
     runtimeProtocolVersion: RUNTIME_PROTOCOL_VERSION,
     dshVersion,
+    runtimeRevision,
     requiredShellRange,
     platform: 'win32',
     arch: 'x64',
@@ -116,10 +120,11 @@ export function parseRuntimeCatalog(value: unknown): RuntimeCatalog {
   if (Number.isNaN(Date.parse(generatedAt))) throw new Error('generatedAt must be an ISO date')
   if (!Array.isArray(input.releases)) throw new Error('releases must be an array')
   const releases = input.releases.map(parseManifest)
-  const versions = new Set<string>()
+  const revisions = new Set<string>()
   for (const release of releases) {
-    if (versions.has(release.dshVersion)) throw new Error(`duplicate DSH version: ${release.dshVersion}`)
-    versions.add(release.dshVersion)
+    const key = release.dshVersion + ':' + release.runtimeRevision
+    if (revisions.has(key)) throw new Error('duplicate DSH version revision: ' + release.dshVersion + ' ' + release.runtimeRevision)
+    revisions.add(key)
   }
   return { schemaVersion: RUNTIME_CATALOG_SCHEMA, generatedAt, releases }
 }
@@ -135,7 +140,7 @@ export function isReleaseCompatible(release: RuntimeManifest, shellVersion: stri
 export function compatibleReleases(catalog: RuntimeCatalog, shellVersion: string): RuntimeManifest[] {
   return catalog.releases
     .filter(release => isReleaseCompatible(release, shellVersion))
-    .sort((left, right) => rcompare(left.dshVersion, right.dshVersion))
+    .sort((left, right) => rcompare(left.dshVersion, right.dshVersion) || right.runtimeRevision - left.runtimeRevision)
 }
 
 export function selectRuntime(

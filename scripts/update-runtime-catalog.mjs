@@ -13,6 +13,8 @@ const manifestFile = resolve(argument('manifest'))
 const outputFile = resolve(argument('output'))
 const existingValue = argument('existing', false)
 const manifest = JSON.parse(await readFile(manifestFile, 'utf8'))
+const incomingRevision = manifest.runtimeRevision ?? 0
+if (!Number.isSafeInteger(incomingRevision) || incomingRevision < 0) throw new Error('manifest runtimeRevision must be a nonnegative safe integer')
 let releases = []
 if (existingValue !== undefined) {
   try {
@@ -20,6 +22,14 @@ if (existingValue !== undefined) {
     if (existing.schemaVersion === 1 && Array.isArray(existing.releases)) releases = existing.releases
   } catch (error) {
     if (error?.code !== 'ENOENT') throw error
+  }
+}
+const previous = releases.find(release => release.dshVersion === manifest.dshVersion)
+if (previous !== undefined) {
+  const previousRevision = previous.runtimeRevision ?? 0
+  if (!Number.isSafeInteger(previousRevision) || previousRevision < 0) throw new Error('existing runtimeRevision must be a nonnegative safe integer')
+  if (incomingRevision <= previousRevision) {
+    throw new Error(`runtime revision must increase for DSH ${manifest.dshVersion}: existing ${previousRevision}, incoming ${incomingRevision}`)
   }
 }
 releases = releases.filter(release => release.dshVersion !== manifest.dshVersion)

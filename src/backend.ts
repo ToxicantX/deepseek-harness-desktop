@@ -1,10 +1,13 @@
-import { fork, type ChildProcess, type ForkOptions } from 'node:child_process'
-import { dirname, delimiter } from 'node:path'
+import { fork, type ChildProcess, type ForkOptions, type Serializable } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import { dirname, delimiter, extname, isAbsolute, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { InstalledRuntime } from './runtime-store.ts'
 
 const READY_PREFIX = 'dsh web: '
 const SHUTDOWN_MESSAGE = 'dsh/shutdown'
+const OPEN_SETTINGS_MESSAGE = 'dsh/desktop-open-settings'
+const OPEN_SETTINGS_RESULT_MESSAGE = 'dsh/desktop-open-settings-result'
 const DEFAULT_START_TIMEOUT_MS = 120_000
 const DEFAULT_STOP_TIMEOUT_MS = 7_000
 const DIAGNOSTIC_LIMIT = 24 * 1024
@@ -30,6 +33,13 @@ export interface StartBackendOptions {
   startTimeoutMs?: number
   stopTimeoutMs?: number
   forkProcess?: typeof fork
+  onOpenSettingsDocument?(path: string): Promise<void>
+}
+
+export interface OpenSettingsRequest {
+  type: typeof OPEN_SETTINGS_MESSAGE
+  requestId: string
+  path: string
 }
 
 class DiagnosticTail {
@@ -76,6 +86,54 @@ export function parseBackendUrl(line: string): string | undefined {
   }
 }
 
+export function parseOpenSettingsRequest(value: unknown): OpenSettingsRequest | undefined {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const input = value as Record<string, unknown>
+  if (input.type !== OPEN_SETTINGS_MESSAGE
+    || typeof input.requestId !== 'string'
+    || input.requestId.length === 0
+    || input.requestId.length > 128
+    || !/^[0-9A-Za-z-]+$/u.test(input.requestId)
+    || typeof input.path !== 'string'
+    || input.path.length === 0
+    || input.path.length > 32_768
+    || input.path.includes('\0')
+    || !isAbsolute(input.path)
+    || !['.yaml', '.yml', '.json'].includes(extname(input.path).toLowerCase())) return undefined
+  return { type: OPEN_SETTINGS_MESSAGE, requestId: input.requestId, path: input.path }
+}
+
+function sendSettingsResult(child: ChildProcess, requestId: string, ok: boolean, error?: string): void {
+  if (!child.connected) return
+  const message: Serializable = {
+    type: OPEN_SETTINGS_RESULT_MESSAGE,
+    requestId,
+    ok,
+    ...(error === undefined ? {} : { error }),
+  }
+  child.send(message, () => {})
+}
+
+export async function handleOpenSettingsRequest(
+  child: ChildProcess,
+  value: unknown,
+  openDocument: ((path: string) => Promise<void>) | undefined,
+): Promise<boolean> {
+  const request = parseOpenSettingsRequest(value)
+  if (request === undefined) return false
+  if (openDocument === undefined) {
+    sendSettingsResult(child, request.requestId, false, 'Desktop settings opener is unavailable')
+    return true
+  }
+  try {
+    await openDocument(request.path)
+    sendSettingsResult(child, request.requestId, true)
+  } catch (error: unknown) {
+    sendSettingsResult(child, request.requestId, false, error instanceof Error ? error.message : String(error))
+  }
+  return true
+}
+
 export function desktopEnvironment(runtime: InstalledRuntime, inherited: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const environment = { ...inherited }
   const path = [dirname(runtime.pnpmExecutable), dirname(runtime.nodeExecutable), inherited.Path ?? inherited.PATH]
@@ -87,11 +145,18 @@ export function desktopEnvironment(runtime: InstalledRuntime, inherited: NodeJS.
   return environment
 }
 
+export function backendArguments(runtime: InstalledRuntime, fileExists: (path: string) => boolean = existsSync): string[] {
+  const patch = join(runtime.directory, 'app', 'desktop.patch.yml')
+  return fileExists(patch)
+    ? ['web', '--patch', patch, '--port', '0']
+    : ['web', '--port', '0']
+}
+
 export async function startBackend(options: StartBackendOptions): Promise<RunningBackend> {
   const diagnostics = new DiagnosticTail()
   const child = (options.forkProcess ?? fork)(
     options.runtime.dshBin,
-    ['web', '--port', '0'],
+    backendArguments(options.runtime),
     {
       cwd: options.cwd,
       env: options.env,
@@ -100,10 +165,13 @@ export async function startBackend(options: StartBackendOptions): Promise<Runnin
       stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
     } satisfies ForkOptions,
   )
+  const onMessage = (message: unknown): void => { void handleOpenSettingsRequest(child, message, options.onOpenSettingsDocument) }
+  child.on('message', onMessage)
   let spawnError: Error | undefined
   const done = new Promise<BackendExit>((resolve) => {
     child.once('error', (error) => { spawnError = error })
     child.once('close', (exitCode, signal) => {
+      child.off('message', onMessage)
       resolve({
         exitCode,
         signal,

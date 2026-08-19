@@ -11,6 +11,7 @@ function release(version: string, shellRange = '>=0.1.0 <1.0.0'): RuntimeManifes
     schemaVersion: 1,
     runtimeProtocolVersion: 1,
     dshVersion: version,
+    runtimeRevision: 0,
     requiredShellRange: shellRange,
     platform: 'win32',
     arch: 'x64',
@@ -42,6 +43,12 @@ describe('runtime catalog', () => {
     expect(compatibleReleases(value, '0.1.0').map(item => item.dshVersion)).toEqual(['0.2.0', '0.1.0-rc.7'])
     expect(selectRuntime(value, '0.1.0', { mode: 'latest-compatible' }).dshVersion).toBe('0.2.0')
     expect(selectRuntime(value, '0.1.0', { mode: 'pinned', version: '0.1.0-rc.7' }).dshVersion).toBe('0.1.0-rc.7')
+  })
+
+  it('defaults legacy manifests to runtime revision zero', () => {
+    const legacy = release('0.2.0') as unknown as Record<string, unknown>
+    delete legacy.runtimeRevision
+    expect(catalog(legacy as unknown as RuntimeManifest).releases[0]?.runtimeRevision).toBe(0)
   })
 
   it('rejects pins outside the shell compatibility range', () => {

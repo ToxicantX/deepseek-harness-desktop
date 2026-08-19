@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self'; style-src 'unsafe-inline'; script-src 'none'">
+  <title>修复历史会话</title>
+  <style>
+    :root { color-scheme: light; font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif; background: #f5f6f8; color: #1d2028; }
+    * { box-sizing: border-box; letter-spacing: 0; }
+    [hidden] { display: none !important; }
+    html, body { width: 100%; min-width: 320px; min-height: 100%; margin: 0; }
+    body { min-height: 100vh; padding: 24px; }
+    main { width: min(720px, 100%); min-height: calc(100vh - 48px); margin: 0 auto; overflow: hidden; border: 1px solid #dfe2e8; border-radius: 8px; background: #fff; box-shadow: 0 10px 30px rgba(25, 30, 45, 0.08); }
+    header { display: flex; align-items: center; gap: 13px; padding: 20px 22px 17px; border-bottom: 1px solid #e7e9ee; }
+    header img { width: 40px; height: 40px; border-radius: 7px; }
+    h1 { margin: 0; font-size: 19px; font-weight: 650; }
+    h2 { margin: 0; font-size: 14px; font-weight: 650; }
+    section { padding: 20px 22px; border-bottom: 1px solid #e7e9ee; }
+    section:last-child { border-bottom: 0; }
+    label { display: block; margin-bottom: 7px; color: #4d5360; font-size: 12px; font-weight: 650; }
+    .session-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 10px; }
+    input[type="text"], button { min-height: 38px; border: 1px solid #cbd0da; border-radius: 6px; background: #fff; color: #1d2028; font: inherit; }
+    input[type="text"] { width: 100%; min-width: 0; padding: 0 11px; }
+    input[type="text"]:focus { outline: 2px solid rgba(50, 91, 190, 0.22); border-color: #325bbe; }
+    button { padding: 0 15px; cursor: pointer; font-weight: 650; }
+    button.primary { border-color: #325bbe; background: #325bbe; color: #fff; }
+    button.danger { border-color: #b83a42; color: #a22e36; }
+    button:hover:not(:disabled) { border-color: #325bbe; }
+    button:disabled, input:disabled { cursor: default; opacity: 0.56; }
+    .status { min-height: 20px; margin: 13px 0 0; color: #5e6573; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+    .status.error { color: #9a2e36; }
+    .status.success { color: #207044; }
+    .progress { position: relative; height: 3px; margin-top: 11px; overflow: hidden; background: #e7e9ee; }
+    .progress::after { position: absolute; width: 35%; height: 100%; background: #325bbe; content: ""; animation: loading 1s ease-in-out infinite; }
+    @keyframes loading { from { transform: translateX(-110%); } to { transform: translateX(310%); } }
+    .section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+    .section-heading span { color: #747b89; font-size: 11px; }
+    dl { display: grid; grid-template-columns: minmax(105px, 0.36fr) minmax(0, 1fr); margin: 0; border-top: 1px solid #edf0f3; }
+    dt, dd { min-width: 0; margin: 0; padding: 9px 0; border-bottom: 1px solid #edf0f3; font-size: 12px; line-height: 1.45; }
+    dt { color: #686e7c; }
+    dd { color: #242832; overflow-wrap: anywhere; }
+    .warning { margin-top: 15px; padding: 11px 12px; border-left: 3px solid #b77818; background: #fff8e9; color: #72521d; font-size: 12px; line-height: 1.5; }
+    .anomaly-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    .anomaly-table th, .anomaly-table td { padding: 8px 7px; border-bottom: 1px solid #e7e9ee; text-align: left; font-size: 11px; overflow-wrap: anywhere; }
+    .anomaly-table th { color: #686e7c; font-weight: 650; }
+    .anomaly-table th:first-child { width: 30%; }
+    .confirmation { display: flex; align-items: flex-start; gap: 9px; margin-top: 16px; color: #343944; font-size: 12px; line-height: 1.5; }
+    .confirmation input { flex: 0 0 auto; width: 16px; height: 16px; margin: 1px 0 0; accent-color: #325bbe; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+    .result-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+    .result-item { min-width: 0; border-left: 2px solid #3b8060; padding-left: 9px; }
+    .result-item span { display: block; color: #686e7c; font-size: 11px; }
+    .result-item strong { display: block; margin-top: 3px; font-size: 14px; overflow-wrap: anywhere; }
+    .backup-result { margin-top: 14px; color: #4d5360; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+    @media (max-width: 560px) {
+      body { padding: 0; }
+      main { min-height: 100vh; border: 0; border-radius: 0; box-shadow: none; }
+      .session-form { grid-template-columns: 1fr; }
+      .session-form button { width: 100%; }
+      .result-grid { grid-template-columns: 1fr 1fr; }
+      dl { grid-template-columns: 94px minmax(0, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <img src="icon.png" alt="">
+      <h1>修复历史会话</h1>
+    </header>
+
+    <section>
+      <div class="session-form">
+        <div>
+          <label for="repair-session-id">会话 ID</label>
+          <input id="repair-session-id" type="text" maxlength="256" autocomplete="off" spellcheck="false">
+        </div>
+        <button id="repair-inspect" class="primary" type="button">诊断会话</button>
+      </div>
+      <p id="repair-status" class="status" role="status" aria-live="polite"></p>
+      <div id="repair-progress" class="progress" aria-label="处理中" hidden></div>
+    </section>
+
+    <section id="repair-inspection" hidden>
+      <div class="section-heading"><h2>诊断结果</h2><span id="repairability"></span></div>
+      <dl>
+        <dt>会话 ID</dt><dd id="inspection-session-id"></dd>
+        <dt>Revision</dt><dd id="inspection-revision"></dd>
+        <dt>原始文件大小</dt><dd id="inspection-file-size"></dd>
+        <dt>事件数量</dt><dd id="inspection-event-count"></dd>
+        <dt>修复策略</dt><dd id="inspection-strategy"></dd>
+        <dt>完整保留事件</dt><dd id="inspection-preserves"></dd>
+        <dt>备份位置</dt><dd id="inspection-backup"></dd>
+        <dt>诊断说明</dt><dd id="inspection-reason"></dd>
+      </dl>
+      <div class="warning">修复期间该会话不可写。Runtime 会在替换前再次校验 revision；文件发生变化时修复会立即中止。</div>
+      <label class="confirmation" for="repair-confirm">
+        <input id="repair-confirm" type="checkbox">
+        <span>我已核对异常区间、事件保留状态与备份位置，并确认修复该非活动会话。</span>
+      </label>
+      <div class="actions"><button id="repair-apply" class="primary" type="button" disabled>修复会话</button></div>
+    </section>
+
+    <section id="repair-anomalies" hidden>
+      <div class="section-heading"><h2>异常区间</h2><span id="anomaly-count"></span></div>
+      <table class="anomaly-table">
+        <thead><tr><th>类型</th><th>事件位置</th><th>期望 seq</th><th>实际 seq</th><th>连续长度</th></tr></thead>
+        <tbody id="anomaly-rows"></tbody>
+      </table>
+    </section>
+
+    <section id="repair-result" hidden>
+      <div class="section-heading"><h2>修复完成</h2><span>历史界面已刷新</span></div>
+      <div class="result-grid">
+        <div class="result-item"><span>事件数量</span><strong id="result-event-count"></strong></div>
+        <div class="result-item"><span>最后 seq</span><strong id="result-last-seq"></strong></div>
+        <div class="result-item"><span>派生消息</span><strong id="result-message-count"></strong></div>
+        <div class="result-item"><span>旧 revision</span><strong id="result-previous-revision"></strong></div>
+        <div class="result-item"><span>新 revision</span><strong id="result-new-revision"></strong></div>
+      </div>
+      <p id="result-backup" class="backup-result"></p>
+      <div class="actions"><button id="repair-rollback" class="danger" type="button">从备份回滚</button></div>
+    </section>
+  </main>
+</body>
+</html>

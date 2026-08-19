@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 import type { ChildProcess, Serializable } from 'node:child_process'
 import { describe, expect, it, vi } from 'vitest'
-import { parseBackendUrl, startBackend, type StartBackendOptions } from '../src/backend.ts'
+import { backendArguments, parseBackendUrl, startBackend, type StartBackendOptions } from '../src/backend.ts'
 import type { InstalledRuntime } from '../src/runtime-store.ts'
 
 class FakeChild extends EventEmitter {
@@ -35,13 +35,14 @@ class FakeChild extends EventEmitter {
 }
 
 const runtime: InstalledRuntime = {
-  directory: 'C:\runtime',
-  nodeExecutable: 'C:\runtime\node\node.exe',
-  pnpmExecutable: 'C:\runtime\tools\pnpm.exe',
-  dshBin: 'C:\runtime\app\lib\bin.js',
+  directory: 'C:\\runtime',
+  nodeExecutable: 'C:\\runtime\\node\\node.exe',
+  pnpmExecutable: 'C:\\runtime\\tools\\pnpm.exe',
+  dshBin: 'C:\\runtime\\app\\lib\\bin.js',
   manifest: {
     schemaVersion: 1,
     runtimeProtocolVersion: 1,
+    runtimeRevision: 0,
     dshVersion: '0.1.0-rc.7',
     requiredShellRange: '>=0.1.0 <1.0.0',
     platform: 'win32',
@@ -55,9 +56,9 @@ const runtime: InstalledRuntime = {
 function options(child: FakeChild, overrides: Partial<StartBackendOptions> = {}): StartBackendOptions {
   return {
     runtime,
-    shutdownHook: 'C:\shell\shutdown-hook.js',
-    cwd: 'C:\home',
-    env: { Path: 'C:\runtime' },
+    shutdownHook: 'C:\\shell\\shutdown-hook.js',
+    cwd: 'C:\\home',
+    env: { Path: 'C:\\runtime' },
     forkProcess: vi.fn(() => child as unknown as ChildProcess) as unknown as typeof import('node:child_process').fork,
     ...overrides,
   }
@@ -68,6 +69,14 @@ describe('parseBackendUrl', () => {
     expect(parseBackendUrl('dsh web: http://127.0.0.1:43120')).toBe('http://127.0.0.1:43120/')
     expect(parseBackendUrl('dsh web: http://localhost:43120')).toBeUndefined()
     expect(parseBackendUrl('noise http://127.0.0.1:43120')).toBeUndefined()
+  })
+})
+
+describe('backendArguments', () => {
+  it('enables the desktop overlay only when the packaged patch exists', () => {
+    const patch = 'C:\\runtime\\app\\desktop.patch.yml'
+    expect(backendArguments(runtime, filename => filename === patch)).toEqual(['web', '--patch', patch, '--port', '0'])
+    expect(backendArguments(runtime, () => false)).toEqual(['web', '--port', '0'])
   })
 })
 
@@ -101,5 +110,40 @@ describe('startBackend', () => {
     const backend = await starting
     await backend.stop()
     expect(child.killCalls).toBe(1)
+  })
+
+  it('opens only a validated settings document and acknowledges success', async () => {
+    const child = new FakeChild()
+    const openDocument = vi.fn(async (_path: string) => {})
+    const starting = startBackend(options(child, { onOpenSettingsDocument: openDocument }))
+    child.stdout.write('dsh web: http://127.0.0.1:43122\n')
+    await starting
+    child.emit('message', { type: 'dsh/desktop-open-settings', requestId: 'valid-123', path: 'C:\\dsh\\settings.yaml' })
+    await vi.waitFor(() => { expect(openDocument).toHaveBeenCalledWith('C:\\dsh\\settings.yaml') })
+    expect(child.sent).toContainEqual({ type: 'dsh/desktop-open-settings-result', requestId: 'valid-123', ok: true })
+  })
+
+  it('rejects arbitrary paths before invoking the Shell opener', async () => {
+    const child = new FakeChild()
+    const openDocument = vi.fn(async (_path: string) => {})
+    const starting = startBackend(options(child, { onOpenSettingsDocument: openDocument }))
+    child.stdout.write('dsh web: http://127.0.0.1:43123\n')
+    await starting
+    child.emit('message', { type: 'dsh/desktop-open-settings', requestId: 'valid-123', path: '..\\settings.yaml' })
+    child.emit('message', { type: 'dsh/desktop-open-settings', requestId: 'valid-124', path: 'C:\\Windows\\System32\\cmd.exe' })
+    await Promise.resolve()
+    expect(openDocument).not.toHaveBeenCalled()
+    expect(child.sent).toEqual([])
+  })
+
+  it('returns an opener failure to the Runtime', async () => {
+    const child = new FakeChild()
+    const starting = startBackend(options(child, { onOpenSettingsDocument: async () => { throw new Error('no editor') } }))
+    child.stdout.write('dsh web: http://127.0.0.1:43124\n')
+    await starting
+    child.emit('message', { type: 'dsh/desktop-open-settings', requestId: 'valid-125', path: 'C:\\dsh\\settings.json' })
+    await vi.waitFor(() => {
+      expect(child.sent).toContainEqual({ type: 'dsh/desktop-open-settings-result', requestId: 'valid-125', ok: false, error: 'no editor' })
+    })
   })
 })

@@ -1,6 +1,7 @@
 param(
   [Parameter(Mandatory = $true)][string]$DshTag,
   [Parameter(Mandatory = $true)][string]$OutputDirectory,
+  [ValidateRange(1, 2147483647)][int]$RuntimeRevision = 1,
   [string]$RequiredShellRange = '>=0.1.0 <1.0.0'
 )
 
@@ -20,8 +21,12 @@ $Source = Join-Path $Work 'source'
 $Runtime = Join-Path $Work 'runtime'
 $ArchiveRuntime = Join-Path $Work 'archive-runtime'
 $Tools = Join-Path $Runtime 'tools'
-$Archive = Join-Path $OutputDirectory "dsh-runtime-$DshVersion-win-x64.zip"
-$Manifest = Join-Path $OutputDirectory "dsh-runtime-$DshVersion-win-x64.json"
+$RepositoryRoot = Split-Path $PSScriptRoot -Parent
+$RepairPluginSource = Join-Path $RepositoryRoot 'runtime/session-repair-plugin'
+$DesktopPatchSource = Join-Path $RepositoryRoot 'runtime/desktop.patch.yml'
+$ArtifactBase = "dsh-runtime-$DshVersion-desktop.$RuntimeRevision-win-x64"
+$Archive = Join-Path $OutputDirectory "$ArtifactBase.zip"
+$Manifest = Join-Path $OutputDirectory "$ArtifactBase.json"
 
 Remove-Item $Work -Recurse -Force -ErrorAction SilentlyContinue
 New-Item $Work -ItemType Directory -Force | Out-Null
@@ -36,13 +41,19 @@ if ($DeclaredVersion -ne $DshVersion) {
 }
 
 $App = Join-Path $Runtime 'app'
+$RepairPlugin = Join-Path $App 'plugins/session-repair'
 New-Item $App -ItemType Directory -Force | Out-Null
+if (-not (Test-Path (Join-Path $RepairPluginSource 'index.js'))) { throw 'Session repair runtime plugin is incomplete; index.js is missing.' }
+New-Item $RepairPlugin -ItemType Directory -Force | Out-Null
+Copy-Item (Join-Path $RepairPluginSource '*') $RepairPlugin -Recurse -Force
+Copy-Item $DesktopPatchSource (Join-Path $App 'desktop.patch.yml') -Force
 @"
 {
   "private": true,
   "type": "module",
   "dependencies": {
-    "@deepseek-ai/dsh": "$DshVersion"
+    "@deepseek-ai/dsh": "$DshVersion",
+    "@deepseek-ai/dsh-desktop-session-repair": "file:./plugins/session-repair"
   }
 }
 "@ | Set-Content (Join-Path $App 'package.json') -Encoding utf8NoBOM
@@ -126,6 +137,7 @@ node (Join-Path $PSScriptRoot 'write-runtime-manifest.mjs') `
   --version $DshVersion `
   --tag $DshTag `
   --commit $Commit `
+  --runtime-revision $RuntimeRevision `
   --shell-range $RequiredShellRange
 if ($LASTEXITCODE -ne 0) { throw 'Runtime manifest generation failed.' }
 

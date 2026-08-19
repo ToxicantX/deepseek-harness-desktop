@@ -16,6 +16,7 @@ function manifest(version: string): RuntimeManifest {
   return {
     schemaVersion: 1,
     runtimeProtocolVersion: 1,
+    runtimeRevision: 0,
     dshVersion: version,
     requiredShellRange: '>=0.1.0 <1.0.0',
     platform: 'win32',
@@ -68,6 +69,7 @@ function harness(state: RuntimeState, catalog: RuntimeCatalog) {
     environment: { DSH_HOME: process.cwd() },
     onView: view => { views.push(view) },
     onReady: vi.fn(async () => {}),
+    onOpenSettingsDocument: vi.fn(async () => {}),
   })
   return { controller, store, views }
 }
@@ -92,6 +94,30 @@ describe('RuntimeController', () => {
     expect(promote).toHaveBeenCalledWith(target.dshVersion)
     expect(vi.mocked(startBackend).mock.invocationCallOrder[0]).toBeLessThan(promote.mock.invocationCallOrder[0] ?? 0)
     expect(views.at(-1)).toMatchObject({ phase: 'ready', currentVersion: target.dshVersion })
+  })
+
+  it('restarts the previous revision when a same-version revision update fails', async () => {
+    const previous = manifest('0.1.0-rc.7')
+    const selected = {
+      ...previous,
+      runtimeRevision: 1,
+      archive: { ...previous.archive, sha256: 'c'.repeat(64) },
+    }
+    const catalog = { schemaVersion: 1 as const, generatedAt: new Date().toISOString(), releases: [selected] }
+    const { controller, store, views } = harness(
+      { schemaVersion: 1, preference: { mode: 'latest-compatible' }, currentVersion: previous.dshVersion },
+      catalog,
+    )
+    vi.spyOn(store, 'installed').mockResolvedValue(installed(previous))
+    vi.mocked(store.install).mockRejectedValue(new Error('revision publication failed'))
+    vi.mocked(startBackend).mockResolvedValue(started())
+
+    await controller.start()
+
+    expect(store.install).toHaveBeenCalledWith(selected, expect.any(Function))
+    expect(startBackend).toHaveBeenCalledWith(expect.objectContaining({ runtime: expect.objectContaining({ manifest: previous }) }))
+    expect(views.some(view => view.phase === 'starting' && view.message.includes('revision 0'))).toBe(true)
+    expect(views.at(-1)).toMatchObject({ phase: 'ready', currentVersion: previous.dshVersion })
   })
 
   it('falls back to the current compatible runtime when the target fails readiness', async () => {

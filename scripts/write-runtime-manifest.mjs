@@ -14,14 +14,17 @@ const version = argument('version')
 const tag = argument('tag')
 const commit = argument('commit')
 const shellRange = argument('shell-range')
+const runtimeRevision = Number(argument('runtime-revision'))
+if (!Number.isSafeInteger(runtimeRevision) || runtimeRevision < 1) throw new Error('runtime-revision must be a positive safe integer')
 const repository = process.env.GITHUB_REPOSITORY ?? 'ToxicantX/deepseek-harness-desktop'
-const releaseTag = `runtime-${tag}`
+const releaseTag = `runtime-${tag}-desktop.${runtimeRevision}`
 const contents = await readFile(archive)
 const sha256 = createHash('sha256').update(contents).digest('hex')
 const size = (await stat(archive)).size
 const manifest = {
   schemaVersion: 1,
   runtimeProtocolVersion: 1,
+  runtimeRevision,
   dshVersion: version,
   requiredShellRange: shellRange,
   platform: 'win32',

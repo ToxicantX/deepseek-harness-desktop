@@ -12,11 +12,12 @@ DeepSeek Harness 的 Windows 桌面壳。Shell 与 DSH runtime 独立版本化�
 
 - **Shell version** 表示窗口、下载器、版本管理和 runtime 协议版本，例如 `0.1.0`。
 - **DSH version** 对应一个上游 Git tag，例如 `0.1.0-rc.7` 对应 `dsh-v0.1.0-rc.7`。
-- Shell 声明最低 DSH 版本；每个 runtime manifest 声明 `requiredShellRange` 和 `runtimeProtocolVersion`。
+- **Runtime revision** 表示同一上游 DSH tag 的不可变桌面构建修订；旧 manifest 缺省为 revision `0`，后续重构建必须递增。
+- Shell 声明最低 DSH 版本；每个 runtime manifest 声明 `requiredShellRange`、`runtimeProtocolVersion` 和 `runtimeRevision`。
 - 默认策略是 `latest-compatible`：仅在已有预构建产物且兼容当前 Shell 的版本中选择最高版本。
 - 用户可以在 **Runtime → 管理 DSH 版本** 中固定具体版本。固定后不会自动切换到更高版本，直到恢复自动策略。
 
-上游刚发布 tag、桌面 runtime 尚未构建时，该版本不会进入 catalog，因此不会破坏现有安装。Shell 和 DSH 的 Release 通道互不覆盖：`shell-v*` 发布 Shell，`runtime-dsh-v*` 发布 runtime，`runtime-catalog` 提供机器可读目录。
+上游刚发布 tag、桌面 runtime 尚未构建时，该版本不会进入 catalog，因此不会破坏现有安装。Shell 和 DSH 的 Release 通道互不覆盖：`shell-v*` 发布 Shell，`runtime-dsh-v*-desktop.<revision>` 发布不可变 runtime，`runtime-catalog` 提供机器可读目录。
 
 ## 安装与更新
 
@@ -45,7 +46,7 @@ Git 来源的插件需要系统 `PATH` 中存在 Git。npm、本地目录和 tar
 
 ## Runtime 产物
 
-`.github/workflows/runtime-release.yml` 每天检查上游最新 `dsh-v*` tag，也支持手动指定 tag 和 Shell 兼容范围。工作流验证 tag 与 CLI 版本，安装 DeepSeek 官方发布的精确 `@deepseek-ai/dsh` 版本，加入经过校验的官方 Node 24 和独立 pnpm，运行真实 Web/插件/关闭冒烟，再发布 ZIP、manifest 和更新后的 catalog。
+`.github/workflows/runtime-release.yml` 每天检查上游最新 `dsh-v*` tag，也支持手动指定 tag、正整数 `runtime_revision` 和 Shell 兼容范围。工作流验证 tag 与 CLI 版本，安装 DeepSeek 官方发布的精确 `@deepseek-ai/dsh` 版本，加入经过校验的官方 Node 24 和独立 pnpm，运行真实 Web、配置打开、会话修复、插件及关闭冒烟，再发布 ZIP、manifest 和更新后的 catalog。同一 DSH 版本只允许以更高 revision 更新 catalog；release tag 和资产不会被覆盖。
 
 客户端不在用户机器上 clone 和构建完整上游仓库。这样仍以 Git tag 为版本真源，同时避免要求用户安装 Git、开发依赖和原生编译工具。
 
@@ -68,6 +69,7 @@ pnpm run dist
 ./scripts/build-runtime.ps1 `
   -DshTag dsh-v0.1.0-rc.7 `
   -OutputDirectory "$PWD/runtime-output" `
+  -RuntimeRevision 1 `
   -RequiredShellRange '>=0.1.0 <1.0.0'
 ```
 

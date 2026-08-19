@@ -12,11 +12,12 @@ Download the Windows x64 installer or portable build from the [Latest Release](h
 
 - **Shell version** identifies the window, downloader, version manager, and runtime protocol, for example `0.1.0`.
 - **DSH version** identifies an upstream Git tag; `0.1.0-rc.7` corresponds to `dsh-v0.1.0-rc.7`.
-- The Shell declares its minimum DSH version. Each runtime manifest declares `requiredShellRange` and `runtimeProtocolVersion`.
+- **Runtime revision** identifies an immutable desktop build of the same upstream DSH tag. Legacy manifests default to revision `0`; rebuilt artifacts must increment it.
+- The Shell declares its minimum DSH version. Each runtime manifest declares `requiredShellRange`, `runtimeProtocolVersion`, and `runtimeRevision`.
 - The default `latest-compatible` policy selects the highest version that has a prebuilt artifact and is compatible with the current Shell.
 - Users can pin an exact version under **Runtime → Manage DSH versions**. A pin remains selected until the user restores the automatic policy.
 
-A new upstream tag does not enter the catalog until its desktop runtime passes the build, compatibility, and smoke gates, so an unprepared version cannot break an existing installation. Release channels stay separate: `shell-v*` publishes the Shell, `runtime-dsh-v*` publishes runtimes, and `runtime-catalog` carries the machine-readable catalog.
+A new upstream tag does not enter the catalog until its desktop runtime passes the build, compatibility, and smoke gates, so an unprepared version cannot break an existing installation. Release channels stay separate: `shell-v*` publishes the Shell, `runtime-dsh-v*-desktop.<revision>` publishes immutable runtimes, and `runtime-catalog` carries the machine-readable catalog.
 
 ## Installation and updates
 
@@ -45,7 +46,7 @@ Git package specifications require system Git on `PATH`. npm, local-directory, a
 
 ## Runtime artifacts
 
-`.github/workflows/runtime-release.yml` checks the newest upstream `dsh-v*` tag each day and also accepts an explicit tag and Shell range. It verifies the tag and CLI version, installs the exact official `@deepseek-ai/dsh` release, adds a checksum-verified official Node 24 runtime and standalone pnpm, runs real Web, plugin, and shutdown smokes, and publishes the ZIP, manifest, and updated catalog.
+`.github/workflows/runtime-release.yml` checks the newest upstream `dsh-v*` tag each day and also accepts an explicit tag, positive `runtime_revision`, and Shell range. It verifies the tag and CLI version, installs the exact official `@deepseek-ai/dsh` release, adds a checksum-verified official Node 24 runtime and standalone pnpm, runs real Web, settings-open, session-repair, plugin, and shutdown smokes, and publishes the ZIP, manifest, and updated catalog. The catalog accepts only a higher revision for the same DSH version; release tags and assets are never overwritten.
 
 The client does not clone and build the complete upstream repository on the user's machine. Git tags remain the version source of truth without requiring users to install Git, development dependencies, or native build tools.
 
@@ -68,6 +69,7 @@ Build one complete runtime with:
 ./scripts/build-runtime.ps1 `
   -DshTag dsh-v0.1.0-rc.7 `
   -OutputDirectory "$PWD/runtime-output" `
+  -RuntimeRevision 1 `
   -RequiredShellRange '>=0.1.0 <1.0.0'
 ```
 

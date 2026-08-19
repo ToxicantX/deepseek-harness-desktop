@@ -18,6 +18,7 @@ export type RuntimePhase = 'checking' | 'downloading' | 'starting' | 'ready' | '
 
 export interface RuntimeVersionView {
   version: string
+  runtimeRevision: number
   requiredShellRange: string
   sourceTag: string
   installed: boolean
@@ -30,6 +31,7 @@ export interface RuntimeView {
   shellVersion: string
   minimumDshVersion: string
   currentVersion?: string
+  currentRuntimeRevision?: number
   preference: RuntimePreference
   versions: RuntimeVersionView[]
   cachedCatalog: boolean
@@ -46,6 +48,7 @@ export interface RuntimeControllerOptions {
   environment?: NodeJS.ProcessEnv
   onView(view: RuntimeView): void
   onReady(url: URL, runtime: InstalledRuntime, cliDirectory: string): Promise<void>
+  onOpenSettingsDocument(path: string): Promise<void>
 }
 
 export class RuntimeController {
@@ -57,10 +60,12 @@ export class RuntimeController {
   private readonly environment: NodeJS.ProcessEnv
   private readonly onView: (view: RuntimeView) => void
   private readonly onReady: (url: URL, runtime: InstalledRuntime, cliDirectory: string) => Promise<void>
+  private readonly onOpenSettingsDocument: (path: string) => Promise<void>
   private catalog: RuntimeCatalog | undefined
   private state: RuntimeState = { schemaVersion: 1, preference: { mode: 'latest-compatible' } }
   private backend: RunningBackend | undefined
   private expectedStop = false
+  private currentRuntimeRevision: number | undefined
   private installedVersions = new Set<string>()
   private phase: RuntimePhase = 'checking'
   private message = '正在检查可用的 DSH 版本'
@@ -78,6 +83,7 @@ export class RuntimeController {
     this.environment = options.environment ?? process.env
     this.onView = options.onView
     this.onReady = options.onReady
+    this.onOpenSettingsDocument = options.onOpenSettingsDocument
   }
 
   start(): Promise<void> {
@@ -105,6 +111,7 @@ export class RuntimeController {
       ? []
       : compatibleReleases(this.catalog, this.shellVersion).map(release => ({
           version: release.dshVersion,
+          runtimeRevision: release.runtimeRevision,
           requiredShellRange: release.requiredShellRange,
           sourceTag: release.source.tag,
           installed: this.installedVersions.has(release.dshVersion),
@@ -116,6 +123,7 @@ export class RuntimeController {
       shellVersion: this.shellVersion,
       minimumDshVersion: MINIMUM_DSH_VERSION,
       ...(this.state.currentVersion === undefined ? {} : { currentVersion: this.state.currentVersion }),
+      ...(this.currentRuntimeRevision === undefined ? {} : { currentRuntimeRevision: this.currentRuntimeRevision }),
       preference: this.state.preference,
       versions,
       cachedCatalog: this.cachedCatalog,
@@ -143,13 +151,26 @@ export class RuntimeController {
       const selected = selectRuntime(loaded.catalog, this.shellVersion, this.state.preference)
       selectedVersion = selected.dshVersion
       target = await this.store.installed(selected.dshVersion)
-      if (target === undefined || target.manifest.archive.sha256 !== selected.archive.sha256) {
-        this.update('downloading', `正在安装 DSH ${selected.dshVersion}`)
-        target = await this.store.install(selected, progress => {
-          this.progress = progress
-          this.emit()
-        })
-        this.installedVersions.add(selected.dshVersion)
+      if (target === undefined
+        || target.manifest.runtimeRevision !== selected.runtimeRevision
+        || target.manifest.archive.sha256 !== selected.archive.sha256) {
+        const previous = target
+        await this.stopBackend()
+        this.update('downloading', `正在安装 DSH ${selected.dshVersion} desktop revision ${selected.runtimeRevision}`)
+        try {
+          target = await this.store.install(selected, progress => {
+            this.progress = progress
+            this.emit()
+          })
+          this.installedVersions.add(selected.dshVersion)
+        } catch (error: unknown) {
+          if (previous !== undefined && isReleaseCompatible(previous.manifest, this.shellVersion)) {
+            const message = `DSH desktop revision 更新未完成，继续使用 revision ${previous.manifest.runtimeRevision}`
+            await this.launch(previous, message)
+            return
+          }
+          throw error
+        }
       }
       await this.launch(target)
       return
@@ -188,10 +209,12 @@ export class RuntimeController {
       shutdownHook: this.shutdownHook,
       cwd: home,
       env: desktopEnvironment(runtime, this.environment),
+      onOpenSettingsDocument: this.onOpenSettingsDocument,
     })
     this.backend = backend
     this.expectedStop = false
     this.state = await this.store.promote(runtime.manifest.dshVersion)
+    this.currentRuntimeRevision = runtime.manifest.runtimeRevision
     const cliDirectory = await prepareCliShim(runtime, this.userData)
     this.update('ready', `DSH ${runtime.manifest.dshVersion} 已启动`)
     await this.onReady(backend.url, runtime, cliDirectory)

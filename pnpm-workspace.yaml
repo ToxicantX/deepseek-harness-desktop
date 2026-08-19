@@ -6,3 +6,5 @@ allowBuilds:
   '@pnpm/exe': true
   # Selects the packaged 7-Zip binary used by Electron's Windows installer tooling.
   electron-winstaller: true
+  # Provides MoveFileExW write-through publication for Runtime repair tests and archives.
+  koffi: true
