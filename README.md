@@ -54,6 +54,12 @@ dsh plugin --profile web remove <package-name>
 
 Git 来源的插件需要系统 `PATH` 中存在 Git。npm、本地目录和 tarball spec 不要求全局 Node 或 pnpm。
 
+## MCP 管理
+
+通过 **Runtime → 管理 MCP** 打开桌面 MCP 管理器。管理器按真实 Cordis Patch 顺序扫描当前 Web profile 声明的 Bundle、Profile Patch、`$DSH_HOME/cordis.patch.yml` 与桌面 Runtime overlay，识别官方 `@deepseek-ai/dsh-mcp-client` 单 Server 配置和 `dsh-mcp-lens` 多 Server 聚合配置；同时只读扫描 `%USERPROFILE%\.codex\config.toml` 中的本机 MCP。列表支持搜索、DSH 接入状态筛选和配置详情；环境变量与 HTTP Header 仅显示键名，URL 用户信息、查询参数及疑似密钥参数不会发送到渲染进程。
+
+启用或禁用需要稳定的 Cordis entry `id`。Shell 只在拥有该条目最高控制权的 Profile 或 Home 用户 Patch 中写入 `disabled` 覆盖，不修改已安装插件包或 MCP Server 文件；写入前校验所有有效层的配置 revision，并使用同目录临时文件原子替换。Codex MCP 的开关表示是否接入 DSH：接入时将该 Server 的执行或连接配置写入 DSH Profile Patch，之后只切换 DSH Entry；Codex `config.toml` 始终保持原样。若更高优先级的桌面 Runtime overlay 锁定状态，条目仍可查看但不能从低优先级层切换；动态 `!!js` 状态会明确显示为“动态”。切换期间 Runtime 会停止并自动恢复，失败时也会尝试恢复。MCP Lens 由一个 Cordis entry 承载，其开关会同时控制该 Lens 条目下显示的全部 Server。
+
 ## Runtime 产物
 
 `.github/workflows/runtime-release.yml` 每天检查上游最新 `dsh-v*` tag，也支持手动指定 tag、正整数 `runtime_revision` 和 Shell 兼容范围。工作流验证 tag 与 CLI 版本，安装 DeepSeek 官方发布的精确 `@deepseek-ai/dsh` 版本，加入经过校验的官方 Node 24 和独立 pnpm，运行真实 Web、配置打开、会话修复、插件及关闭冒烟，再发布 ZIP、manifest 和更新后的 catalog。同一 DSH 版本只允许以更高 revision 更新 catalog；release tag 和资产不会被覆盖。

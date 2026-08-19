@@ -54,6 +54,12 @@ dsh plugin --profile web remove <package-name>
 
 Git package specifications require system Git on `PATH`. npm, local-directory, and tarball specifications need no global Node or pnpm installation.
 
+## MCP management
+
+Open the desktop MCP manager from **Runtime → Manage MCP**. It scans Bundle patches declared by the current Web profile, the profile patch, `$DSH_HOME/cordis.patch.yml`, and the desktop Runtime overlay in actual Cordis patch order. It recognizes one-server `@deepseek-ai/dsh-mcp-client` entries and multi-server `dsh-mcp-lens` aggregate entries, and also discovers local MCPs from `%USERPROFILE%\.codex\config.toml` read-only. The list supports search, DSH connection-state filters, and configuration details. Environment and HTTP header values stay in the main process; URLs lose credentials and query strings, and likely secret arguments are redacted before any data reaches the renderer.
+
+Enabling or disabling requires a stable Cordis entry `id`. The Shell writes only a `disabled` override in the highest controlling profile or home user patch and never changes an installed plugin package or MCP server files. It checks the revision across all effective layers before using a same-directory temporary file and atomic replacement. A Codex MCP switch controls whether that server is connected to DSH: the initial connection writes its execution or connection settings to the DSH profile patch, and later toggles affect only the DSH entry. Codex `config.toml` always remains unchanged. An entry remains visible but cannot be toggled from a lower layer when the higher-priority desktop Runtime overlay locks its state; a dynamic `!!js` state is labeled explicitly. The Runtime stops for the mutation and restarts afterward, including recovery attempts after failures. MCP Lens uses one Cordis entry, so its switch controls every server shown under that Lens entry together.
+
 ## Runtime artifacts
 
 `.github/workflows/runtime-release.yml` checks the newest upstream `dsh-v*` tag each day and also accepts an explicit tag, positive `runtime_revision`, and Shell range. It verifies the tag and CLI version, installs the exact official `@deepseek-ai/dsh` release, adds a checksum-verified official Node 24 runtime and standalone pnpm, runs real Web, settings-open, session-repair, plugin, and shutdown smokes, and publishes the ZIP, manifest, and updated catalog. The catalog accepts only a higher revision for the same DSH version; release tags and assets are never overwritten.

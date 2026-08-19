@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MCP 管理</title>
+  <style>
+    :root { color-scheme: light; font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif; color: #202124; background: #f5f6f8; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 420px; background: #f5f6f8; }
+    button, input { font: inherit; letter-spacing: 0; }
+    button { min-height: 34px; padding: 6px 13px; border: 1px solid #c8ccd2; border-radius: 6px; background: #fff; color: #202124; cursor: pointer; }
+    button:hover:not(:disabled) { background: #eef1f4; }
+    button:focus-visible, input:focus-visible { outline: 2px solid #1769d2; outline-offset: 2px; }
+    button:disabled, input:disabled { cursor: default; opacity: .55; }
+    [hidden] { display: none !important; }
+    main { width: min(100%, 920px); margin: 0 auto; padding: 22px 26px 28px; }
+    header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+    h1 { margin: 0; font-size: 22px; font-weight: 650; letter-spacing: 0; }
+    h2, h3 { margin: 0; letter-spacing: 0; }
+    #mcp-count { color: #626870; font-size: 13px; white-space: nowrap; }
+    .toolbar { display: grid; grid-template-columns: minmax(180px, 1fr) auto auto; gap: 10px; align-items: center; padding-bottom: 16px; border-bottom: 1px solid #d9dde3; }
+    .search { width: 100%; min-height: 36px; padding: 7px 10px; border: 1px solid #b9bec6; border-radius: 6px; background: #fff; color: #202124; }
+    .segments { display: inline-grid; grid-auto-flow: column; grid-auto-columns: minmax(68px, auto); border: 1px solid #b9bec6; border-radius: 6px; overflow: hidden; background: #fff; }
+    .segments button { min-height: 34px; border: 0; border-right: 1px solid #d4d8de; border-radius: 0; padding-inline: 12px; }
+    .segments button:last-child { border-right: 0; }
+    .segments button[aria-pressed="true"] { background: #e8f0fb; color: #1259a7; font-weight: 650; }
+    .status-band { min-height: 58px; padding: 13px 0; display: grid; gap: 8px; align-content: center; }
+    #mcp-status { min-height: 20px; font-size: 13px; color: #4c5158; overflow-wrap: anywhere; }
+    #mcp-status[data-kind="success"] { color: #1f6b3a; }
+    #mcp-status[data-kind="error"] { color: #a92323; }
+    progress { width: 100%; height: 6px; accent-color: #1769d2; }
+    #mcp-list { border-top: 1px solid #d9dde3; }
+    .mcp-row { border-bottom: 1px solid #d9dde3; }
+    .mcp-summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; align-items: center; min-height: 82px; padding: 13px 0; }
+    .mcp-main { min-width: 0; display: grid; gap: 6px; }
+    .mcp-title-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .mcp-name { font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
+    .badge { display: inline-flex; align-items: center; min-height: 21px; padding: 2px 7px; border: 1px solid #cfd4da; border-radius: 5px; background: #fff; color: #50565e; font-size: 11px; line-height: 1.2; }
+    .badge.enabled { border-color: #a8cfb4; background: #edf8f0; color: #21683a; }
+    .badge.disabled { border-color: #d6b7b7; background: #fff3f3; color: #973434; }
+    .badge.dynamic { border-color: #d5c28e; background: #fff9e9; color: #765b13; }
+    .mcp-meta { color: #676d75; font-size: 12px; overflow-wrap: anywhere; }
+    .mcp-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
+    .details-button { min-width: 74px; }
+    .switch { position: relative; display: inline-flex; align-items: center; width: 42px; height: 24px; flex: 0 0 auto; }
+    .switch input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+    .switch-track { width: 42px; height: 24px; border: 1px solid #aeb4bc; border-radius: 12px; background: #c8cdd3; transition: background .12s ease, border-color .12s ease; }
+    .switch-track::after { content: ""; display: block; width: 18px; height: 18px; margin: 2px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / 22%); transition: transform .12s ease; }
+    .switch input:checked + .switch-track { border-color: #1769d2; background: #1769d2; }
+    .switch input:checked + .switch-track::after { transform: translateX(18px); }
+    .switch input:focus-visible + .switch-track { outline: 2px solid #1769d2; outline-offset: 2px; }
+    .switch input:disabled + .switch-track { opacity: .5; }
+    .mcp-details { padding: 0 0 16px; }
+    .details-inner { border-left: 3px solid #cbd4df; padding: 3px 0 3px 14px; display: grid; gap: 14px; }
+    .endpoint { display: grid; gap: 7px; }
+    .endpoint + .endpoint { padding-top: 13px; border-top: 1px solid #e0e3e7; }
+    .endpoint h3 { font-size: 13px; font-weight: 650; overflow-wrap: anywhere; }
+    .detail-grid { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 5px 12px; margin: 0; font-size: 12px; }
+    .detail-grid dt { color: #70767e; }
+    .detail-grid dd { min-width: 0; margin: 0; color: #33373d; font-family: Consolas, "Microsoft YaHei UI", monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+    #mcp-empty { margin: 0; padding: 48px 16px; text-align: center; color: #737982; font-size: 13px; border-bottom: 1px solid #d9dde3; }
+    @media (max-width: 680px) {
+      body { min-width: 360px; }
+      main { padding: 18px 16px 24px; }
+      .toolbar { grid-template-columns: 1fr auto; }
+      .search { grid-column: 1 / -1; }
+      .mcp-summary { grid-template-columns: 1fr; gap: 10px; }
+      .mcp-actions { justify-content: space-between; }
+    }
+  </style>
+</head>
+<body>
+  <main id="mcp-manager-page">
+    <header>
+      <h1>MCP 管理</h1>
+      <span id="mcp-count">0 个 MCP</span>
+    </header>
+    <section class="toolbar" aria-label="筛选 MCP">
+      <input id="mcp-search" class="search" type="search" maxlength="160" autocomplete="off" spellcheck="false" placeholder="搜索名称、Provider 或地址" aria-label="搜索 MCP">
+      <div class="segments" role="group" aria-label="状态筛选">
+        <button id="mcp-filter-all" type="button" aria-pressed="true">全部</button>
+        <button id="mcp-filter-enabled" type="button" aria-pressed="false">DSH 已启用</button>
+        <button id="mcp-filter-disabled" type="button" aria-pressed="false">DSH 未启用</button>
+      </div>
+      <button id="mcp-refresh" type="button">刷新</button>
+    </section>
+    <div class="status-band">
+      <div id="mcp-status" role="status" aria-live="polite">正在读取 MCP 配置...</div>
+      <progress id="mcp-progress" hidden></progress>
+    </div>
+    <section aria-label="MCP 列表">
+      <div id="mcp-list" role="list"></div>
+      <p id="mcp-empty" hidden>没有识别到本地 MCP 配置</p>
+    </section>
+  </main>
+</body>
+</html>

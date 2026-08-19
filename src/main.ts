@@ -18,6 +18,8 @@ import {
 } from 'electron'
 import { MINIMUM_DSH_VERSION, type RuntimePreference } from './catalog.ts'
 import { openPluginTerminal } from './cli-shell.ts'
+import { McpManager, type McpList } from './mcp-manager.ts'
+import { mutateMcpWithRuntime } from './mcp-restart.ts'
 import { PluginManager } from './plugin-manager.ts'
 import { PluginRestartCoordinator } from './plugin-restart.ts'
 import { RuntimeController, type RuntimeView } from './runtime-controller.ts'
@@ -31,8 +33,9 @@ const moduleDirectory = dirname(fileURLToPath(import.meta.url))
 const setupPage = join(app.getAppPath(), 'assets', 'runtime.html')
 const repairPage = join(app.getAppPath(), 'assets', 'session-repair.html')
 const pluginManagerPage = join(app.getAppPath(), 'assets', 'plugin-manager.html')
+const mcpManagerPage = join(app.getAppPath(), 'assets', 'mcp-manager.html')
 const shellUpdatePage = join(app.getAppPath(), 'assets', 'shell-update.html')
-const allowedLocalPages = new Set([setupPage, repairPage, pluginManagerPage, shellUpdatePage])
+const allowedLocalPages = new Set([setupPage, repairPage, pluginManagerPage, mcpManagerPage, shellUpdatePage])
 const preload = join(moduleDirectory, 'preload.cjs')
 const shutdownHook = app.isPackaged
   ? join(process.resourcesPath, 'app.asar.unpacked', 'lib', 'shutdown-hook.js')
@@ -43,10 +46,13 @@ let tray: Tray | undefined
 let managerWindow: BrowserWindow | undefined
 let repairWindow: BrowserWindow | undefined
 let pluginWindow: BrowserWindow | undefined
+let mcpWindow: BrowserWindow | undefined
 let updateWindow: BrowserWindow | undefined
 let latestUpdateProgress: ShellUpdateProgress | undefined
 let controller: RuntimeController | undefined
 let pluginManager: PluginManager | undefined
+let mcpManager: McpManager | undefined
+let mcpMutationActive = false
 const pluginRestartCoordinator = new PluginRestartCoordinator()
 let updater: ShellUpdater | undefined
 let latestView: RuntimeView | undefined
@@ -61,18 +67,19 @@ function runtimeRoot(): string {
   return join(local, 'DeepSeek Harness', 'runtime-manager')
 }
 
-function createWindow(options: { utility?: 'manager' | 'repair' | 'plugin' | 'update' } = {}): BrowserWindow {
+function createWindow(options: { utility?: 'manager' | 'repair' | 'plugin' | 'mcp' | 'update' } = {}): BrowserWindow {
   const utility = options.utility
   const manager = utility === 'manager'
   const repair = utility === 'repair'
   const plugin = utility === 'plugin'
+  const mcp = utility === 'mcp'
   const update = utility === 'update'
   const window = new BrowserWindow({
     ...(update && mainWindow !== undefined ? { parent: mainWindow, modal: true } : {}),
-    width: manager ? 700 : repair ? 760 : plugin ? 740 : update ? 480 : 1240,
-    height: manager ? 720 : repair ? 780 : plugin ? 700 : update ? 250 : 820,
-    minWidth: manager || repair ? 480 : plugin || update ? 420 : 820,
-    minHeight: manager ? 560 : plugin ? 520 : update ? 220 : 600,
+    width: manager ? 700 : repair ? 760 : plugin ? 740 : mcp ? 860 : update ? 480 : 1240,
+    height: manager ? 720 : repair ? 780 : plugin ? 700 : mcp ? 760 : update ? 250 : 820,
+    minWidth: manager || repair ? 480 : plugin ? 420 : mcp ? 600 : update ? 420 : 820,
+    minHeight: manager ? 560 : plugin ? 520 : mcp ? 560 : update ? 220 : 600,
     ...(update ? { closable: false, minimizable: false, maximizable: false, resizable: false } : {}),
     show: false,
     autoHideMenuBar: utility !== undefined,
@@ -257,6 +264,20 @@ async function openPluginManager(): Promise<void> {
   await pluginWindow.loadFile(pluginManagerPage)
 }
 
+async function openMcpManager(): Promise<void> {
+  if (controller?.installedRuntime() === undefined) {
+    await dialog.showMessageBox({ type: 'warning', title: 'MCP 管理', message: 'DSH Runtime 尚未安装。' })
+    return
+  }
+  if (mcpWindow !== undefined && !mcpWindow.isDestroyed()) {
+    mcpWindow.focus()
+    return
+  }
+  mcpWindow = createWindow({ utility: 'mcp' })
+  mcpWindow.on('closed', () => { mcpWindow = undefined })
+  await mcpWindow.loadFile(mcpManagerPage)
+}
+
 async function showAbout(): Promise<void> {
   const runtimeVersion = latestView?.currentVersion === undefined
     ? '尚未启动'
@@ -300,6 +321,41 @@ function pluginService(event: IpcMainInvokeEvent): PluginManager {
   return pluginManager
 }
 
+function mcpService(event: IpcMainInvokeEvent): McpManager {
+  if (mcpWindow === undefined || mcpWindow.isDestroyed() || event.sender !== mcpWindow.webContents) {
+    throw new Error('MCP 管理请求来源无效')
+  }
+  if (mcpManager === undefined) throw new Error('MCP 管理器尚未初始化')
+  return mcpManager
+}
+
+async function setMcpEnabled(event: IpcMainInvokeEvent, value: unknown): Promise<McpList> {
+  const service = mcpService(event)
+  const runtimeController = controller
+  if (runtimeController === undefined) throw new Error('DSH Runtime 控制器尚未初始化')
+  if (mcpMutationActive) throw new Error('另一个 MCP 操作正在进行')
+  if (pluginManager?.current() !== undefined) throw new Error('插件操作正在进行，请完成后再切换 MCP')
+  mcpMutationActive = true
+  try {
+    return await mutateMcpWithRuntime({
+      async pause() {
+        if (quitting) throw new Error('应用正在退出，无法切换 MCP')
+        if (mainWindow !== undefined) await showSetup(mainWindow)
+        await runtimeController.pauseForPluginMutation()
+      },
+      async mutate() {
+        if (quitting) throw new Error('应用正在退出，无法切换 MCP')
+        return service.setEnabled(value)
+      },
+      async retry() {
+        if (!quitting) await runtimeController.retry()
+      },
+    })
+  } finally {
+    mcpMutationActive = false
+  }
+}
+
 function installMenu(): void {
   const template: MenuItemConstructorOptions[] = [
     {
@@ -327,6 +383,11 @@ function installMenu(): void {
           label: '管理插件',
           enabled: controller?.installedRuntime() !== undefined,
           click: () => { void openPluginManager() },
+        },
+        {
+          label: '管理 MCP',
+          enabled: controller?.installedRuntime() !== undefined,
+          click: () => { void openMcpManager() },
         },
         {
           label: '打开插件管理终端',
@@ -400,6 +461,14 @@ async function startApplication(): Promise<void> {
       void controller.retry().catch(logFatalError)
     },
   })
+  mcpManager = new McpManager({
+    home,
+    codexConfigPath: join(homedir(), '.codex', 'config.toml'),
+    overlayPaths() {
+      const runtime = controller?.installedRuntime()
+      return runtime === undefined ? [] : [join(runtime.directory, 'app', 'desktop.patch.yml')]
+    },
+  })
   updater = new ShellUpdater(mainWindow, async () => {
     pluginManager?.dispose()
     await controller?.stop()
@@ -442,11 +511,18 @@ ipcMain.handle('runtime:recover-plugin-preset', async (event) => {
   if (mainWindow !== undefined) await showSetup(mainWindow)
   await runtimeController.recoverPluginPreset()
 })
+ipcMain.handle('mcp-manager:list', async (event) => {
+  return mcpService(event).list()
+})
+ipcMain.handle('mcp-manager:set-enabled', async (event, value: unknown) => {
+  return setMcpEnabled(event, value)
+})
 ipcMain.handle('plugin-manager:list', async (event) => {
   return pluginService(event).list()
 })
 ipcMain.handle('plugin-manager:start', async (event, value: unknown) => {
   const service = pluginService(event)
+  if (mcpMutationActive) throw new Error('MCP 操作正在进行，请完成后再管理插件')
   const runtimeController = controller
   if (runtimeController === undefined) throw new Error('DSH Runtime 控制器尚未初始化')
   return service.start(value, async () => {
