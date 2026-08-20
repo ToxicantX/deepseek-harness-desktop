@@ -365,14 +365,12 @@ function initializePluginManagerPage(): void {
       main.append(name, meta)
       const actions = document.createElement('div')
       actions.className = 'plugin-actions'
-      if (latestVersion !== undefined) {
-        const updateButton = document.createElement('button')
-        updateButton.type = 'button'
-        updateButton.textContent = '更新至 ' + latestVersion
-        updateButton.disabled = busy
-        updateButton.addEventListener('click', () => { void runOperation({ action: 'update', packageName: entry.name }, '更新 ' + entry.name) })
-        actions.append(updateButton)
-      }
+      const updateButton = document.createElement('button')
+      updateButton.type = 'button'
+      updateButton.textContent = latestVersion === undefined ? '更新' : '更新至 ' + latestVersion
+      updateButton.disabled = busy
+      updateButton.addEventListener('click', () => { void runOperation({ action: 'update', packageName: entry.name }, '更新 ' + entry.name) })
+      actions.append(updateButton)
       const removeButton = document.createElement('button')
       removeButton.type = 'button'
       removeButton.className = 'danger'

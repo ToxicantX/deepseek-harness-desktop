@@ -41,13 +41,13 @@ Runtime 默认位于：
 
 默认桌宠是在 Electron 透明桌面窗口内播放的原创二次元精灵角色，使用本地透明 PNG 为待机、思考、说话、审批、成功、错误、不可用和拖动提供独立逐帧动作；资源缺失、尺寸不符或解码失败时自动回退原创程序化 Canvas 机器人。桌宠不加载网络资源或打开 Web 页面。Windows 启用“减少动态效果”时，各状态停在对应代表帧。
 
-通过 **文件 → 桌宠设置 → 小 / 标准 / 大** 调整角色大小。三个档位分别使用 72、96 和 128 CSS 像素，Canvas 始终保留 192×192 backing；切换时同步更新透明窗口、原生点击 shape、气泡锚点和拖动边界，并把选择保存到应用 `userData` 下的 `desktop-pet.json`。标准档保持原有 96 像素视觉大小。
+通过 **文件 → 桌宠设置 → 小 / 标准 / 大** 调整角色大小。三个档位分别使用 72、96 和 128 CSS 像素，Canvas 始终保留 192×192 backing；切换时同步更新透明窗口、原生点击 shape、气泡锚点和拖动边界，并把选择保存到应用 `userData` 下的 `desktop-pet.json`。标准档保持原有 96 像素视觉大小。左键单击角色会打开主窗口，右键菜单可打开主窗口、调整大小或隐藏桌宠。回复流式输出时显示气泡，输出结束后停留 5 秒自动关闭；审批气泡在请求解决前持续显示。
 
 旧的本地静态图片和动态 GIF 皮肤入口、解码器及 renderer 数据 URL 通道已移除；升级后 Shell 会清理遗留的 `desktop-pet-skin.png`、`desktop-pet-skin.gif` 及对应 `.tmp` 中间文件。
 
 ## 插件
 
-通过 **Runtime → 管理插件** 打开桌面插件管理器。管理器会列出当前 Web profile 中已安装的插件，并支持安装和移除。安装时请输入受控的 npm package spec，或 GitHub HTTPS / `github:` spec；例如 `@scope/plugin@1.2.3`、`https://github.com/owner/repo.git` 或 `github:owner/repo`。后台确认 npm 插件存在可执行的新版本后，列表才会显示对应的更新按钮；Git 来源、固定版本、网络失败或无法确认更新状态时不显示。管理器会显示每项操作的进度和日志。
+通过 **Runtime → 管理插件** 打开桌面插件管理器。管理器会列出当前 Web profile 中已安装的插件，并支持安装和移除。安装时请输入受控的 npm package spec，或 GitHub HTTPS / `github:` spec；例如 `@scope/plugin@1.2.3`、`https://github.com/owner/repo.git` 或 `github:owner/repo`。管理器会优先从 pnpm 列表读取已安装版本；列表缺失版本时，再从受控的已安装包清单回退读取。所有直接声明的插件都会显示更新按钮；后台确认 npm 插件存在兼容新版本时，按钮会同时标明目标版本。网络失败或无法确认最新版本不会阻止手动更新。管理器会显示每项操作的进度和日志。
 
 安装、更新或移除前，Shell 会先停止 Runtime，避免 Web/HMR 在 `node_modules` 变更过程中加载不完整文件。操作成功后 Runtime 自动重启；操作失败时 Shell 也会恢复 Runtime。关闭并重新打开插件管理器不会丢失正在执行的操作或待完成的 Runtime 重启，窗口会继续显示同一操作的进度和日志。若插件加载失败导致 Web 无法就绪，由 Shell 独立提供的插件管理器仍保持可用，可移除或更新有问题的插件并再次重启 Runtime。
 

@@ -3,6 +3,7 @@ import {
   DesktopPetController,
   MAX_PET_FRAME_BYTES,
   MAX_PET_TEXT_BYTES,
+  PET_REPLY_HOLD_MS,
   clampPetBounds,
   defaultPetBounds,
   parsePetDecision,
@@ -200,6 +201,58 @@ describe('DesktopPetController', () => {
     sockets[0]?.message(turnEvent('foreground', 'turn/start', 2))
     sockets[0]?.message(turnEvent('foreground', 'turn/end', 2))
     expect(controller.snapshot().thinking).toBeUndefined()
+  })
+
+  it('holds a completed reply for five seconds while approvals remain persistent', async () => {
+    vi.useFakeTimers()
+    const { controller, sockets } = createController()
+    try {
+      controller.setActiveSession('foreground')
+      controller.start('http://127.0.0.1:43120')
+      const socket = sockets[0]
+      if (socket === undefined) throw new Error('socket was not created')
+      socket.open()
+
+      socket.message(assistantChunk('foreground', 'streaming reply'))
+      await vi.advanceTimersByTimeAsync(PET_REPLY_HOLD_MS * 2)
+      expect(controller.snapshot().reply).toMatchObject({ text: 'streaming reply', streaming: true })
+
+      socket.message(turnEvent('foreground', 'turn/end'))
+      expect(controller.snapshot().reply?.streaming).toBe(false)
+      socket.message(approvalRequested('foreground', 'approval-persistent'))
+      await vi.advanceTimersByTimeAsync(PET_REPLY_HOLD_MS - 1)
+      expect(controller.snapshot().reply?.text).toBe('streaming reply')
+      expect(controller.snapshot().approval?.approvalId).toBe('approval-persistent')
+
+      await vi.advanceTimersByTimeAsync(1)
+      expect(controller.snapshot().reply).toBeUndefined()
+      expect(controller.snapshot().approval?.approvalId).toBe('approval-persistent')
+    } finally {
+      controller.stop()
+      vi.clearAllTimers()
+      vi.useRealTimers()
+    }
+  })
+
+  it('restarts the hold period when a newer final reply arrives', async () => {
+    vi.useFakeTimers()
+    const { controller, sockets } = createController()
+    try {
+      controller.setActiveSession('foreground')
+      controller.start('http://127.0.0.1:43120')
+      sockets[0]?.open()
+      sockets[0]?.message(assistantMessage('foreground', [{ type: 'text', text: 'first' }]))
+      await vi.advanceTimersByTimeAsync(PET_REPLY_HOLD_MS - 1)
+      sockets[0]?.message(assistantMessage('foreground', [{ type: 'text', text: 'second' }], 2))
+      await vi.advanceTimersByTimeAsync(PET_REPLY_HOLD_MS - 1)
+      expect(controller.snapshot().reply?.text).toBe('second')
+      await vi.advanceTimersByTimeAsync(1)
+      expect(controller.snapshot().reply).toBeUndefined()
+    } finally {
+      controller.stop()
+      vi.clearAllTimers()
+      vi.useRealTimers()
+    }
   })
 
   it('drops duplicate and out-of-order foreground reply events by sequence', () => {

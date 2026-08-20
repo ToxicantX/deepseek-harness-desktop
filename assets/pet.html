@@ -9,15 +9,17 @@
 </head>
 <body>
   <main id="pet-page" data-state="idle" data-size="standard" aria-label="DSH 桌面宠物">
-    <section id="bubble" class="bubble" data-interactive hidden aria-live="polite" aria-atomic="true">
+    <section id="bubble" class="bubble" data-kind="reply" data-interactive hidden aria-live="polite" aria-atomic="true">
       <header class="bubble-header">
+        <span class="bubble-mark" aria-hidden="true"></span>
         <span id="session-label" class="session-label">DeepSeek Harness</span>
         <button id="open-main" class="open-main" type="button">打开</button>
-        <button id="hide-pet" class="icon-button" type="button" title="隐藏宠物" aria-label="隐藏宠物">X</button>
+        <button id="hide-pet" class="icon-button" type="button" title="隐藏宠物" aria-label="隐藏宠物">×</button>
       </header>
-      <p id="status-text" class="status-text"></p>
-      <p id="reply-text" class="reply-text"></p>
+      <p id="status-text" class="status-text" hidden></p>
+      <p id="reply-text" class="reply-text" hidden></p>
       <div id="approval" class="approval" hidden>
+        <span class="approval-kicker">需要审批</span>
         <strong id="approval-tool" class="approval-tool"></strong>
         <p id="approval-reason" class="approval-reason"></p>
         <p id="approval-count" class="approval-count"></p>
@@ -27,7 +29,7 @@
         </div>
       </div>
     </section>
-    <div id="mascot" class="mascot" data-interactive title="拖动宠物；单击打开 DSH" aria-label="DSH 宠物，单击打开主窗口" role="button" tabindex="0">
+    <div id="mascot" class="mascot" data-interactive title="拖动宠物；左键打开；右键显示菜单" aria-label="DSH 宠物，左键打开主窗口，右键显示菜单" role="button" tabindex="0">
       <canvas id="pet-character" width="192" height="192" aria-hidden="true"></canvas>
       <span id="state-indicator" class="state-indicator" aria-hidden="true"></span>
     </div>

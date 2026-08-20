@@ -97,21 +97,30 @@ function render(value: unknown): void {
   const pending = latest.approval
   const bubble = element<HTMLElement>('bubble')
   const approvalPanel = element<HTMLElement>('approval')
+  const replyElement = element<HTMLElement>('reply-text')
+  const statusElement = element<HTMLElement>('status-text')
+  const approvalReason = element<HTMLElement>('approval-reason')
+  const approvalCount = element<HTMLElement>('approval-count')
   const reply = clipped(latest.reply, 600)
   const status = clipped(latest.status, 120)
   document.body.dataset.state = latest.mode
   element('pet-page').dataset.state = latest.mode
   character?.setMode(latest.mode)
   element('session-label').textContent = pending?.sessionLabel ?? latest.sessionLabel ?? 'DeepSeek Harness'
-  element('status-text').textContent = status
-  element('reply-text').textContent = pending === undefined ? reply : ''
+  statusElement.textContent = status
+  statusElement.hidden = status.length === 0
+  replyElement.textContent = pending === undefined ? reply : ''
+  replyElement.hidden = pending !== undefined || reply.length === 0
   approvalPanel.hidden = pending === undefined
   element('approval-tool').textContent = pending?.toolName ?? ''
-  element('approval-reason').textContent = pending?.reason ?? ''
-  element('approval-count').textContent = pending === undefined || pending.pendingCount <= 1 ? '' : '待处理 ' + String(pending.pendingCount) + ' 项'
+  approvalReason.textContent = pending?.reason ?? ''
+  approvalReason.hidden = pending?.reason === undefined || pending.reason.length === 0
+  approvalCount.textContent = pending === undefined || pending.pendingCount <= 1 ? '' : '待处理 ' + String(pending.pendingCount) + ' 项'
+  approvalCount.hidden = pending === undefined || pending.pendingCount <= 1
   element<HTMLButtonElement>('allow-approval').disabled = pending?.responding ?? false
   element<HTMLButtonElement>('reject-approval').disabled = pending?.responding ?? false
-  bubble.hidden = pending === undefined && reply.length === 0 && status.length === 0
+  bubble.dataset.kind = pending === undefined ? 'reply' : 'approval'
+  bubble.hidden = pending === undefined && reply.length === 0
   if (bubble.hidden) ipcRenderer.send('pet:set-shape', null)
   else {
     const bounds = bubble.getBoundingClientRect()
@@ -133,7 +142,9 @@ async function respond(outcome: ApprovalOutcome): Promise<void> {
   try {
     await ipcRenderer.invoke('pet:respond', pending.id, outcome)
   } catch {
-    element('status-text').textContent = '审批已失效，请打开 DSH 查看'
+    const status = element<HTMLElement>('status-text')
+    status.textContent = '审批已失效，请打开 DSH 查看'
+    status.hidden = false
   }
 }
 
@@ -153,6 +164,7 @@ window.addEventListener('DOMContentLoaded', () => {
   element('open-main').addEventListener('click', () => { ipcRenderer.send('pet:focus-main') })
   element('hide-pet').addEventListener('click', () => { ipcRenderer.send('pet:hide') })
   const mascot = element<HTMLElement>('mascot')
+  mascot.addEventListener('contextmenu', event => { event.preventDefault() })
   let drag: { pointerId: number; startX: number; startY: number; moved: boolean } | undefined
   mascot.addEventListener('pointerdown', event => {
     if (event.button !== 0) return
@@ -188,7 +200,14 @@ window.addEventListener('DOMContentLoaded', () => {
     endActiveDrag(drag.pointerId)
     updateInteraction(-1, -1)
   }
-  mascot.addEventListener('pointerup', event => { finishDrag(event, true) })
+  mascot.addEventListener('pointerup', event => {
+    if (event.button === 2) {
+      event.preventDefault()
+      ipcRenderer.send('pet:context-menu')
+      return
+    }
+    finishDrag(event, true)
+  })
   mascot.addEventListener('pointercancel', event => { finishDrag(event, false) })
   mascot.addEventListener('lostpointercapture', event => {
     if (endActiveDrag(event.pointerId) !== undefined) updateInteraction(-1, -1)

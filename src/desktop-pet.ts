@@ -7,6 +7,7 @@ export const MAX_PET_TOOL_NAME_BYTES = 256
 export const MAX_PET_IDENTIFIER_LENGTH = 256
 export const MAX_PET_FRAME_BYTES = 64 * 1024
 export const MAX_PENDING_APPROVALS = 64
+export const PET_REPLY_HOLD_MS = 5_000
 
 const PET_EVENTS_PATH = '/api/events.mux'
 const PET_RESPOND_PATH = '/api/respond'
@@ -373,6 +374,7 @@ export class DesktopPetController {
   private readonly responseControllers = new Map<string, AbortController>()
   private socket: SocketHandle | undefined
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined
+  private replyTimer: ReturnType<typeof setTimeout> | undefined
   private origin: URL | undefined
   private activeSessionId: string | undefined
   private activeDraftKey: string | undefined
@@ -427,6 +429,7 @@ export class DesktopPetController {
     this.activeLastSeq = undefined
     this.activeDraftKey = undefined
     this.activeDraft = { text: '', truncated: false }
+    this.clearReplyTimer()
     this.reply = undefined
     this.thinking = false
     this.emit()
@@ -449,6 +452,7 @@ export class DesktopPetController {
     this.stopped = true
     this.generation += 1
     this.clearReconnectTimer()
+    this.clearReplyTimer()
     this.disposeSocket()
     for (const controller of this.responseControllers.values()) controller.abort()
     this.responseControllers.clear()
@@ -674,6 +678,7 @@ export class DesktopPetController {
     if (frame.event.kind === 'turn-start') {
       this.activeDraftKey = undefined
       this.activeDraft = { text: '', truncated: false }
+      this.clearReplyTimer()
       this.reply = undefined
       this.thinking = true
       this.emit()
@@ -681,11 +686,16 @@ export class DesktopPetController {
     }
     if (frame.event.kind === 'turn-end') {
       this.thinking = false
+      if (this.reply?.streaming === true) {
+        this.reply = { ...this.reply, streaming: false }
+        this.scheduleReplyClear()
+      }
       this.emit()
       return
     }
     const key = String(frame.event.turn) + ':' + String(frame.event.step)
     if (frame.event.kind === 'text-delta') {
+      this.clearReplyTimer()
       this.thinking = false
       if (this.activeDraftKey !== key) {
         this.activeDraftKey = key
@@ -701,9 +711,28 @@ export class DesktopPetController {
     this.activeDraftKey = key
     this.activeDraft = { text: frame.event.text, truncated: frame.event.truncated }
     this.reply = { text: frame.event.text, streaming: false, truncated: frame.event.truncated }
+    this.scheduleReplyClear()
     this.thinking = false
     this.message = undefined
     this.emit()
+  }
+
+  private scheduleReplyClear(): void {
+    this.clearReplyTimer()
+    this.replyTimer = setTimeout(() => {
+      this.replyTimer = undefined
+      if (this.reply?.streaming === false) {
+        this.reply = undefined
+        this.emit()
+      }
+    }, PET_REPLY_HOLD_MS)
+    this.replyTimer.unref()
+  }
+
+  private clearReplyTimer(): void {
+    if (this.replyTimer === undefined) return
+    clearTimeout(this.replyTimer)
+    this.replyTimer = undefined
   }
 
   private handleApprovalRequested(frame: Extract<PetMuxFrame, { type: 'approval/requested' }>): void {

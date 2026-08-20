@@ -189,6 +189,28 @@ function stringField(value: unknown, label: string, limit: number): string | und
   return boundedText(value, label, limit)
 }
 
+function versionField(value: unknown, label: string): string | undefined {
+  const version = stringField(value, label, 256)
+  return version === undefined ? undefined : valid(version) ?? version
+}
+
+async function readInstalledPluginVersion(
+  profilePath: string,
+  name: string,
+  readText: (filename: string) => Promise<string>,
+): Promise<string | undefined> {
+  try {
+    const manifestPath = join(profilePath, 'node_modules', ...name.split('/'), 'package.json')
+    const text = await readText(manifestPath)
+    if (Buffer.byteLength(text, 'utf8') > MAX_LIST_BYTES) return undefined
+    const manifest = object(JSON.parse(text) as unknown, 'installed plugin manifest')
+    if (stringField(manifest.name, 'installed plugin name', MAX_PACKAGE_NAME) !== name) return undefined
+    return versionField(manifest.version, 'installed plugin version')
+  } catch {
+    return undefined
+  }
+}
+
 async function parsePluginList(
   stdout: string,
   expectedProfilePath: string,
@@ -209,24 +231,25 @@ async function parsePluginList(
   const dependencies = manifest.dependencies === undefined ? {} : object(manifest.dependencies, 'plugin dependencies')
   const names = Object.keys(dependencies)
   if (names.length > MAX_ENTRIES) throw new Error('plugin dependency list is too large')
-  const entries = names.map((name): PluginEntry => {
+  const entries: PluginEntry[] = []
+  for (const name of names) {
     validatePackageName(name)
     const dependencySpec = boundedText(dependencies[name], 'plugin dependency spec', MAX_PACKAGE_SPEC)
     let spec: string | undefined
     try { spec = validatePackageSpec(dependencySpec) } catch { spec = undefined }
     const detailValue = listed[name]
     const detail = detailValue === undefined ? undefined : object(detailValue, 'listed plugin')
-    const version = detail === undefined ? undefined : stringField(detail.version, 'plugin version', 256)
-    return {
+    const listedVersion = detail === undefined ? undefined : versionField(detail.version, 'plugin version')
+    const version = listedVersion ?? await readInstalledPluginVersion(profilePath, name, readText)
+    entries.push({
       name,
       ...(spec === undefined ? {} : { spec }),
       ...(version === undefined ? {} : { version }),
-    }
-  })
+    })
+  }
   entries.sort((left, right) => left.name.localeCompare(right.name))
   return { entries }
 }
-
 
 export function parsePluginUpdates(stdout: string): PluginUpdateList {
   if (stdout.trim().length === 0) return { entries: [] }
@@ -238,10 +261,12 @@ export function parsePluginUpdates(stdout: string): PluginUpdateList {
   for (const name of names) {
     validatePackageName(name)
     const detail = object(parsed[name], 'plugin update')
-    const currentVersion = stringField(detail.current, 'current plugin version', 256)
-    const latestVersion = stringField(detail.wanted ?? detail.latest, 'latest plugin version', 256)
-    if (currentVersion === undefined || latestVersion === undefined) continue
-    if (valid(currentVersion) === null || valid(latestVersion) === null || !gt(latestVersion, currentVersion)) continue
+    const currentValue = stringField(detail.current, 'current plugin version', 256)
+    const latestValue = stringField(detail.wanted ?? detail.latest, 'latest plugin version', 256)
+    if (currentValue === undefined || latestValue === undefined) continue
+    const currentVersion = valid(currentValue)
+    const latestVersion = valid(latestValue)
+    if (currentVersion === null || latestVersion === null || !gt(latestVersion, currentVersion)) continue
     entries.push({ name, currentVersion, latestVersion })
   }
   entries.sort((left, right) => left.name.localeCompare(right.name))

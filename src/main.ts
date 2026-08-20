@@ -196,6 +196,26 @@ async function setPetSize(size: PetSize): Promise<void> {
   }
 }
 
+function showPetContextMenu(event: IpcMainEvent): void {
+  const pet = petSender(event)
+  const owner = BrowserWindow.fromWebContents(event.sender)
+  if (pet === undefined || owner === null || owner.isDestroyed()) return
+  Menu.buildFromTemplate([
+    { label: '打开 DeepSeek Harness', click: showMainWindow },
+    { type: 'separator' },
+    {
+      label: '桌宠大小',
+      submenu: [
+        { label: '小', type: 'radio', checked: pet.size === 'small', click: () => { void setPetSize('small') } },
+        { label: '标准', type: 'radio', checked: pet.size === 'standard', click: () => { void setPetSize('standard') } },
+        { label: '大', type: 'radio', checked: pet.size === 'large', click: () => { void setPetSize('large') } },
+      ],
+    },
+    { type: 'separator' },
+    { label: '隐藏桌宠', click: () => { void setPetEnabled(false) } },
+  ]).popup({ window: owner })
+}
+
 async function stopPet(): Promise<void> {
   activePetSession = undefined
   petEvents?.stop()
@@ -882,6 +902,7 @@ ipcMain.on('pet:drag-move', (event, value: unknown) => {
 })
 ipcMain.on('pet:drag-end', (event) => { petSender(event)?.endDrag() })
 ipcMain.on('pet:focus-main', (event) => { if (petSender(event) !== undefined) showMainWindow() })
+ipcMain.on('pet:context-menu', showPetContextMenu)
 ipcMain.on('pet:hide', (event) => { if (petSender(event) !== undefined) void setPetEnabled(false) })
 ipcMain.handle('shell-skins:list', event => skinService(event).list())
 ipcMain.handle('shell-skins:preview', async (event, skinId: unknown, index: unknown) => skinService(event).preview(String(skinId), Number(index)))

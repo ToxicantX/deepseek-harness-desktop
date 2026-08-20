@@ -41,15 +41,17 @@ const runtime: InstalledRuntime = {
   dshBin: 'C:/runtime/app/bin.js',
 }
 
+type ReadText = (filename: string) => Promise<string>
+
 function harness(
-  readText = vi.fn(async () => JSON.stringify({ dependencies: { 'example-plugin': 'github:owner/example-plugin' } })),
+  readText: ReadText = vi.fn(async () => JSON.stringify({ dependencies: { 'example-plugin': 'github:owner/example-plugin' } })),
   removeFile = vi.fn(async () => {}),
   onOperationFinished = vi.fn(),
 ): {
   manager: PluginManager
   children: FakeProcess[]
   calls: { command: string; args: readonly string[]; options: PluginProcessOptions }[]
-  readText: typeof readText
+  readText: ReadText
   removeFile: typeof removeFile
   onOperationFinished: typeof onOperationFinished
 } {
@@ -111,7 +113,7 @@ describe('plugin package validation', () => {
 describe('plugin update parsing', () => {
   it('returns only confirmed semver upgrades and prefers the actionable wanted version', () => {
     expect(parsePluginUpdates(JSON.stringify({
-      'update-plugin': { current: '1.2.3', wanted: '1.4.0', latest: '2.0.0' },
+      'update-plugin': { current: 'v1.2.3', wanted: 'v1.4.0', latest: '2.0.0' },
       current: { current: '2.0.0', wanted: '2.0.0', latest: '2.0.0' },
       downgrade: { current: '3.0.0', wanted: '2.5.0', latest: '2.5.0' },
       git: { current: 'main', wanted: 'next', latest: 'next' },
@@ -138,7 +140,7 @@ describe('PluginManager', () => {
       path: 'C:/Users/test/.dsh/profiles/web',
       dependencies: {
         'example-plugin': {
-          version: '1.2.3',
+          version: 'v1.2.3',
           resolved: 'https://codeload.github.com/owner/example-plugin/tar.gz/abc',
           path: 'C:/secret/node_modules/example-plugin',
         },
@@ -161,6 +163,29 @@ describe('PluginManager', () => {
     })
     expect(value.calls[0]?.options.env.DSH_HOME).toBe('C:/Users/test/.dsh')
     expect(value.calls[0]?.options.env.PATH).toContain('C:/runtime/tools')
+  })
+
+  it('falls back to the installed package manifest when pnpm list omits a version', async () => {
+    const profileManifest = join('C:/Users/test/.dsh/profiles/web', 'package.json')
+    const installedManifest = join('C:/Users/test/.dsh/profiles/web', 'node_modules', '@scope', 'example-plugin', 'package.json')
+    const value = harness(vi.fn(async (filename: string) => {
+      if (filename === profileManifest) return JSON.stringify({ dependencies: { '@scope/example-plugin': 'github:owner/example-plugin' } })
+      if (filename === installedManifest) return JSON.stringify({ name: '@scope/example-plugin', version: '1.2.3' })
+      throw new Error('unexpected file: ' + filename)
+    }))
+    const pending = value.manager.list()
+    value.children[0]?.stdout.write(JSON.stringify([{
+      path: 'C:/Users/test/.dsh/profiles/web',
+      dependencies: { '@scope/example-plugin': { resolved: 'https://codeload.github.com/owner/example-plugin/tar.gz/abc' } },
+    }]))
+    value.children[0]?.close(0)
+
+    await expect(pending).resolves.toEqual({ entries: [{
+      name: '@scope/example-plugin',
+      spec: 'github:owner/example-plugin',
+      version: '1.2.3',
+    }] })
+    expect(value.readText).toHaveBeenCalledWith(installedManifest)
   })
 
   it('checks actionable updates with the bundled pnpm and accepts its outdated exit code', async () => {

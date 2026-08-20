@@ -396,7 +396,7 @@ export class PetWindowController {
       window.setIgnoreMouseEvents(false)
       return
     }
-    const forced = this.state.approval !== undefined || (this.state.reply?.length ?? 0) > 0 || (this.state.status?.length ?? 0) > 0
+    const forced = this.state.approval !== undefined || (this.state.reply?.length ?? 0) > 0
     window.setIgnoreMouseEvents(!(forced || this.hoverInteractive || this.dragState !== undefined), { forward: true })
   }
 
