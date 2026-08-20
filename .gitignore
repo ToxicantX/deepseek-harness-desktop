@@ -5,3 +5,4 @@ coverage/
 *.log
 .env
 .runtime-fixture/
+.playwright-cli/
