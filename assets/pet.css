@@ -20,11 +20,16 @@ html, body {
 button { font: inherit; letter-spacing: 0; }
 
 #pet-page {
+  --pet-size: 96px;
   position: relative;
   width: 100%;
   height: 100%;
   color: #20242b;
 }
+
+#pet-page[data-size="small"] { --pet-size: 72px; }
+#pet-page[data-size="standard"] { --pet-size: 96px; }
+#pet-page[data-size="large"] { --pet-size: 128px; }
 
 .bubble {
   position: absolute;
@@ -139,8 +144,8 @@ button:focus-visible, .mascot:focus-visible { outline: 3px solid #f2b705; outlin
   right: 8px;
   bottom: 8px;
   z-index: 1;
-  width: 96px;
-  height: 96px;
+  width: var(--pet-size);
+  height: var(--pet-size);
   cursor: grab;
   touch-action: none;
   user-select: none;
@@ -148,21 +153,16 @@ button:focus-visible, .mascot:focus-visible { outline: 3px solid #f2b705; outlin
 }
 
 .mascot:active { cursor: grabbing; }
-.mascot canvas, .mascot img {
+.mascot canvas {
   width: 100%;
   height: 100%;
   display: block;
+  image-rendering: pixelated;
   pointer-events: none;
 }
-.mascot canvas { image-rendering: pixelated; }
-.mascot img {
-  object-fit: contain;
-  border-radius: 8px;
-  filter: drop-shadow(0 7px 7px rgba(10, 20, 35, 0.25));
-}
-[data-custom-skin="false"] .state-indicator { display: none; }
 
 .state-indicator {
+  display: none;
   position: absolute;
   right: 3px;
   bottom: 7px;
@@ -173,21 +173,11 @@ button:focus-visible, .mascot:focus-visible { outline: 3px solid #f2b705; outlin
   background: #6d7784;
 }
 
-[data-custom-skin="true"][data-state="idle"] .mascot { animation: pet-idle 2.6s ease-in-out infinite; }
-[data-custom-skin="true"][data-state="thinking"] .mascot, [data-custom-skin="true"][data-state="speaking"] .mascot { animation: pet-bob 900ms ease-in-out infinite; }
-[data-custom-skin="true"][data-state="approval"] .mascot { animation: pet-alert 650ms ease-in-out infinite; }
-[data-custom-skin="true"][data-state="success"] .mascot { animation: pet-success 700ms ease-out 1; }
-[data-custom-skin="true"][data-state="error"] .mascot { animation: pet-error 420ms ease-in-out 2; }
 [data-state="thinking"] .state-indicator { background: #d89b00; }
 [data-state="speaking"] .state-indicator, [data-state="success"] .state-indicator { background: #198754; }
 [data-state="approval"] .state-indicator { background: #ef7d00; }
 [data-state="error"] .state-indicator, [data-state="unavailable"] .state-indicator { background: #c63737; }
 
-@keyframes pet-idle { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
-@keyframes pet-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
-@keyframes pet-success { 0% { transform: scale(0.92); } 65% { transform: scale(1.06); } 100% { transform: scale(1); } }
-@keyframes pet-error { 0%, 100% { transform: translateX(0); } 35% { transform: translateX(-4px); } 65% { transform: translateX(4px); } }
-@keyframes pet-alert { 0%, 100% { transform: rotate(0); } 35% { transform: rotate(-3deg); } 65% { transform: rotate(3deg); } }
 
 @media (prefers-color-scheme: dark) {
   #pet-page { color: #f3f5f8; }
@@ -199,9 +189,6 @@ button:focus-visible, .mascot:focus-visible { outline: 3px solid #f2b705; outlin
   .open-main { border-color: #6c7683; }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .mascot { animation: none !important; }
-}
 
 @media (forced-colors: active) {
   .mascot canvas {
@@ -213,11 +200,10 @@ button:focus-visible, .mascot:focus-visible { outline: 3px solid #f2b705; outlin
   }
   .bubble, .bubble::after { border: 1px solid CanvasText; background: Canvas; color: CanvasText; box-shadow: none; }
   .command, .open-main { border: 1px solid ButtonText; forced-color-adjust: auto; }
-  [data-custom-skin="false"] .state-indicator {
+  .state-indicator {
     display: block;
     border-color: Canvas;
     background: Highlight;
     forced-color-adjust: auto;
   }
-  .state-indicator { border-color: Canvas; }
 }

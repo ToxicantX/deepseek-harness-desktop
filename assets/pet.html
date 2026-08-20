@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'none'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self'; style-src 'self'; script-src 'none'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <title>DSH 桌面宠物</title>
   <link rel="stylesheet" href="pet.css">
 </head>
 <body>
-  <main id="pet-page" data-state="idle" data-custom-skin="false" aria-label="DSH 桌面宠物">
+  <main id="pet-page" data-state="idle" data-size="standard" aria-label="DSH 桌面宠物">
     <section id="bubble" class="bubble" data-interactive hidden aria-live="polite" aria-atomic="true">
       <header class="bubble-header">
         <span id="session-label" class="session-label">DeepSeek Harness</span>
@@ -29,7 +29,6 @@
     </section>
     <div id="mascot" class="mascot" data-interactive title="拖动宠物；单击打开 DSH" aria-label="DSH 宠物，单击打开主窗口" role="button" tabindex="0">
       <canvas id="pet-character" width="192" height="192" aria-hidden="true"></canvas>
-      <img id="pet-skin" src="icon.png" alt="" hidden>
       <span id="state-indicator" class="state-indicator" aria-hidden="true"></span>
     </div>
   </main>

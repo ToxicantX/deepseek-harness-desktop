@@ -26,6 +26,7 @@ import { McpManager, type McpList } from './mcp-manager.ts'
 import { mutateMcpWithRuntime } from './mcp-restart.ts'
 import { PersonalizationManager } from './personalization-manager.ts'
 import { parsePetWindowShape, PetWindowController, type PetRendererState as PetWindowState } from './pet-window.ts'
+import type { PetSize } from './pet-size.ts'
 import { PluginManager } from './plugin-manager.ts'
 import { PluginRestartCoordinator } from './plugin-restart.ts'
 import { RuntimeController, type RuntimeView } from './runtime-controller.ts'
@@ -77,7 +78,6 @@ let petWindow: PetWindowController | undefined
 let petEvents: PetEventController | undefined
 let disposePetEvents: (() => void) | undefined
 let activePetSession: string | undefined
-let petSkinMutationActive = false
 let latestView: RuntimeView | undefined
 let cliDirectory: string | undefined
 let trustedOrigin: string | undefined
@@ -185,40 +185,13 @@ async function setPetEnabled(enabled: boolean): Promise<void> {
   installTrayMenu()
 }
 
-async function choosePetSkin(): Promise<void> {
-  const skin = petWindow
-  if (skin === undefined || petSkinMutationActive) return
-  petSkinMutationActive = true
-  try {
-    const options = {
-      title: '选择静态图片或动态 GIF',
-      properties: ['openFile' as const],
-      filters: [{ name: '宠物皮肤', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }],
-    }
-    const parent = mainWindow === undefined || mainWindow.isDestroyed() ? undefined : mainWindow
-    const selected = parent === undefined
-      ? await dialog.showOpenDialog(options)
-      : await dialog.showOpenDialog(parent, options)
-    const sourcePath = selected.filePaths[0]
-    if (!selected.canceled && sourcePath !== undefined) await skin.setCustomSkin(sourcePath)
-  } catch (error: unknown) {
-    dialog.showErrorBox('无法更新个性化皮肤', error instanceof Error ? error.message : String(error))
+async function setPetSize(size: PetSize): Promise<void> {
+  const pet = petWindow
+  if (pet === undefined) return
+  try { await pet.setSize(size) }
+  catch (error: unknown) {
+    dialog.showErrorBox('无法调整桌宠大小', error instanceof Error ? error.message : String(error))
   } finally {
-    petSkinMutationActive = false
-    installMenu()
-  }
-}
-
-async function resetPetSkin(): Promise<void> {
-  const skin = petWindow
-  if (skin === undefined || petSkinMutationActive) return
-  petSkinMutationActive = true
-  try {
-    await skin.resetCustomSkin()
-  } catch (error: unknown) {
-    dialog.showErrorBox('无法恢复默认皮肤', error instanceof Error ? error.message : String(error))
-  } finally {
-    petSkinMutationActive = false
     installMenu()
   }
 }
@@ -676,10 +649,11 @@ function installMenu(): void {
       submenu: [
         { label: '个性化设置...', click: () => { void openPersonalization() } },
         {
-          label: '个性化皮肤',
+          label: '桌宠设置',
           submenu: [
-            { label: '选择静态图片或动态 GIF...', enabled: petWindow !== undefined && !petSkinMutationActive, click: () => { void choosePetSkin() } },
-            { label: '恢复默认皮肤', enabled: petWindow?.customSkinConfigured === true && !petSkinMutationActive, click: () => { void resetPetSkin() } },
+            { label: '小', type: 'radio', checked: petWindow?.size === 'small', enabled: petWindow !== undefined, click: () => { void setPetSize('small') } },
+            { label: '标准', type: 'radio', checked: petWindow?.size === 'standard', enabled: petWindow !== undefined, click: () => { void setPetSize('standard') } },
+            { label: '大', type: 'radio', checked: petWindow?.size === 'large', enabled: petWindow !== undefined, click: () => { void setPetSize('large') } },
           ],
         },
         { label: '设置', enabled: latestView?.phase === 'ready', click: () => { void openSettings() } },
@@ -895,7 +869,7 @@ ipcMain.on('pet:interaction', (event, value: unknown) => { petSender(event)?.set
 ipcMain.on('pet:set-shape', (event, value: unknown) => {
   const pet = petSender(event)
   if (pet === undefined) return
-  try { pet.setBubbleShape(parsePetWindowShape(value)) }
+  try { pet.setBubbleShape(parsePetWindowShape(value, pet.size)) }
   catch { /* Invalid renderer geometry cannot expand the native pet window region. */ }
 })
 ipcMain.on('pet:drag-start', (event, value: unknown) => {

@@ -14,9 +14,6 @@ importers:
       extract-zip:
         specifier: 2.0.1
         version: 2.0.1
-      omggif:
-        specifier: 1.0.10
-        version: 1.0.10
       react:
         specifier: 18.3.1
         version: 18.3.1
@@ -48,9 +45,6 @@ importers:
       '@types/node':
         specifier: 24.10.13
         version: 24.10.13
-      '@types/omggif':
-        specifier: 1.0.5
-        version: 1.0.5
       '@types/react':
         specifier: 18.3.31
         version: 18.3.31
@@ -1099,9 +1093,6 @@ packages:
   '@types/node@24.10.13':
     resolution: {integrity: sha512-oH72nZRfDv9lADUBSo104Aq7gPHpQZc4BTx38r9xf9pg5LfP6EzSyH2n7qFmmxRQXh7YlUXODcYsg6PuTDSxGg==}
 
-  '@types/omggif@1.0.5':
-    resolution: {integrity: sha512-gDQJflz1rOgEcUXkMAl80bDGN46f5mp8GbcM5dyvq+zsFV6YRBRtmNxlJJ5mjY77T7BRkRFzdIBVmK90QYhCxA==}
-
   '@types/prop-types@15.7.15':
     resolution: {integrity: sha512-F6bEyamV9jKGAFBEmlQnesRPGOQqS2+Uwi0Em15xenOxHaf2hv6L8YCVn3rPdPJOiJfPiCnLIRyvwVaqMY3MIw==}
 
@@ -1954,9 +1945,6 @@ packages:
   obug@2.1.4:
     resolution: {integrity: sha512-4a+OsYv9UktOJKE+l1A4OufDgdRF9PifWj+tJnHURo/P+WOxpG4GzUFL9qCalmWauao6ogiG+QvnCovwPoyAWA==}
     engines: {node: '>=12.20.0'}
-
-  omggif@1.0.10:
-    resolution: {integrity: sha512-LMJTtvgc/nugXj0Vcrrs68Mn2D1r0zf630VNtqtpI1FEO7e+O9FP4gqs9AcnBaSEeoHIPm28u6qgPR0oyEpGSw==}
 
   once@1.4.0:
     resolution: {integrity: sha512-lNaJgI+2Q5URQBkccEKHTQOPaXdUxnZZElQTZY0MFUAuaEqe1E+Nyvgdz/aIyNi6Z9MzO5dv1H8n58/GELp3+w==}
@@ -3473,8 +3461,6 @@ snapshots:
     dependencies:
       undici-types: 7.16.0
 
-  '@types/omggif@1.0.5': {}
-
   '@types/prop-types@15.7.15': {}
 
   '@types/react-dom@18.3.7(@types/react@18.3.31)':
@@ -4391,8 +4377,6 @@ snapshots:
     optional: true
 
   obug@2.1.4: {}
-
-  omggif@1.0.10: {}
 
   once@1.4.0:
     dependencies:

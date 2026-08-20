@@ -1,6 +1,6 @@
 import { ipcRenderer } from 'electron'
 import { createPetCharacter, type PetCharacterAnimator } from './pet-character.ts'
-import { DEFAULT_PET_SKIN, isDefaultPetSkin, parsePetSkinSource, selectPetSkinUrl, type PetSkinView } from './pet-skin.ts'
+import { DEFAULT_PET_SIZE, parsePetSize } from './pet-size.ts'
 
 type PetMode = 'idle' | 'thinking' | 'speaking' | 'approval' | 'success' | 'error' | 'unavailable'
 type ApprovalOutcome = 'allowed-once' | 'rejected'
@@ -73,27 +73,23 @@ function state(value: unknown): PetRendererState {
 }
 
 let latest: PetRendererState = { mode: 'idle' }
-let latestSkin: PetSkinView = DEFAULT_PET_SKIN
 let character: PetCharacterAnimator | undefined
 let petWindowVisible = false
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
 
-function applySkin(): void {
-  const builtIn = isDefaultPetSkin(latestSkin)
-  const page = element<HTMLElement>('pet-page')
-  const canvas = element<HTMLCanvasElement>('pet-character')
-  const image = element<HTMLImageElement>('pet-skin')
+function applyCharacterActivity(): void {
   const visible = petWindowVisible && document.visibilityState === 'visible'
-  page.dataset.customSkin = String(!builtIn)
-  canvas.hidden = !builtIn
-  image.hidden = builtIn || !visible
-  if (!builtIn) {
-    const source = selectPetSkinUrl(latestSkin, reducedMotion.matches, visible)
-    if (image.getAttribute('src') !== source) image.src = source
-  }
   character?.setReducedMotion(reducedMotion.matches)
-  character?.setActive(builtIn && visible)
+  character?.setActive(visible)
 }
+
+function applySize(value: unknown): void {
+  const size = parsePetSize(value)
+  const page = element<HTMLElement>('pet-page')
+  page.dataset.size = size
+  render(latest)
+}
+
 let interaction: boolean | undefined
 
 function render(value: unknown): void {
@@ -157,12 +153,6 @@ window.addEventListener('DOMContentLoaded', () => {
   element('open-main').addEventListener('click', () => { ipcRenderer.send('pet:focus-main') })
   element('hide-pet').addEventListener('click', () => { ipcRenderer.send('pet:hide') })
   const mascot = element<HTMLElement>('mascot')
-  const skinImage = element<HTMLImageElement>('pet-skin')
-  skinImage.addEventListener('error', () => {
-    if (isDefaultPetSkin(latestSkin)) return
-    latestSkin = DEFAULT_PET_SKIN
-    applySkin()
-  })
   let drag: { pointerId: number; startX: number; startY: number; moved: boolean } | undefined
   mascot.addEventListener('pointerdown', event => {
     if (event.button !== 0) return
@@ -205,7 +195,7 @@ window.addEventListener('DOMContentLoaded', () => {
   })
   window.addEventListener('blur', cancelActiveDrag)
   window.addEventListener('pagehide', () => { cancelActiveDrag(); character?.dispose() })
-  document.addEventListener('visibilitychange', applySkin)
+  document.addEventListener('visibilitychange', applyCharacterActivity)
   mascot.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); ipcRenderer.send('pet:focus-main') }
   })
@@ -215,14 +205,12 @@ window.addEventListener('DOMContentLoaded', () => {
   ipcRenderer.on('pet:visibility', (_event, visible: unknown) => {
     if (typeof visible !== 'boolean') return
     petWindowVisible = visible
-    applySkin()
+    applyCharacterActivity()
   })
-  ipcRenderer.on('pet:skin', (_event, value: unknown) => {
-    const next = parsePetSkinSource(value)
-    if (next !== undefined) { latestSkin = next; applySkin() }
-  })
-  reducedMotion.addEventListener('change', applySkin)
-  applySkin()
+  ipcRenderer.on('pet:size', (_event, value: unknown) => { applySize(value) })
+  reducedMotion.addEventListener('change', applyCharacterActivity)
+  applySize(DEFAULT_PET_SIZE)
+  applyCharacterActivity()
   render({ mode: 'idle' })
   ipcRenderer.send('pet:ready')
 })

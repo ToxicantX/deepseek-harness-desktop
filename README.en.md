@@ -37,13 +37,13 @@ Open the global Agent personalization editor from **File → Personalization...*
 
 This document is a user-preference layer. It does not modify an Agent preset or grant tools and permissions the preset does not provide. Presets composed with `@deepseek-ai/dsh-agent-instructions` load it for subsequent new sessions while retaining their own role, tools, capabilities, and security boundaries; a workspace `AGENTS.md` can add more specific project rules. Personalization text enters model context, so it must not contain API keys, tokens, passwords, or other credentials.
 
-## Desktop pet skins
+## Desktop pet settings
 
 The default pet is an original anime sprite character rendered entirely inside the transparent Electron desktop window. Local transparent PNG strips provide separate frame animations for idle, thinking, speaking, approval, success, error, unavailable, and dragging states; missing, malformed, or undecodable strips fall back to the original procedural Canvas robot. The pet loads no network assets and launches no Web page. When Windows reduced motion is enabled, each state holds a representative frame.
 
-Choose a PNG, JPEG, or WebP still image, or an animated GIF, from **File → Pet Skin → Choose Still Image or Animated GIF...**. Still images are limited to 8 MB and 4096×4096, then normalized to PNG with a longest edge of 512 pixels. Animated GIFs preserve their source frames and are limited to 2 MB, a 512-pixel longest edge, 2–120 frames, and 16777216 aggregate frame pixels before being stored as `desktop-pet-skin.gif` under application `userData`. When reduced motion is enabled, the renderer uses a first-frame PNG generated in the main process. The original source path never reaches the pet renderer or DSH Runtime.
+Choose **File → Desktop Pet Settings → Small / Standard / Large** to resize the character. The three modes use 72, 96, and 128 CSS pixels while retaining the 192×192 Canvas backing store. A size change updates the transparent window, native hit-test shape, bubble anchor, and drag bounds together, then persists the selection in `desktop-pet.json` under application `userData`. Standard preserves the previous 96-pixel appearance.
 
-Select **File → Pet Skin → Restore Default Skin** to delete both still and animated custom files and immediately restore the built-in anime character. A custom skin remains active after Shell restarts and pet renderer recovery.
+The legacy local still-image and animated-GIF skin picker, decoders, and renderer data-URL channel have been removed. After an upgrade, the Shell deletes stale `desktop-pet-skin.png`, `desktop-pet-skin.gif`, and their corresponding `.tmp` files.
 
 ## Plugins
 
