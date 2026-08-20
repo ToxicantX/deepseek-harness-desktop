@@ -26,6 +26,8 @@
     "electron-updater": "6.8.9",
     "extract-zip": "2.0.1",
     "omggif": "1.0.10",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
     "semver": "7.7.4",
     "toml-eslint-parser": "1.0.3",
     "yaml": "2.8.3"
@@ -37,6 +39,8 @@
     "@types/eslint": "9.6.1",
     "@types/node": "24.10.13",
     "@types/omggif": "1.0.5",
+    "@types/react": "18.3.31",
+    "@types/react-dom": "18.3.7",
     "@types/semver": "7.7.1",
     "electron": "43.4.0",
     "electron-builder": "26.15.3",

@@ -26,4 +26,17 @@ export default defineConfig([
     outExtensions: () => ({ js: '.cjs' }),
     clean: false,
   },
+  {
+    outDir: 'lib',
+    entry: { 'skin-react-runtime.global': 'src/skin-react-runtime.ts' },
+    platform: 'browser',
+    target: 'chrome120',
+    format: 'iife',
+    globalName: 'DshSkinReactRuntimeBundle',
+    minify: true,
+    sourcemap: false,
+    dts: false,
+    clean: false,
+    deps: { alwaysBundle: [/^react(?:-dom)?(?:\/.*)?$/] },
+  },
 ])

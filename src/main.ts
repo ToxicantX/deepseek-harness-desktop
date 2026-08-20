@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { appendFileSync, mkdirSync } from 'node:fs'
+import { appendFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -11,11 +11,13 @@ import {
   ipcMain,
   Menu,
   nativeImage,
+  protocol,
   Tray,
   shell,
   type IpcMainEvent,
   type IpcMainInvokeEvent,
   type MenuItemConstructorOptions,
+  type WebContents,
 } from 'electron'
 import { MINIMUM_DSH_VERSION, type RuntimePreference } from './catalog.ts'
 import { DesktopPetController as PetEventController, type PetRendererState as PetProtocolState, type PetWebSocket } from './desktop-pet.ts'
@@ -31,7 +33,11 @@ import { SessionRepairClient } from './session-repair.ts'
 import { SettingsDocumentClient } from './settings-document.ts'
 import { RuntimeStore } from './runtime-store.ts'
 import { ShellUpdater, type ShellUpdateProgress } from './shell-updater.ts'
+import { createClientBundleAdapterScript, createSkinDisposerScript, createSkinMarketInjectorScript } from './skin-market-injector.ts'
+import { ShellSkinStore } from './shell-skin-store.ts'
 import { allowDshWebPermission } from './window-security.ts'
+
+protocol.registerSchemesAsPrivileged([{ scheme: 'dsh-skin', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }])
 
 const moduleDirectory = dirname(fileURLToPath(import.meta.url))
 const setupPage = join(app.getAppPath(), 'assets', 'runtime.html')
@@ -76,6 +82,7 @@ let latestView: RuntimeView | undefined
 let cliDirectory: string | undefined
 let trustedOrigin: string | undefined
 let mainUiLoaded = false
+let shellSkinStore: ShellSkinStore | undefined
 let quitting = false
 
 function runtimeRoot(): string {
@@ -83,6 +90,50 @@ function runtimeRoot(): string {
   const local = process.env.LOCALAPPDATA
   if (local === undefined || local.length === 0) throw new Error('LOCALAPPDATA is unavailable')
   return join(local, 'DeepSeek Harness', 'runtime-manager')
+}
+
+let skinReactRuntimeSource: string | undefined
+function getSkinReactRuntimeSource(): string {
+  skinReactRuntimeSource ??= readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'skin-react-runtime.global.iife.js'), 'utf8')
+  return skinReactRuntimeSource
+}
+
+type ClientBundleAdapterResult = {
+  ok: boolean
+  error?: { stage?: string; name?: string; message?: string; stack?: string }
+  diagnostics?: unknown
+}
+
+async function executeClientBundleAdapter(contents: WebContents, bundle: string, skinId: string, variantId?: string): Promise<void> {
+  await contents.executeJavaScript(`if (!window.__dshDesktopReactRuntime) { ${getSkinReactRuntimeSource()} }`)
+  const result: unknown = await contents.executeJavaScript(createClientBundleAdapterScript(bundle, skinId, variantId))
+  if (result === null || typeof result !== 'object' || Array.isArray(result) || typeof (result as ClientBundleAdapterResult).ok !== 'boolean') {
+    throw new Error('皮肤适配器执行失败：皮肤 ' + skinId + ' 返回了无效结果')
+  }
+  const adapterResult = result as ClientBundleAdapterResult
+  if (adapterResult.ok) return
+  const detail = adapterResult.error ?? {}
+  const parts = ['皮肤适配器执行失败：皮肤 ' + skinId]
+  if (detail.stage !== undefined) parts.push('阶段 ' + detail.stage)
+  if (detail.name !== undefined) parts.push('名称 ' + detail.name)
+  if (detail.message !== undefined) parts.push('消息 ' + detail.message)
+  const error = new Error(parts.join('，'))
+  if (detail.stack !== undefined) error.stack = error.message + '\n' + detail.stack
+  throw error
+}
+
+function injectSkinMarket(window: BrowserWindow): void {
+  if (window !== mainWindow || trustedOrigin === undefined || window.isDestroyed()) return
+  try {
+    if (new URL(window.webContents.getURL()).origin !== trustedOrigin) return
+  } catch {
+    return
+  }
+  void (async () => {
+    await window.webContents.executeJavaScript(createSkinMarketInjectorScript())
+    const active = await shellSkinStore?.activeClientBundle()
+    if (active !== undefined && active !== null) await executeClientBundleAdapter(window.webContents, active.bundle, active.id)
+  })().catch(logFatalError)
 }
 
 function petStatus(message: string | undefined): string | undefined {
@@ -275,7 +326,7 @@ function createWindow(options: { utility?: 'manager' | 'repair' | 'plugin' | 'mc
   window.once('ready-to-show', () => { window.show() })
   window.webContents.on('did-finish-load', () => {
     sendView(window)
-    if (window === mainWindow) syncMainMenuVisibility()
+    if (window === mainWindow) { syncMainMenuVisibility(); injectSkinMarket(window) }
   })
   return window
 }
@@ -517,11 +568,27 @@ function runtimeClient(event: IpcMainInvokeEvent): RuntimeController {
   return controller
 }
 
-function fromTrustedDshWindow(event: IpcMainEvent): boolean {
+function fromTrustedDshWindow(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
   if (mainWindow === undefined || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents
     || trustedOrigin === undefined || latestView?.phase !== 'ready') return false
   try { return new URL(event.sender.getURL()).origin === trustedOrigin }
   catch { return false }
+}
+
+function skinService(event: IpcMainInvokeEvent): ShellSkinStore {
+  if (!fromTrustedDshWindow(event)) throw new Error('皮肤市场请求来源无效')
+  if (shellSkinStore === undefined) throw new Error('皮肤市场尚未初始化')
+  return shellSkinStore
+}
+
+function openSkinMarket(): void {
+  if (mainWindow === undefined || mainWindow.isDestroyed() || trustedOrigin === undefined) return
+  try {
+    if (new URL(mainWindow.webContents.getURL()).origin !== trustedOrigin) return
+  } catch {
+    return
+  }
+  void mainWindow.webContents.executeJavaScript("typeof window.__dshDesktopOpenSkinMarket === 'function' ? window.__dshDesktopOpenSkinMarket() : false").catch(logFatalError)
 }
 
 function petSender(event: IpcMainEvent | IpcMainInvokeEvent): PetWindowController | undefined {
@@ -660,6 +727,7 @@ function installMenu(): void {
     {
       label: '视图',
       submenu: [
+        { label: '主题', enabled: latestView?.phase === 'ready', click: openSkinMarket },
         { label: '桌面宠物', type: 'checkbox', checked: petWindow?.enabled ?? true, click: item => { void setPetEnabled(item.checked) } },
         { type: 'separator' },
         { role: 'reload', label: '重新加载' },
@@ -725,6 +793,20 @@ async function startApplication(): Promise<void> {
   createTray()
   await mainWindow.loadFile(setupPage)
   const store = new RuntimeStore(runtimeRoot())
+  shellSkinStore = new ShellSkinStore(join(app.getPath('userData'), 'skins'), undefined, progress => {
+    if (mainWindow !== undefined && !mainWindow.isDestroyed()) mainWindow.webContents.send('shell-skins:progress', progress)
+  })
+  await shellSkinStore.initialize().catch(logFatalError)
+  protocol.handle('dsh-skin', async request => {
+    try {
+      const url = new URL(request.url)
+      const asset = await shellSkinStore?.readAsset(decodeURIComponent(url.hostname), decodeURIComponent(url.pathname === '/' ? '/skin.html' : url.pathname))
+      if (asset === undefined) return new Response('skin store unavailable', { status: 503 })
+      return new Response(new Uint8Array(asset.body), { status: 200, headers: { 'content-type': asset.contentType, 'cache-control': 'no-cache', 'access-control-allow-origin': '*' } })
+    } catch (error) {
+      return new Response(error instanceof Error ? error.message : String(error), { status: 404 })
+    }
+  })
   const home = process.env.DSH_HOME ?? join(homedir(), '.dsh')
   await mkdir(home, { recursive: true })
   controller = new RuntimeController({
@@ -827,6 +909,38 @@ ipcMain.on('pet:drag-move', (event, value: unknown) => {
 ipcMain.on('pet:drag-end', (event) => { petSender(event)?.endDrag() })
 ipcMain.on('pet:focus-main', (event) => { if (petSender(event) !== undefined) showMainWindow() })
 ipcMain.on('pet:hide', (event) => { if (petSender(event) !== undefined) void setPetEnabled(false) })
+ipcMain.handle('shell-skins:list', event => skinService(event).list())
+ipcMain.handle('shell-skins:preview', async (event, skinId: unknown, index: unknown) => skinService(event).preview(String(skinId), Number(index)))
+ipcMain.handle('shell-skins:install', async (event, skinId: unknown) => skinService(event).install(String(skinId)))
+ipcMain.handle('shell-skins:activate', async (event, skinId: unknown) => {
+  const service = skinService(event)
+  const active = await service.activate(String(skinId))
+  if (active !== null) await executeClientBundleAdapter(event.sender, active.bundle, active.id)
+  return service.list()
+})
+ipcMain.handle('shell-skins:select-variant', async (event, skinId: unknown, variantId: unknown) => {
+  const service = skinService(event)
+  const requestedSkinId = String(skinId)
+  if (service.list().activeSkinId !== requestedSkinId) throw new Error('只能为当前激活皮肤选择变体')
+  const active = await service.activeClientBundle()
+  if (active === null || active.id !== requestedSkinId) throw new Error('当前激活皮肤不可用')
+  await executeClientBundleAdapter(event.sender, active.bundle, active.id, String(variantId))
+  return service.list()
+})
+ipcMain.handle('shell-skins:deactivate', async event => {
+  const service = skinService(event)
+  const result = await service.deactivate()
+  await event.sender.executeJavaScript(createSkinDisposerScript())
+  return result
+})
+ipcMain.handle('shell-skins:uninstall', async (event, skinId: unknown) => {
+  const service = skinService(event)
+  const active = service.list().activeSkinId === String(skinId)
+  const result = await service.uninstall(String(skinId))
+  if (active) await event.sender.executeJavaScript(createSkinDisposerScript())
+  return result
+})
+
 ipcMain.handle('pet:respond', async (event, approvalId: unknown, outcome: unknown) => {
   fromPetWindow(event)
   if (typeof approvalId !== 'string' || approvalId.length === 0 || approvalId.length > 256
