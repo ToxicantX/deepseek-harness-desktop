@@ -29,7 +29,7 @@ import { RuntimeStore } from './runtime-store.ts'
 import { ShellUpdater, type ShellUpdateProgress } from './shell-updater.ts'
 import { createClientBundleAdapterScript, createSkinDisposerScript, createSkinMarketInjectorScript } from './skin-market-injector.ts'
 import { ShellSkinStore } from './shell-skin-store.ts'
-import { allowDshWebPermission } from './window-security.ts'
+import { allowDshWebPermission, shouldOpenInSystemBrowser } from './window-security.ts'
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'dsh-skin', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }])
 
@@ -155,7 +155,7 @@ function createWindow(options: { utility?: 'manager' | 'repair' | 'plugin' | 'up
     })
   })
   window.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('https://') || url.startsWith('http://')) void shell.openExternal(url)
+    if (shouldOpenInSystemBrowser(url, trustedOrigin)) void shell.openExternal(url)
     return { action: 'deny' }
   })
   window.webContents.on('will-navigate', (event, url) => {
@@ -165,7 +165,7 @@ function createWindow(options: { utility?: 'manager' | 'repair' | 'plugin' | 'up
     const allowed = localNavigation || (trustedOrigin !== undefined && origin === trustedOrigin)
     if (!allowed) {
       event.preventDefault()
-      if (url.startsWith('https://') || url.startsWith('http://')) void shell.openExternal(url)
+      if (shouldOpenInSystemBrowser(url, trustedOrigin)) void shell.openExternal(url)
     }
   })
   window.once('ready-to-show', () => { window.show() })

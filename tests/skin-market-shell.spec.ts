@@ -33,6 +33,12 @@ describe('skin market shell integration', () => {
     expect(main).not.toContain('swatchbook')
   })
 
+  it('does not send trusted DSH popups to the system browser', () => {
+    expect(main).toContain("import { allowDshWebPermission, shouldOpenInSystemBrowser } from './window-security.ts'")
+    expect(main.match(/if \(shouldOpenInSystemBrowser\(url, trustedOrigin\)\) void shell\.openExternal\(url\)/g)).toHaveLength(2)
+    expect(main).not.toContain("if (url.startsWith('https://') || url.startsWith('http://')) void shell.openExternal(url)")
+  })
+
   it('does not let injector failures interrupt the DSH UI', () => {
     expect(main).toContain('.catch(logFatalError)')
   })

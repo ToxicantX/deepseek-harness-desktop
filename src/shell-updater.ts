@@ -25,6 +25,7 @@ export class ShellUpdater {
     private readonly stopRuntime: () => Promise<void>,
     private readonly onProgress: (progress: ShellUpdateProgress) => void = () => {},
   ) {
+    autoUpdater.logger = null
     autoUpdater.autoDownload = false
     autoUpdater.autoInstallOnAppQuit = false
     autoUpdater.allowPrerelease = app.getVersion().includes('-')
