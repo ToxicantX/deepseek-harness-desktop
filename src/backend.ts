@@ -148,8 +148,8 @@ export function desktopEnvironment(runtime: InstalledRuntime, inherited: NodeJS.
 export function backendArguments(runtime: InstalledRuntime, fileExists: (path: string) => boolean = existsSync): string[] {
   const patch = join(runtime.directory, 'app', 'desktop.patch.yml')
   return fileExists(patch)
-    ? ['web', '--patch', patch, '--port', '0', '--no-open']
-    : ['web', '--port', '0', '--no-open']
+    ? ['web', '--patch', patch, '--port', '0']
+    : ['web', '--port', '0']
 }
 
 export async function startBackend(options: StartBackendOptions): Promise<RunningBackend> {

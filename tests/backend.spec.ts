@@ -75,8 +75,8 @@ describe('parseBackendUrl', () => {
 describe('backendArguments', () => {
   it('enables the desktop overlay only when the packaged patch exists', () => {
     const patch = 'C:\\runtime\\app\\desktop.patch.yml'
-    expect(backendArguments(runtime, filename => filename === patch)).toEqual(['web', '--patch', patch, '--port', '0', '--no-open'])
-    expect(backendArguments(runtime, () => false)).toEqual(['web', '--port', '0', '--no-open'])
+    expect(backendArguments(runtime, filename => filename === patch)).toEqual(['web', '--patch', patch, '--port', '0'])
+    expect(backendArguments(runtime, () => false)).toEqual(['web', '--port', '0'])
   })
 })
 
