@@ -35,21 +35,21 @@ function revision(state: FileState): string {
 
 function parseSaveInput(value: unknown): PersonalizationSaveInput {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('个人化设置保存参数无效')
+    throw new Error('个性化设置保存参数无效')
   }
   const input = value as Record<string, unknown>
   const keys = Object.keys(input).sort()
   if (keys.length !== 2 || keys[0] !== 'content' || keys[1] !== 'expectedRevision') {
-    throw new Error('个人化设置保存参数无效')
+    throw new Error('个性化设置保存参数无效')
   }
   if (typeof input.content !== 'string' || typeof input.expectedRevision !== 'string') {
-    throw new Error('个人化设置保存参数无效')
+    throw new Error('个性化设置保存参数无效')
   }
-  if (!/^[a-f0-9]{64}$/u.test(input.expectedRevision)) throw new Error('个人化设置 revision 无效')
-  if (input.content.includes('\0')) throw new Error('个人化设置不能包含 NUL 字符')
+  if (!/^[a-f0-9]{64}$/u.test(input.expectedRevision)) throw new Error('个性化设置 revision 无效')
+  if (input.content.includes('\0')) throw new Error('个性化设置不能包含 NUL 字符')
   const bytes = Buffer.byteLength(input.content, 'utf8')
   if (bytes > PERSONALIZATION_MAX_BYTES) {
-    throw new Error('个人化设置不能超过 ' + PERSONALIZATION_MAX_BYTES.toLocaleString('zh-CN') + ' B')
+    throw new Error('个性化设置不能超过 ' + PERSONALIZATION_MAX_BYTES.toLocaleString('zh-CN') + ' B')
   }
   return { content: input.content, expectedRevision: input.expectedRevision }
 }
@@ -60,7 +60,7 @@ export class PersonalizationManager {
 
   constructor(options: PersonalizationManagerOptions) {
     if (options === null || typeof options !== 'object' || typeof options.home !== 'string' || options.home.length === 0) {
-      throw new Error('个人化设置目录无效')
+      throw new Error('个性化设置目录无效')
     }
     this.path = join(options.home, 'AGENTS.md')
   }
@@ -78,13 +78,13 @@ export class PersonalizationManager {
   private async saveLocked(input: PersonalizationSaveInput): Promise<PersonalizationDocument> {
     const current = await this.readState()
     if (revision(current) !== input.expectedRevision) {
-      throw new Error('个人化设置已被其他程序修改，请重新加载后再保存')
+      throw new Error('个性化设置已被其他程序修改，请重新加载后再保存')
     }
 
     if (input.content.trim().length === 0) {
       const verified = await this.readState()
       if (revision(verified) !== input.expectedRevision) {
-        throw new Error('个人化设置已被其他程序修改，请重新加载后再保存')
+        throw new Error('个性化设置已被其他程序修改，请重新加载后再保存')
       }
       await rm(this.path, { force: true })
       return this.read()
@@ -96,7 +96,7 @@ export class PersonalizationManager {
       await writeFile(temporary, input.content, { encoding: 'utf8', flag: 'wx', mode: 0o600 })
       const verified = await this.readState()
       if (revision(verified) !== input.expectedRevision) {
-        throw new Error('个人化设置已被其他程序修改，请重新加载后再保存')
+        throw new Error('个性化设置已被其他程序修改，请重新加载后再保存')
       }
       await rename(temporary, this.path)
     } finally {
@@ -117,7 +117,7 @@ export class PersonalizationManager {
   private toDocument(state: FileState): PersonalizationDocument {
     const content = state.bytes.toString('utf8')
     if (!Buffer.from(content, 'utf8').equals(state.bytes)) {
-      throw new Error('个人化设置文件不是有效的 UTF-8 文本')
+      throw new Error('个性化设置文件不是有效的 UTF-8 文本')
     }
     return {
       path: this.path,

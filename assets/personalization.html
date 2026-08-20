@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>个人化设置</title>
+  <title>个性化设置</title>
   <style>
     :root { color-scheme: light; font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif; color: #202124; background: #f5f6f8; }
     * { box-sizing: border-box; }
@@ -58,12 +58,12 @@
   <main id="personalization-page">
     <header>
       <div>
-        <h1>个人化设置</h1>
+        <h1>个性化设置</h1>
         <p class="scope">全局偏好 · 遵从当前 Agent 预设</p>
       </div>
       <span id="personalization-state" class="state">正在读取</span>
     </header>
-    <div class="toolbar" role="group" aria-label="个人化文档操作">
+    <div class="toolbar" role="group" aria-label="个性化文档操作">
       <button id="personalization-template" type="button">使用模板</button>
       <button id="personalization-reload" type="button">重新加载</button>
       <span class="toolbar-spacer"></span>
@@ -74,13 +74,13 @@
       <span id="personalization-count" class="count">0 / 65,536 B</span>
     </div>
     <div class="editor-wrap">
-      <textarea id="personalization-content" aria-label="全局 Agent 个人化内容" autocomplete="off" spellcheck="false" placeholder="输入全局偏好（Markdown）"></textarea>
+      <textarea id="personalization-content" aria-label="全局 Agent 个性化内容" autocomplete="off" spellcheck="false" placeholder="输入全局偏好（Markdown）"></textarea>
     </div>
     <footer>
       <p id="personalization-warning" class="warning">不要填写 API Key、Token、密码或其他凭据</p>
       <div class="status-area">
         <progress id="personalization-progress" hidden></progress>
-        <span id="personalization-status" role="status" aria-live="polite">正在读取全局个人化设置...</span>
+        <span id="personalization-status" role="status" aria-live="polite">正在读取全局个性化设置...</span>
       </div>
     </footer>
   </main>

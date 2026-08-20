@@ -18,10 +18,12 @@ import {
   type MenuItemConstructorOptions,
 } from 'electron'
 import { MINIMUM_DSH_VERSION, type RuntimePreference } from './catalog.ts'
+import { DesktopPetController as PetEventController, type PetRendererState as PetProtocolState, type PetWebSocket } from './desktop-pet.ts'
 import { openPluginTerminal } from './cli-shell.ts'
 import { McpManager, type McpList } from './mcp-manager.ts'
 import { mutateMcpWithRuntime } from './mcp-restart.ts'
 import { PersonalizationManager } from './personalization-manager.ts'
+import { PetWindowController, type PetRendererState as PetWindowState } from './pet-window.ts'
 import { PluginManager } from './plugin-manager.ts'
 import { PluginRestartCoordinator } from './plugin-restart.ts'
 import { RuntimeController, type RuntimeView } from './runtime-controller.ts'
@@ -38,8 +40,10 @@ const pluginManagerPage = join(app.getAppPath(), 'assets', 'plugin-manager.html'
 const mcpManagerPage = join(app.getAppPath(), 'assets', 'mcp-manager.html')
 const personalizationPage = join(app.getAppPath(), 'assets', 'personalization.html')
 const shellUpdatePage = join(app.getAppPath(), 'assets', 'shell-update.html')
-const allowedLocalPages = new Set([setupPage, repairPage, pluginManagerPage, mcpManagerPage, personalizationPage, shellUpdatePage])
+const petPage = join(app.getAppPath(), 'assets', 'pet.html')
+const allowedLocalPages = new Set([setupPage, repairPage, pluginManagerPage, mcpManagerPage, personalizationPage, shellUpdatePage, petPage])
 const preload = join(moduleDirectory, 'preload.cjs')
+const petPreload = join(moduleDirectory, 'pet-preload.cjs')
 const shutdownHook = app.isPackaged
   ? join(process.resourcesPath, 'app.asar.unpacked', 'lib', 'shutdown-hook.js')
   : join(moduleDirectory, 'shutdown-hook.js')
@@ -63,6 +67,11 @@ let personalizationQuitPrompt = false
 let mcpMutationActive = false
 const pluginRestartCoordinator = new PluginRestartCoordinator()
 let updater: ShellUpdater | undefined
+let petWindow: PetWindowController | undefined
+let petEvents: PetEventController | undefined
+let disposePetEvents: (() => void) | undefined
+let activePetSession: string | undefined
+let petSkinMutationActive = false
 let latestView: RuntimeView | undefined
 let cliDirectory: string | undefined
 let trustedOrigin: string | undefined
@@ -73,6 +82,118 @@ function runtimeRoot(): string {
   const local = process.env.LOCALAPPDATA
   if (local === undefined || local.length === 0) throw new Error('LOCALAPPDATA is unavailable')
   return join(local, 'DeepSeek Harness', 'runtime-manager')
+}
+
+function petStatus(message: string | undefined): string | undefined {
+  if (message === undefined) return undefined
+  if (message === 'Approval response failed') return '审批响应发送失败'
+  if (message === 'Invalid approval response') return '审批响应格式无效'
+  if (message === 'Approval expired') return '审批已失效'
+  if (message === 'DSH event stream unavailable') return 'DSH 事件流暂不可用'
+  if (message === 'DSH connection lost; retrying') return '正在重新连接 DSH'
+  return '宠物状态暂不可用'
+}
+
+function toPetWindowState(state: PetProtocolState): PetWindowState {
+  const status = petStatus(state.message)
+  const approval = state.approval
+  if (approval !== undefined) {
+    return {
+      mode: 'approval',
+      ...(status === undefined ? {} : { status }),
+      approval: {
+        id: approval.approvalId,
+        toolName: approval.toolName,
+        sessionLabel: approval.sessionLabel,
+        ...(approval.reason === undefined ? {} : { reason: approval.reason }),
+        pendingCount: state.queuedApprovals + 1,
+        responding: approval.status === 'responding',
+      },
+    }
+  }
+  if (state.reply !== undefined) {
+    return {
+      mode: state.reply.streaming ? 'speaking' : 'success',
+      reply: state.reply.text + (state.reply.truncated ? '…' : ''),
+      sessionLabel: '当前会话',
+      ...(status === undefined ? {} : { status }),
+    }
+  }
+  if (state.thinking === true) return { mode: 'thinking', status: '正在思考', sessionLabel: '当前会话' }
+  if (state.connection !== 'connected') {
+    return { mode: 'unavailable', status: status ?? (state.connection === 'reconnecting' ? '正在重新连接 DSH' : 'DSH 暂不可用') }
+  }
+  if (status !== undefined) return { mode: 'error', status }
+  return { mode: 'idle' }
+}
+
+async function setPetEnabled(enabled: boolean): Promise<void> {
+  await petWindow?.setEnabled(enabled)
+  installMenu()
+  installTrayMenu()
+}
+
+async function choosePetSkin(): Promise<void> {
+  const skin = petWindow
+  if (skin === undefined || petSkinMutationActive) return
+  petSkinMutationActive = true
+  try {
+    const options = {
+      title: '选择个性化皮肤',
+      properties: ['openFile' as const],
+      filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
+    }
+    const parent = mainWindow === undefined || mainWindow.isDestroyed() ? undefined : mainWindow
+    const selected = parent === undefined
+      ? await dialog.showOpenDialog(options)
+      : await dialog.showOpenDialog(parent, options)
+    const sourcePath = selected.filePaths[0]
+    if (!selected.canceled && sourcePath !== undefined) await skin.setCustomSkin(sourcePath)
+  } catch (error: unknown) {
+    dialog.showErrorBox('无法更新个性化皮肤', error instanceof Error ? error.message : String(error))
+  } finally {
+    petSkinMutationActive = false
+    installMenu()
+  }
+}
+
+async function resetPetSkin(): Promise<void> {
+  const skin = petWindow
+  if (skin === undefined || petSkinMutationActive) return
+  petSkinMutationActive = true
+  try {
+    await skin.resetCustomSkin()
+  } catch (error: unknown) {
+    dialog.showErrorBox('无法恢复默认皮肤', error instanceof Error ? error.message : String(error))
+  } finally {
+    petSkinMutationActive = false
+    installMenu()
+  }
+}
+
+async function stopPet(): Promise<void> {
+  activePetSession = undefined
+  petEvents?.stop()
+  disposePetEvents?.()
+  disposePetEvents = undefined
+  petEvents = undefined
+  await petWindow?.dispose()
+  petWindow = undefined
+}
+
+function installTrayMenu(): void {
+  if (tray === undefined || tray.isDestroyed()) return
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: '显示 DeepSeek Harness', click: showMainWindow },
+    {
+      label: '启用桌面宠物',
+      type: 'checkbox',
+      checked: petWindow?.enabled ?? true,
+      click: item => { void setPetEnabled(item.checked) },
+    },
+    { type: 'separator' },
+    { label: '退出', click: () => { app.quit() } },
+  ]))
 }
 
 function createWindow(options: { utility?: 'manager' | 'repair' | 'plugin' | 'mcp' | 'personalization' | 'update' } = {}): BrowserWindow {
@@ -148,11 +269,7 @@ function showMainWindow(): void {
 function createTray(): void {
   tray = new Tray(nativeImage.createFromPath(join(app.getAppPath(), 'assets', 'icon.png')))
   tray.setToolTip('DeepSeek Harness')
-  tray.setContextMenu(Menu.buildFromTemplate([
-    { label: '显示 DeepSeek Harness', click: showMainWindow },
-    { type: 'separator' },
-    { label: '退出', click: () => { app.quit() } },
-  ]))
+  installTrayMenu()
   tray.on('click', showMainWindow)
 }
 
@@ -230,6 +347,11 @@ async function openSettings(): Promise<void> {
 
 function broadcast(view: RuntimeView): void {
   latestView = view
+  if (view.phase !== 'ready') {
+    activePetSession = undefined
+    petEvents?.setActiveSession(undefined)
+    petEvents?.stop()
+  }
   installMenu()
   if (mainWindow !== undefined && view.phase === 'error') void showSetup(mainWindow)
   if (mainWindow !== undefined) sendView(mainWindow)
@@ -311,8 +433,8 @@ async function openPersonalization(): Promise<void> {
     personalizationClosePrompt = true
     void dialog.showMessageBox(window, {
       type: 'warning',
-      title: '个人化设置',
-      message: '个人化设置有尚未保存的更改。',
+      title: '个性化设置',
+      message: '个性化设置有尚未保存的更改。',
       detail: '关闭窗口将放弃这些更改。',
       buttons: ['继续编辑', '放弃更改'],
       defaultId: 0,
@@ -368,6 +490,32 @@ function runtimeClient(event: IpcMainInvokeEvent): RuntimeController {
   return controller
 }
 
+function fromTrustedDshWindow(event: IpcMainEvent): boolean {
+  if (mainWindow === undefined || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents
+    || trustedOrigin === undefined || latestView?.phase !== 'ready') return false
+  try { return new URL(event.sender.getURL()).origin === trustedOrigin }
+  catch { return false }
+}
+
+function petSender(event: IpcMainEvent | IpcMainInvokeEvent): PetWindowController | undefined {
+  const window = petWindow
+  return window?.matchesSender(event.sender, petPage) === true ? window : undefined
+}
+
+function fromPetWindow(event: IpcMainInvokeEvent): PetWindowController {
+  const window = petSender(event)
+  if (window === undefined) throw new Error('桌面宠物请求来源无效')
+  return window
+}
+
+function parseActivePetSession(value: unknown): string | undefined {
+  if (value === null) return undefined
+  if (typeof value !== 'string' || value.length === 0 || value.length > 128 || !/^[0-9A-Za-z._~-]+$/u.test(value)) {
+    throw new Error('桌面宠物前台会话无效')
+  }
+  return value
+}
+
 function pluginService(event: IpcMainInvokeEvent): PluginManager {
   if (pluginWindow === undefined || pluginWindow.isDestroyed() || event.sender !== pluginWindow.webContents) {
     throw new Error('插件管理请求来源无效')
@@ -386,9 +534,9 @@ function mcpService(event: IpcMainInvokeEvent): McpManager {
 
 function personalizationService(event: IpcMainInvokeEvent): PersonalizationManager {
   if (personalizationWindow === undefined || personalizationWindow.isDestroyed() || event.sender !== personalizationWindow.webContents) {
-    throw new Error('个人化设置请求来源无效')
+    throw new Error('个性化设置请求来源无效')
   }
-  if (personalizationManager === undefined) throw new Error('个人化设置管理器尚未初始化')
+  if (personalizationManager === undefined) throw new Error('个性化设置管理器尚未初始化')
   return personalizationManager
 }
 
@@ -428,7 +576,14 @@ function installMenu(): void {
     {
       label: '文件',
       submenu: [
-        { label: '个人化设置...', click: () => { void openPersonalization() } },
+        { label: '个性化设置...', click: () => { void openPersonalization() } },
+        {
+          label: '个性化皮肤',
+          submenu: [
+            { label: '选择本地图片...', enabled: petWindow !== undefined && !petSkinMutationActive, click: () => { void choosePetSkin() } },
+            { label: '恢复默认皮肤', enabled: petWindow?.customSkinConfigured === true && !petSkinMutationActive, click: () => { void resetPetSkin() } },
+          ],
+        },
         { label: '设置', enabled: latestView?.phase === 'ready', click: () => { void openSettings() } },
         { label: '检查更新', click: () => { void updater?.check(true) } },
         { type: 'separator' },
@@ -471,7 +626,20 @@ function installMenu(): void {
       ],
     },
     { label: '编辑', submenu: [{ role: 'copy', label: '复制' }, { role: 'paste', label: '粘贴' }, { role: 'selectAll', label: '全选' }] },
-    { label: '视图', submenu: [{ role: 'reload', label: '重新加载' }, { role: 'toggleDevTools', label: '开发者工具' }, { type: 'separator' }, { role: 'resetZoom', label: '实际大小' }, { role: 'zoomIn', label: '放大' }, { role: 'zoomOut', label: '缩小' }, { role: 'togglefullscreen', label: '全屏' }] },
+    {
+      label: '视图',
+      submenu: [
+        { label: '桌面宠物', type: 'checkbox', checked: petWindow?.enabled ?? true, click: item => { void setPetEnabled(item.checked) } },
+        { type: 'separator' },
+        { role: 'reload', label: '重新加载' },
+        { role: 'toggleDevTools', label: '开发者工具' },
+        { type: 'separator' },
+        { role: 'resetZoom', label: '实际大小' },
+        { role: 'zoomIn', label: '放大' },
+        { role: 'zoomOut', label: '缩小' },
+        { role: 'togglefullscreen', label: '全屏' },
+      ],
+    },
     {
       label: '帮助',
       submenu: [
@@ -495,12 +663,31 @@ async function startApplication(): Promise<void> {
     cachedCatalog: false,
   }
   mainWindow = createWindow()
+  petWindow = new PetWindowController({
+    page: petPage,
+    preload: petPreload,
+    icon: join(app.getAppPath(), 'assets', 'icon.png'),
+    userData: app.getPath('userData'),
+    onFatal: logFatalError,
+  })
+  await petWindow.start()
+  petEvents = new PetEventController({
+    webSocketFactory: url => new WebSocket(url) as unknown as PetWebSocket,
+  })
+  disposePetEvents = petEvents.subscribe(state => { petWindow?.setState(toPetWindowState(state)) })
+  petWindow.setState(toPetWindowState(petEvents.snapshot()))
+  mainWindow.on('show', () => { petWindow?.setMainVisible(true) })
+  mainWindow.on('hide', () => { petWindow?.setMainVisible(false) })
   mainWindow.on('close', (event) => {
     if (quitting) return
     event.preventDefault()
     mainWindow?.hide()
   })
-  mainWindow.on('closed', () => { mainWindow = undefined })
+  mainWindow.on('closed', () => {
+    mainWindow = undefined
+    if (!quitting) petWindow?.setMainVisible(false)
+  })
+  petWindow.setMainVisible(mainWindow.isVisible())
   createTray()
   await mainWindow.loadFile(setupPage)
   const store = new RuntimeStore(runtimeRoot())
@@ -516,7 +703,11 @@ async function startApplication(): Promise<void> {
     async onReady(url, _runtime, preparedCliDirectory) {
       cliDirectory = preparedCliDirectory
       trustedOrigin = url.origin
+      activePetSession = undefined
+      petEvents?.setActiveSession(undefined)
+      petEvents?.start(url.origin)
       installMenu()
+      installTrayMenu()
       if (mainWindow !== undefined) await mainWindow.loadURL(url.href)
     },
     onOpenSettingsDocument: openTextDocument,
@@ -540,6 +731,7 @@ async function startApplication(): Promise<void> {
   })
   updater = new ShellUpdater(mainWindow, async () => {
     pluginManager?.dispose()
+    await stopPet()
     await controller?.stop()
     quitting = true
   }, showUpdateProgress)
@@ -555,6 +747,30 @@ function logFatalError(error: unknown): void {
   const detail = error instanceof Error ? (error.stack ?? error.message) : String(error)
   appendFileSync(join(directory, 'desktop.log'), `[${new Date().toISOString()}] ${detail}\n`, 'utf8')
 }
+
+ipcMain.on('pet:set-active-session', (event, value: unknown) => {
+  if (!fromTrustedDshWindow(event)) return
+  try {
+    const sessionId = parseActivePetSession(value)
+    if (sessionId === activePetSession) return
+    activePetSession = sessionId
+    petEvents?.setActiveSession(sessionId)
+  } catch {
+    // Invalid page messages cannot change the foreground reply source.
+  }
+})
+ipcMain.on('pet:ready', (event) => { petSender(event)?.rendererDidLoad() })
+ipcMain.on('pet:interaction', (event, value: unknown) => { petSender(event)?.setInteraction(value === true) })
+ipcMain.on('pet:focus-main', (event) => { if (petSender(event) !== undefined) showMainWindow() })
+ipcMain.on('pet:hide', (event) => { if (petSender(event) !== undefined) void setPetEnabled(false) })
+ipcMain.handle('pet:respond', async (event, approvalId: unknown, outcome: unknown) => {
+  fromPetWindow(event)
+  if (typeof approvalId !== 'string' || approvalId.length === 0 || approvalId.length > 256
+    || (outcome !== 'allowed-once' && outcome !== 'rejected')) throw new Error('桌面宠物审批参数无效')
+  const events = petEvents
+  if (events === undefined) throw new Error('DSH 审批连接不可用')
+  return events.decide({ approvalId, outcome })
+})
 
 ipcMain.handle('runtime:get-view', (event) => {
   runtimeClient(event)
@@ -661,7 +877,7 @@ else {
       void dialog.showMessageBox(window, {
         type: 'warning',
         title: '退出 DeepSeek Harness',
-        message: '个人化设置有尚未保存的更改。',
+        message: '个性化设置有尚未保存的更改。',
         detail: '退出应用将放弃这些更改。',
         buttons: ['继续编辑', '放弃更改并退出'],
         defaultId: 0,
@@ -674,7 +890,7 @@ else {
       })
       return
     }
-    if (controller === undefined) {
+    if (controller === undefined && petWindow === undefined) {
       tray?.destroy()
       tray = undefined
       return
@@ -684,7 +900,7 @@ else {
     pluginManager?.dispose()
     tray?.destroy()
     tray = undefined
-    void controller.stop().finally(() => { app.quit() })
+    void Promise.all([stopPet(), controller?.stop()]).finally(() => { app.quit() })
   })
   app.whenReady().then(startApplication).catch((error: unknown) => {
     logFatalError(error)

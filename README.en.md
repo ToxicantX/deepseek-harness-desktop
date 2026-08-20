@@ -37,6 +37,12 @@ Open the global Agent personalization editor from **File → Personalization...*
 
 This document is a user-preference layer. It does not modify an Agent preset or grant tools and permissions the preset does not provide. Presets composed with `@deepseek-ai/dsh-agent-instructions` load it for subsequent new sessions while retaining their own role, tools, capabilities, and security boundaries; a workspace `AGENTS.md` can add more specific project rules. Personalization text enters model context, so it must not contain API keys, tokens, passwords, or other credentials.
 
+## Desktop pet skins
+
+Choose a PNG, JPEG, or WebP still image from **File → Pet Skin → Choose Local Image...**. The Shell rejects files larger than 8 MB or images larger than 4096×4096, normalizes valid images to PNG with a longest edge of 512 pixels, and stores the result as `desktop-pet-skin.png` under application `userData`. The original image path never reaches the pet renderer or DSH Runtime.
+
+Select **File → Pet Skin → Restore Default Skin** to delete the custom file and immediately restore the bundled icon. A custom skin remains active after Shell restarts and pet renderer recovery.
+
 ## Plugins
 
 Open the desktop plugin manager from **Runtime → Manage Plugins**. It lists plugins installed in the current Web profile and supports installing and removing them. For installation, enter a controlled npm package spec or a GitHub HTTPS / `github:` spec, such as `@scope/plugin@1.2.3`, `https://github.com/owner/repo.git`, or `github:owner/repo`. An update action appears only after the bundled pnpm confirms an actionable newer npm version; Git sources, pinned versions, network failures, and unresolved update states show no update action. The manager shows operation progress and logs.

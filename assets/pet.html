@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'none'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>DSH 桌面宠物</title>
+  <link rel="stylesheet" href="pet.css">
+</head>
+<body>
+  <main id="pet-page" data-state="idle" aria-label="DSH 桌面宠物">
+    <section id="bubble" class="bubble" data-interactive hidden aria-live="polite" aria-atomic="true">
+      <header class="bubble-header">
+        <span id="session-label" class="session-label">DeepSeek Harness</span>
+        <button id="open-main" class="open-main" type="button">打开</button>
+        <button id="hide-pet" class="icon-button" type="button" title="隐藏宠物" aria-label="隐藏宠物">X</button>
+      </header>
+      <p id="status-text" class="status-text"></p>
+      <p id="reply-text" class="reply-text"></p>
+      <div id="approval" class="approval" hidden>
+        <strong id="approval-tool" class="approval-tool"></strong>
+        <p id="approval-reason" class="approval-reason"></p>
+        <p id="approval-count" class="approval-count"></p>
+        <div class="approval-actions">
+          <button id="reject-approval" class="command secondary" type="button">拒绝</button>
+          <button id="allow-approval" class="command primary" type="button">允许一次</button>
+        </div>
+      </div>
+    </section>
+    <div id="mascot" class="mascot" data-interactive title="拖动宠物；双击打开 DSH" aria-label="DSH 宠物，双击打开主窗口" role="button" tabindex="0">
+      <img id="pet-skin" src="icon.png" alt="">
+      <span id="state-indicator" class="state-indicator" aria-hidden="true"></span>
+    </div>
+  </main>
+</body>
+</html>

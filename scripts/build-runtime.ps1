@@ -23,6 +23,7 @@ $ArchiveRuntime = Join-Path $Work 'archive-runtime'
 $Tools = Join-Path $Runtime 'tools'
 $RepositoryRoot = Split-Path $PSScriptRoot -Parent
 $RepairPluginSource = Join-Path $RepositoryRoot 'runtime/session-repair-plugin'
+$PetBridgePluginSource = Join-Path $RepositoryRoot 'runtime/pet-bridge-plugin'
 $DesktopPatchSource = Join-Path $RepositoryRoot 'runtime/desktop.patch.yml'
 $ArtifactBase = "dsh-runtime-$DshVersion-desktop.$RuntimeRevision-win-x64"
 $Archive = Join-Path $OutputDirectory "$ArtifactBase.zip"
@@ -42,10 +43,14 @@ if ($DeclaredVersion -ne $DshVersion) {
 
 $App = Join-Path $Runtime 'app'
 $RepairPlugin = Join-Path $App 'plugins/session-repair'
+$PetBridgePlugin = Join-Path $App 'plugins/pet-bridge'
 New-Item $App -ItemType Directory -Force | Out-Null
 if (-not (Test-Path (Join-Path $RepairPluginSource 'index.js'))) { throw 'Session repair runtime plugin is incomplete; index.js is missing.' }
+if (-not (Test-Path (Join-Path $PetBridgePluginSource 'client.js'))) { throw 'Desktop pet bridge plugin is incomplete; client.js is missing.' }
 New-Item $RepairPlugin -ItemType Directory -Force | Out-Null
+New-Item $PetBridgePlugin -ItemType Directory -Force | Out-Null
 Copy-Item (Join-Path $RepairPluginSource '*') $RepairPlugin -Recurse -Force
+Copy-Item (Join-Path $PetBridgePluginSource '*') $PetBridgePlugin -Recurse -Force
 Copy-Item $DesktopPatchSource (Join-Path $App 'desktop.patch.yml') -Force
 @"
 {
@@ -53,7 +58,8 @@ Copy-Item $DesktopPatchSource (Join-Path $App 'desktop.patch.yml') -Force
   "type": "module",
   "dependencies": {
     "@deepseek-ai/dsh": "$DshVersion",
-    "@deepseek-ai/dsh-desktop-session-repair": "file:./plugins/session-repair"
+    "@deepseek-ai/dsh-desktop-session-repair": "file:./plugins/session-repair",
+    "@deepseek-ai/dsh-desktop-pet-bridge": "file:./plugins/pet-bridge"
   }
 }
 "@ | Set-Content (Join-Path $App 'package.json') -Encoding utf8NoBOM
@@ -79,7 +85,7 @@ try {
   $InstalledVersion = node -e "const p=require(process.argv[1]); process.stdout.write(p.version)" $DshManifest
   if ($InstalledVersion -ne $DshVersion) { throw "Installed DSH version $InstalledVersion does not match $DshVersion." }
   # DSH links its manifest dependency closure into each profile for bare plugin resolution.
-  node -e 'const fs=require("node:fs"); const path=process.argv[1]; const value=JSON.parse(fs.readFileSync(path, "utf8")); value.dependencies ??= {}; value.dependencies["@deepseek-ai/dsh-desktop-session-repair"] = "0.1.0"; fs.writeFileSync(path, JSON.stringify(value, null, 2) + "\n")' $DshManifest
+  node -e 'const fs=require("node:fs"); const path=process.argv[1]; const value=JSON.parse(fs.readFileSync(path, "utf8")); value.dependencies ??= {}; value.dependencies["@deepseek-ai/dsh-desktop-session-repair"] = "0.1.0"; value.dependencies["@deepseek-ai/dsh-desktop-pet-bridge"] = "0.1.0"; fs.writeFileSync(path, JSON.stringify(value, null, 2) + "\n")' $DshManifest
   if ($LASTEXITCODE -ne 0) { throw 'Failed to register the desktop plugin in the packaged DSH dependency closure.' }
 } finally {
   Pop-Location

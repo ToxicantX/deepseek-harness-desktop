@@ -6,6 +6,26 @@ import type { RuntimeView } from './runtime-controller.ts'
 import type { SessionRepairAnomalyKind, SessionRepairInspection, SessionRepairResult, SessionRepairRollbackResult } from './session-repair.ts'
 import type { ShellUpdateProgress } from './shell-updater.ts'
 
+const PET_ACTIVE_SESSION_MESSAGE = 'dsh/desktop-pet-active-session'
+
+function petActiveSession(value: unknown): string | null | undefined {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const payload = value as Record<string, unknown>
+  if (payload.type !== PET_ACTIVE_SESSION_MESSAGE) return undefined
+  if (payload.sessionId === null) return null
+  if (typeof payload.sessionId !== 'string'
+    || payload.sessionId.length === 0
+    || payload.sessionId.length > 128
+    || !/^[0-9A-Za-z._~-]+$/u.test(payload.sessionId)) return undefined
+  return payload.sessionId
+}
+
+window.addEventListener('message', (event) => {
+  if (event.source !== window || event.origin !== window.location.origin) return
+  const sessionId = petActiveSession(event.data)
+  if (sessionId !== undefined) ipcRenderer.send('pet:set-active-session', sessionId)
+})
+
 function element<T extends HTMLElement>(id: string): T {
   const value = document.querySelector<T>('#' + id)
   if (value === null) throw new Error('page is missing #' + id)
@@ -693,7 +713,7 @@ interface PersonalizationDocument {
 }
 
 const PERSONALIZATION_TEMPLATE = [
-  '# 全局 Agent 个人化',
+  '# 全局 Agent 个性化',
   '',
   '## 沟通方式',
   '',
@@ -770,13 +790,13 @@ function initializePersonalizationPage(): void {
     if (busy) return
     if (confirmDiscard && isDirty() && !window.confirm('放弃尚未保存的更改并重新加载？')) return
     setBusy(true)
-    setStatus('正在读取全局个人化设置...')
+    setStatus('正在读取全局个性化设置...')
     try {
       snapshot = await ipcRenderer.invoke('personalization:read') as PersonalizationDocument
       editor.value = snapshot.content
       baseline = editor.value
       path.textContent = snapshot.path
-      setStatus(snapshot.exists ? '已加载全局个人化设置' : '尚未创建全局个人化设置', 'success')
+      setStatus(snapshot.exists ? '已加载全局个性化设置' : '尚未创建全局个性化设置', 'success')
     } catch (error: unknown) {
       setStatus(errorMessage(error), 'error')
     } finally {
@@ -789,7 +809,7 @@ function initializePersonalizationPage(): void {
     const current = snapshot
     if (busy || current === undefined || !isDirty() || byteLength() > current.maxBytes) return
     setBusy(true)
-    setStatus(editor.value.trim().length === 0 ? '正在移除全局个人化设置...' : '正在保存全局个人化设置...')
+    setStatus(editor.value.trim().length === 0 ? '正在移除全局个性化设置...' : '正在保存全局个性化设置...')
     try {
       snapshot = await ipcRenderer.invoke('personalization:save', {
         content: editor.value,
@@ -798,7 +818,7 @@ function initializePersonalizationPage(): void {
       editor.value = snapshot.content
       baseline = editor.value
       path.textContent = snapshot.path
-      setStatus(snapshot.exists ? '已保存；后续新会话将使用该设置' : '已移除全局个人化设置', 'success')
+      setStatus(snapshot.exists ? '已保存；后续新会话将使用该设置' : '已移除全局个性化设置', 'success')
     } catch (error: unknown) {
       setStatus(errorMessage(error), 'error')
     } finally {

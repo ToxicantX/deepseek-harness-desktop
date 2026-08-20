@@ -21,7 +21,7 @@ export default defineConfig([
   },
   {
     ...common,
-    entry: ['src/preload.ts'],
+    entry: ['src/preload.ts', 'src/pet-preload.ts'],
     format: 'cjs',
     outExtensions: () => ({ js: '.cjs' }),
     clean: false,
