@@ -7,7 +7,7 @@ import { createRequire } from 'node:module'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { RuntimeManifest } from '../src/catalog.ts'
-import { RuntimeStore } from '../src/runtime-store.ts'
+import { RuntimeStore, validateRuntimeArchiveEntry } from '../src/runtime-store.ts'
 
 const temporaryDirectories: string[] = []
 const execFileAsync = promisify(execFile)
@@ -41,6 +41,23 @@ async function temporaryStore(): Promise<RuntimeStore> {
   const directory = await mkdtemp(join(tmpdir(), 'dsh-desktop-store-'))
   temporaryDirectories.push(directory)
   return new RuntimeStore(directory)
+}
+
+async function patchedArchiveEntry(fileName: string, externalFileAttributes: number): Promise<Buffer> {
+  if (Buffer.byteLength(fileName) !== 4) throw new Error('patched ZIP fixture entry name must be four bytes')
+  const fixture = await mkdtemp(join(tmpdir(), 'dsh-desktop-hostile-zip-'))
+  temporaryDirectories.push(fixture)
+  const archive = join(fixture, 'hostile.zip')
+  await writeFile(join(fixture, 'safe'), '../outside')
+  await execFileAsync(path7za, ['a', '-tzip', archive, 'safe'], { cwd: fixture })
+  const bytes = Buffer.from(await readFile(archive))
+  const localHeader = bytes.indexOf(Buffer.from([0x50, 0x4b, 0x03, 0x04]))
+  const centralHeader = bytes.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]))
+  if (localHeader < 0 || centralHeader < 0) throw new Error('ZIP fixture headers are missing')
+  Buffer.from(fileName).copy(bytes, localHeader + 30)
+  Buffer.from(fileName).copy(bytes, centralHeader + 46)
+  bytes.writeUInt32LE(externalFileAttributes >>> 0, centralHeader + 38)
+  return bytes
 }
 
 async function revisionArchive(runtimeRevision: number, validLinks = true): Promise<{ bytes: Buffer; manifest: RuntimeManifest }> {
@@ -83,6 +100,31 @@ async function revisionArchive(runtimeRevision: number, validLinks = true): Prom
 afterEach(async () => {
   vi.unstubAllGlobals()
   await Promise.all(temporaryDirectories.splice(0).map(directory => rm(directory, { recursive: true, force: true })))
+})
+
+describe('runtime archive entry validation', () => {
+  it.each([
+    '../escape.exe',
+    'app/../../escape.exe',
+    String.raw`app\..\escape.exe`,
+    '/absolute/escape.exe',
+    'C:/absolute/escape.exe',
+    String.raw`\\server\share\escape.exe`,
+    'app/file.exe:stream',
+  ])('rejects unsafe archive path %s before extraction', fileName => {
+    expect(() => { validateRuntimeArchiveEntry({ fileName, externalFileAttributes: 0 }) }).toThrow('unsafe path')
+  })
+
+  it('rejects archive symbolic links before extraction', () => {
+    expect(() => {
+      validateRuntimeArchiveEntry({ fileName: 'app/node-link', externalFileAttributes: 0o120777 << 16 })
+    }).toThrow('forbidden symbolic link')
+  })
+
+  it('accepts ordinary relative files and directories', () => {
+    expect(() => { validateRuntimeArchiveEntry({ fileName: 'app/lib/bin.js', externalFileAttributes: 0o100644 << 16 }) }).not.toThrow()
+    expect(() => { validateRuntimeArchiveEntry({ fileName: 'tools/', externalFileAttributes: 0o040755 << 16 }) }).not.toThrow()
+  })
 })
 
 describe('RuntimeStore', () => {
@@ -198,6 +240,22 @@ describe('RuntimeStore', () => {
     expect(restored?.manifest.runtimeRevision).toBe(1)
     expect(await readFile(restored?.nodeExecutable ?? '', 'utf8')).toBe('revision 1')
     expect((await readdir(store.runtimesDirectory)).every(name => !name.includes('.staging-') && !name.includes('.backup-'))).toBe(true)
+  })
+
+  it('rejects a real ZIP symbolic-link entry before extract-zip can create it', async () => {
+    const store = await temporaryStore()
+    const bytes = await patchedArchiveEntry('link', 0o120777 << 16)
+    const value: RuntimeManifest = {
+      ...manifest(),
+      archive: {
+        url: 'https://example.test/hostile.zip',
+        size: bytes.byteLength,
+        sha256: createHash('sha256').update(bytes).digest('hex'),
+      },
+    }
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array(bytes), { status: 200 })))
+    await expect(store.install(value)).rejects.toThrow('forbidden symbolic link')
+    expect((await readdir(store.runtimesDirectory)).every(name => !name.includes('.staging-'))).toBe(true)
   })
 
   it('rejects a downloaded archive before extraction when its digest differs', async () => {

@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="pet.css">
 </head>
 <body>
-  <main id="pet-page" data-state="idle" aria-label="DSH 桌面宠物">
+  <main id="pet-page" data-state="idle" data-custom-skin="false" aria-label="DSH 桌面宠物">
     <section id="bubble" class="bubble" data-interactive hidden aria-live="polite" aria-atomic="true">
       <header class="bubble-header">
         <span id="session-label" class="session-label">DeepSeek Harness</span>
@@ -27,8 +27,9 @@
         </div>
       </div>
     </section>
-    <div id="mascot" class="mascot" data-interactive title="拖动宠物；双击打开 DSH" aria-label="DSH 宠物，双击打开主窗口" role="button" tabindex="0">
-      <img id="pet-skin" src="icon.png" alt="">
+    <div id="mascot" class="mascot" data-interactive title="拖动宠物；单击打开 DSH" aria-label="DSH 宠物，单击打开主窗口" role="button" tabindex="0">
+      <canvas id="pet-character" width="192" height="192" aria-hidden="true"></canvas>
+      <img id="pet-skin" src="icon.png" alt="" hidden>
       <span id="state-indicator" class="state-indicator" aria-hidden="true"></span>
     </div>
   </main>

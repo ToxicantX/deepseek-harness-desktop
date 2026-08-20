@@ -2,17 +2,23 @@ import { readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { BrowserWindow, nativeImage, screen, type NativeImage, type Rectangle, type WebContents } from 'electron'
+import { GifReader } from 'omggif'
 import { clampPetBounds, defaultPetBounds } from './desktop-pet.ts'
 
 const WIDTH = 360
 const HEIGHT = 240
 const EDGE_GAP = 16
+const MASCOT_SHAPE: Rectangle = { x: 256, y: 136, width: 96, height: 96 }
 const SAVE_DELAY_MS = 250
 const STREAM_UPDATE_MS = 100
 const MAX_SKIN_SOURCE_BYTES = 8 * 1024 * 1024
 const MAX_SKIN_SOURCE_DIMENSION = 4_096
 const MAX_SKIN_RENDER_DIMENSION = 512
 const MAX_SKIN_PNG_BYTES = 2 * 1024 * 1024
+const MAX_ANIMATED_SKIN_BYTES = 2 * 1024 * 1024
+const MAX_ANIMATED_SKIN_DIMENSION = 512
+const MAX_ANIMATED_SKIN_FRAMES = 120
+const MAX_ANIMATED_SKIN_FRAME_PIXELS = 16 * 1024 * 1024
 const MAX_SKIN_DATA_URL_LENGTH = 3_000_000
 
 export type PetMode = 'idle' | 'thinking' | 'speaking' | 'approval' | 'success' | 'error' | 'unavailable'
@@ -32,6 +38,17 @@ export interface PetRendererState {
   reply?: string
   sessionLabel?: string
   approval?: PetApprovalView
+}
+
+interface PetSkinSource {
+  dataUrl: string
+  reducedMotionDataUrl?: string
+}
+
+interface PetDragState {
+  pointerX: number
+  pointerY: number
+  bounds: Rectangle
 }
 
 interface StoredPetSettings {
@@ -76,6 +93,104 @@ function normalizedSkin(image: NativeImage): { png: Buffer; dataUrl: string } {
   return { png, dataUrl }
 }
 
+function hasGifSignature(bytes: Buffer): boolean {
+  if (bytes.byteLength < 6) return false
+  const signature = bytes.subarray(0, 6).toString('ascii')
+  return signature === 'GIF87a' || signature === 'GIF89a'
+}
+
+function countGifFramesBounded(bytes: Buffer): number {
+  if (!hasGifSignature(bytes) || bytes.byteLength < 13) throw new Error('所选文件不是有效的动态 GIF')
+  let offset = 13
+  const logicalPacked = bytes[10]
+  if (logicalPacked === undefined) throw new Error('所选文件不是有效的动态 GIF')
+  if ((logicalPacked & 0x80) !== 0) offset += 3 * (1 << ((logicalPacked & 0x07) + 1))
+  const skipSubBlocks = (): void => {
+    while (offset < bytes.byteLength) {
+      const size = bytes[offset]
+      if (size === undefined) throw new Error('所选文件不是有效的动态 GIF')
+      offset += 1
+      if (size === 0) return
+      if (offset + size > bytes.byteLength) throw new Error('所选文件不是有效的动态 GIF')
+      offset += size
+    }
+    throw new Error('所选文件不是有效的动态 GIF')
+  }
+  let frameCount = 0
+  while (offset < bytes.byteLength) {
+    const marker = bytes[offset]
+    offset += 1
+    if (marker === 0x3b) return frameCount
+    if (marker === 0x21) {
+      if (offset >= bytes.byteLength) throw new Error('所选文件不是有效的动态 GIF')
+      offset += 1
+      skipSubBlocks()
+      continue
+    }
+    if (marker !== 0x2c || offset + 9 > bytes.byteLength) throw new Error('所选文件不是有效的动态 GIF')
+    frameCount += 1
+    if (frameCount > MAX_ANIMATED_SKIN_FRAMES) throw new Error('动态 GIF 不能超过 120 帧')
+    const imagePacked = bytes[offset + 8]
+    if (imagePacked === undefined) throw new Error('所选文件不是有效的动态 GIF')
+    offset += 9
+    if ((imagePacked & 0x80) !== 0) offset += 3 * (1 << ((imagePacked & 0x07) + 1))
+    if (offset >= bytes.byteLength) throw new Error('所选文件不是有效的动态 GIF')
+    offset += 1
+    skipSubBlocks()
+  }
+  throw new Error('所选文件不是有效的动态 GIF')
+}
+
+function animatedGifSkin(bytes: Buffer): PetSkinSource {
+  if (bytes.byteLength === 0 || bytes.byteLength > MAX_ANIMATED_SKIN_BYTES) {
+    throw new Error('动态 GIF 皮肤不能超过 2 MB')
+  }
+  const scannedFrameCount = countGifFramesBounded(bytes)
+  if (scannedFrameCount < 2) throw new Error('动态 GIF 至少需要 2 帧')
+  let reader: GifReader
+  try { reader = new GifReader(bytes) }
+  catch { throw new Error('所选文件不是有效的动态 GIF') }
+  if (reader.width <= 0 || reader.height <= 0
+    || reader.width > MAX_ANIMATED_SKIN_DIMENSION || reader.height > MAX_ANIMATED_SKIN_DIMENSION) {
+    throw new Error('动态 GIF 画布尺寸必须在 1 到 512 像素之间')
+  }
+  const frameCount = reader.numFrames()
+  if (frameCount !== scannedFrameCount) throw new Error('动态 GIF 帧元数据不一致')
+  let framePixels = 0
+  for (let index = 0; index < frameCount; index += 1) {
+    const frame = reader.frameInfo(index)
+    if (frame.width <= 0 || frame.height <= 0 || frame.x < 0 || frame.y < 0
+      || frame.x + frame.width > reader.width || frame.y + frame.height > reader.height) {
+      throw new Error('动态 GIF 包含无效帧区域')
+    }
+    framePixels += frame.width * frame.height
+    if (framePixels > MAX_ANIMATED_SKIN_FRAME_PIXELS) throw new Error('动态 GIF 的总帧像素过大')
+  }
+  const firstFrame = Buffer.alloc(reader.width * reader.height * 4)
+  try { reader.decodeAndBlitFrameBGRA(0, firstFrame) }
+  catch { throw new Error('无法解码动态 GIF 首帧') }
+  const poster = normalizedSkin(nativeImage.createFromBitmap(firstFrame, {
+    width: reader.width,
+    height: reader.height,
+    scaleFactor: 1,
+  }))
+  const dataUrl = 'data:image/gif;base64,' + bytes.toString('base64')
+  if (dataUrl.length > MAX_SKIN_DATA_URL_LENGTH) throw new Error('动态 GIF 皮肤编码后过大')
+  return { dataUrl, reducedMotionDataUrl: poster.dataUrl }
+}
+
+export function parsePetWindowShape(value: unknown): Rectangle | undefined {
+  if (value === null) return undefined
+  if (typeof value !== 'object' || Array.isArray(value)) throw new Error('pet shape must be a rectangle')
+  const input = value as Record<string, unknown>
+  if (typeof input.x !== 'number' || !Number.isSafeInteger(input.x) || input.x < 0
+    || typeof input.y !== 'number' || !Number.isSafeInteger(input.y) || input.y < 0
+    || typeof input.width !== 'number' || !Number.isSafeInteger(input.width) || input.width <= 0
+    || typeof input.height !== 'number' || !Number.isSafeInteger(input.height) || input.height <= 0
+    || input.x + input.width > WIDTH || input.y + input.height > HEIGHT) throw new Error('pet shape is outside the window')
+  return { x: input.x, y: input.y, width: input.width, height: input.height }
+}
+
 function parseSettings(value: unknown): StoredPetSettings {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return { version: 1, manuallyHidden: false }
   const input = value as Record<string, unknown>
@@ -94,28 +209,33 @@ function parseSettings(value: unknown): StoredPetSettings {
 export class PetWindowController {
   private readonly settingsPath: string
   private readonly skinPath: string
+  private readonly animatedSkinPath: string
   private window: BrowserWindow | undefined
   private settings: StoredPetSettings = { version: 1, manuallyHidden: false }
-  private skinDataUrl: string | undefined
+  private skin: PetSkinSource | undefined
   private state: PetRendererState = { mode: 'unavailable', status: 'DSH 正在启动' }
   private mainVisible = true
   private rendererReady = false
   private hoverInteractive = false
+  private dragState: PetDragState | undefined
+  private bubbleShape: Rectangle | undefined
   private disposing = false
   private saveTimer: NodeJS.Timeout | undefined
   private stateTimer: NodeJS.Timeout | undefined
   private savePromise: Promise<void> = Promise.resolve()
+  private skinMutationPromise: Promise<void> = Promise.resolve()
   private crashTimes: number[] = []
   private readonly displayChanged = (): void => { this.reclamp() }
 
   constructor(private readonly options: PetWindowOptions) {
     this.settingsPath = join(options.userData, 'desktop-pet.json')
     this.skinPath = join(options.userData, 'desktop-pet-skin.png')
+    this.animatedSkinPath = join(options.userData, 'desktop-pet-skin.gif')
   }
 
   async start(): Promise<void> {
     this.settings = await this.readSettings()
-    this.skinDataUrl = await this.readSkin()
+    this.skin = await this.readSkin()
     this.createWindow()
     screen.on('display-added', this.displayChanged)
     screen.on('display-removed', this.displayChanged)
@@ -123,7 +243,7 @@ export class PetWindowController {
   }
 
   get enabled(): boolean { return !this.settings.manuallyHidden }
-  get customSkinConfigured(): boolean { return this.skinDataUrl !== undefined }
+  get customSkinConfigured(): boolean { return this.skin !== undefined }
   get visible(): boolean { return this.window?.isVisible() ?? false }
   get webContents(): WebContents | undefined { return this.window?.webContents }
 
@@ -138,28 +258,35 @@ export class PetWindowController {
     await this.save()
   }
 
-  async setCustomSkin(sourcePath: string): Promise<void> {
-    const source = await stat(sourcePath)
-    if (!source.isFile() || source.size <= 0 || source.size > MAX_SKIN_SOURCE_BYTES) {
-      throw new Error('宠物皮肤图片必须是不超过 8 MB 的本地文件')
-    }
-    const skin = normalizedSkin(nativeImage.createFromPath(sourcePath))
-    const temporary = this.skinPath + '.tmp'
-    try {
-      await writeFile(temporary, skin.png)
-      await rename(temporary, this.skinPath)
-    } catch (error: unknown) {
-      await rm(temporary, { force: true }).catch(() => undefined)
-      throw error
-    }
-    this.skinDataUrl = skin.dataUrl
-    this.sendSkin()
+  setCustomSkin(sourcePath: string): Promise<void> {
+    return this.mutateSkin(async () => {
+      const source = await stat(sourcePath)
+      if (!source.isFile() || source.size <= 0 || source.size > MAX_SKIN_SOURCE_BYTES) {
+        throw new Error('宠物皮肤文件必须是不超过 8 MB 的本地文件')
+      }
+      const bytes = await readFile(sourcePath)
+      if (bytes.byteLength === 0 || bytes.byteLength > MAX_SKIN_SOURCE_BYTES) {
+        throw new Error('宠物皮肤文件必须是不超过 8 MB 的本地文件')
+      }
+      if (hasGifSignature(bytes)) {
+        const skin = animatedGifSkin(bytes)
+        await this.persistSkin(this.animatedSkinPath, bytes, this.skinPath)
+        this.skin = skin
+      } else {
+        const skin = normalizedSkin(nativeImage.createFromBuffer(bytes))
+        await this.persistSkin(this.skinPath, skin.png, this.animatedSkinPath)
+        this.skin = { dataUrl: skin.dataUrl }
+      }
+      this.sendSkin()
+    })
   }
 
-  async resetCustomSkin(): Promise<void> {
-    await rm(this.skinPath, { force: true })
-    this.skinDataUrl = undefined
-    this.sendSkin()
+  resetCustomSkin(): Promise<void> {
+    return this.mutateSkin(async () => {
+      await Promise.all([rm(this.skinPath, { force: true }), rm(this.animatedSkinPath, { force: true })])
+      this.skin = undefined
+      this.sendSkin()
+    })
   }
 
   setState(state: PetRendererState): void {
@@ -178,6 +305,39 @@ export class PetWindowController {
 
   setInteraction(interactive: boolean): void {
     this.hoverInteractive = interactive
+    this.applyMousePolicy()
+  }
+
+  setBubbleShape(shape: Rectangle | undefined): void {
+    this.bubbleShape = shape
+    this.applyWindowShape()
+  }
+
+  startDrag(point: { x: number; y: number }): void {
+    const window = this.window
+    if (window === undefined || window.isDestroyed() || !window.isVisible()) return
+    this.dragState = { pointerX: point.x, pointerY: point.y, bounds: window.getBounds() }
+    this.applyMousePolicy()
+  }
+
+  dragTo(point: { x: number; y: number }): void {
+    const window = this.window
+    const drag = this.dragState
+    if (window === undefined || window.isDestroyed() || drag === undefined) return
+    const candidate = {
+      x: Math.round(drag.bounds.x + point.x - drag.pointerX),
+      y: Math.round(drag.bounds.y + point.y - drag.pointerY),
+      width: WIDTH,
+      height: HEIGHT,
+    }
+    const display = screen.getDisplayNearestPoint({ x: point.x, y: point.y })
+    window.setBounds(clampPetBounds(candidate, display.workArea), false)
+  }
+
+  endDrag(): void {
+    if (this.dragState === undefined) return
+    this.dragState = undefined
+    this.scheduleSave()
     this.applyMousePolicy()
   }
 
@@ -203,6 +363,8 @@ export class PetWindowController {
   async dispose(): Promise<void> {
     if (this.disposing) return
     this.disposing = true
+    await this.skinMutationPromise
+    this.dragState = undefined
     screen.off('display-added', this.displayChanged)
     screen.off('display-removed', this.displayChanged)
     screen.off('display-metrics-changed', this.displayChanged)
@@ -244,6 +406,7 @@ export class PetWindowController {
     this.rendererReady = false
     window.setAlwaysOnTop(true, 'floating')
     window.setMenu(null)
+    this.applyWindowShape()
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     window.webContents.on('will-navigate', (event, url) => { if (url !== window.webContents.getURL()) event.preventDefault() })
     window.webContents.on('did-finish-load', () => { this.rendererDidLoad() })
@@ -264,6 +427,7 @@ export class PetWindowController {
   private recoverRenderer(error: unknown): void {
     const failed = this.window
     if (failed === undefined) return
+    this.dragState = undefined
     this.window = undefined
     this.options.onFatal(error)
     const now = Date.now()
@@ -302,8 +466,23 @@ export class PetWindowController {
   private reconcileVisibility(): void {
     const window = this.window
     if (window === undefined || window.isDestroyed() || !this.rendererReady) return
-    if (!this.mainVisible && !this.settings.manuallyHidden) window.showInactive()
-    else window.hide()
+    if (!this.mainVisible && !this.settings.manuallyHidden) {
+      this.applyMousePolicy()
+      window.showInactive()
+      this.sendVisibility(true)
+    } else {
+      this.dragState = undefined
+      this.hoverInteractive = false
+      this.applyMousePolicy()
+      this.sendVisibility(false)
+      window.hide()
+    }
+  }
+
+  private sendVisibility(visible: boolean): void {
+    if (this.rendererReady && this.window !== undefined && !this.window.isDestroyed()) {
+      this.window.webContents.send('pet:visibility', visible)
+    }
   }
 
   private clearStateTimer(): void {
@@ -316,15 +495,28 @@ export class PetWindowController {
 
   private sendSkin(): void {
     if (this.rendererReady && this.window !== undefined && !this.window.isDestroyed()) {
-      this.window.webContents.send('pet:skin', { dataUrl: this.skinDataUrl ?? null })
+      this.window.webContents.send('pet:skin', {
+        dataUrl: this.skin?.dataUrl ?? null,
+        reducedMotionDataUrl: this.skin?.reducedMotionDataUrl ?? null,
+      })
     }
+  }
+
+  private applyWindowShape(): void {
+    const window = this.window
+    if (window === undefined || window.isDestroyed() || (process.platform !== 'win32' && process.platform !== 'linux')) return
+    window.setShape(this.bubbleShape === undefined ? [MASCOT_SHAPE] : [MASCOT_SHAPE, this.bubbleShape])
   }
 
   private applyMousePolicy(): void {
     const window = this.window
     if (window === undefined || window.isDestroyed()) return
+    if (process.platform === 'win32' || process.platform === 'linux') {
+      window.setIgnoreMouseEvents(false)
+      return
+    }
     const forced = this.state.approval !== undefined || (this.state.reply?.length ?? 0) > 0 || (this.state.status?.length ?? 0) > 0
-    window.setIgnoreMouseEvents(!(forced || this.hoverInteractive), { forward: true })
+    window.setIgnoreMouseEvents(!(forced || this.hoverInteractive || this.dragState !== undefined), { forward: true })
   }
 
   private scheduleSave(): void {
@@ -348,11 +540,47 @@ export class PetWindowController {
     catch { return { version: 1, manuallyHidden: false } }
   }
 
-  private async readSkin(): Promise<string | undefined> {
+  private mutateSkin(operation: () => Promise<void>): Promise<void> {
+    const result = this.skinMutationPromise.then(async () => {
+      if (this.disposing) throw new Error('桌面宠物正在关闭，无法修改皮肤')
+      await operation()
+    })
+    this.skinMutationPromise = result.catch(() => undefined)
+    return result
+  }
+
+  private async persistSkin(target: string, content: Buffer, stale: string): Promise<void> {
+    const temporary = target + '.tmp'
+    try {
+      await writeFile(temporary, content)
+      await rename(temporary, target)
+      try { await rm(stale, { force: true }) }
+      catch (error: unknown) {
+        await rm(target, { force: true }).catch(() => undefined)
+        throw error
+      }
+    } catch (error: unknown) {
+      await rm(temporary, { force: true }).catch(() => undefined)
+      throw error
+    }
+  }
+
+  private async readSkin(): Promise<PetSkinSource | undefined> {
+    try {
+      const source = await stat(this.animatedSkinPath)
+      if (source.isFile() && source.size > 0 && source.size <= MAX_ANIMATED_SKIN_BYTES) {
+        const bytes = await readFile(this.animatedSkinPath)
+        if (hasGifSignature(bytes)) return animatedGifSkin(bytes)
+      }
+    } catch {
+      // Invalid animated skins fall back to a persisted static skin or the default icon.
+    }
     try {
       const source = await stat(this.skinPath)
-      if (!source.isFile() || source.size <= 0 || source.size > MAX_SKIN_SOURCE_BYTES) return undefined
-      return normalizedSkin(nativeImage.createFromPath(this.skinPath)).dataUrl
+      if (!source.isFile() || source.size <= 0 || source.size > MAX_SKIN_PNG_BYTES) return undefined
+      const bytes = await readFile(this.skinPath)
+      if (bytes.byteLength === 0 || bytes.byteLength > MAX_SKIN_PNG_BYTES) return undefined
+      return { dataUrl: normalizedSkin(nativeImage.createFromBuffer(bytes)).dataUrl }
     } catch {
       return undefined
     }

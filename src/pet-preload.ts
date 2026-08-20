@@ -1,9 +1,11 @@
 import { ipcRenderer } from 'electron'
+import { createPetCharacter, type PetCharacterAnimator } from './pet-character.ts'
+import { DEFAULT_PET_SKIN, isDefaultPetSkin, parsePetSkinSource, selectPetSkinUrl, type PetSkinView } from './pet-skin.ts'
 
 type PetMode = 'idle' | 'thinking' | 'speaking' | 'approval' | 'success' | 'error' | 'unavailable'
 type ApprovalOutcome = 'allowed-once' | 'rejected'
 
-const MAX_SKIN_DATA_URL_LENGTH = 3_000_000
+const CLICK_DRAG_THRESHOLD = 4
 
 interface PetApprovalView {
   id: string
@@ -57,16 +59,6 @@ function approval(value: unknown): PetApprovalView | undefined {
   }
 }
 
-function skinUrl(value: unknown): string | undefined {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined
-  const dataUrl = (value as Record<string, unknown>).dataUrl
-  if (dataUrl === null) return 'icon.png'
-  if (typeof dataUrl !== 'string' || dataUrl.length > MAX_SKIN_DATA_URL_LENGTH) return undefined
-  const prefix = 'data:image/png;base64,'
-  if (!dataUrl.startsWith(prefix) || !/^[A-Za-z0-9+/]+={0,2}$/u.test(dataUrl.slice(prefix.length))) return undefined
-  return dataUrl
-}
-
 function state(value: unknown): PetRendererState {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return { mode: 'unavailable', status: '宠物连接不可用' }
   const input = value as Record<string, unknown>
@@ -81,6 +73,27 @@ function state(value: unknown): PetRendererState {
 }
 
 let latest: PetRendererState = { mode: 'idle' }
+let latestSkin: PetSkinView = DEFAULT_PET_SKIN
+let character: PetCharacterAnimator | undefined
+let petWindowVisible = false
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
+
+function applySkin(): void {
+  const builtIn = isDefaultPetSkin(latestSkin)
+  const page = element<HTMLElement>('pet-page')
+  const canvas = element<HTMLCanvasElement>('pet-character')
+  const image = element<HTMLImageElement>('pet-skin')
+  const visible = petWindowVisible && document.visibilityState === 'visible'
+  page.dataset.customSkin = String(!builtIn)
+  canvas.hidden = !builtIn
+  image.hidden = builtIn || !visible
+  if (!builtIn) {
+    const source = selectPetSkinUrl(latestSkin, reducedMotion.matches, visible)
+    if (image.getAttribute('src') !== source) image.src = source
+  }
+  character?.setReducedMotion(reducedMotion.matches)
+  character?.setActive(builtIn && visible)
+}
 let interaction: boolean | undefined
 
 function render(value: unknown): void {
@@ -92,6 +105,7 @@ function render(value: unknown): void {
   const status = clipped(latest.status, 120)
   document.body.dataset.state = latest.mode
   element('pet-page').dataset.state = latest.mode
+  character?.setMode(latest.mode)
   element('session-label').textContent = pending?.sessionLabel ?? latest.sessionLabel ?? 'DeepSeek Harness'
   element('status-text').textContent = status
   element('reply-text').textContent = pending === undefined ? reply : ''
@@ -102,6 +116,16 @@ function render(value: unknown): void {
   element<HTMLButtonElement>('allow-approval').disabled = pending?.responding ?? false
   element<HTMLButtonElement>('reject-approval').disabled = pending?.responding ?? false
   bubble.hidden = pending === undefined && reply.length === 0 && status.length === 0
+  if (bubble.hidden) ipcRenderer.send('pet:set-shape', null)
+  else {
+    const bounds = bubble.getBoundingClientRect()
+    ipcRenderer.send('pet:set-shape', {
+      x: Math.floor(bounds.x),
+      y: Math.floor(bounds.y),
+      width: Math.ceil(bounds.width) + 8,
+      height: Math.ceil(bounds.height),
+    })
+  }
   bubble.setAttribute('aria-live', pending === undefined ? 'polite' : 'assertive')
 }
 
@@ -117,29 +141,88 @@ async function respond(outcome: ApprovalOutcome): Promise<void> {
   }
 }
 
-function updateInteraction(target: EventTarget | null): void {
-  const interactive = target instanceof Element && target.closest('[data-interactive]') !== null
+function updateInteraction(clientX: number, clientY: number): void {
+  const target = document.elementFromPoint(clientX, clientY)
+  const interactive = target !== null && target.closest('[data-interactive]') !== null
   if (interactive === interaction) return
   interaction = interactive
   ipcRenderer.send('pet:interaction', interactive)
 }
 
 window.addEventListener('DOMContentLoaded', () => {
+  character = createPetCharacter(element<HTMLCanvasElement>('pet-character'))
+  character.setMode(latest.mode)
   element('allow-approval').addEventListener('click', () => { void respond('allowed-once') })
   element('reject-approval').addEventListener('click', () => { void respond('rejected') })
   element('open-main').addEventListener('click', () => { ipcRenderer.send('pet:focus-main') })
   element('hide-pet').addEventListener('click', () => { ipcRenderer.send('pet:hide') })
-  element('mascot').addEventListener('dblclick', () => { ipcRenderer.send('pet:focus-main') })
-  element('mascot').addEventListener('keydown', (event) => {
+  const mascot = element<HTMLElement>('mascot')
+  const skinImage = element<HTMLImageElement>('pet-skin')
+  skinImage.addEventListener('error', () => {
+    if (isDefaultPetSkin(latestSkin)) return
+    latestSkin = DEFAULT_PET_SKIN
+    applySkin()
+  })
+  let drag: { pointerId: number; startX: number; startY: number; moved: boolean } | undefined
+  mascot.addEventListener('pointerdown', event => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    drag = { pointerId: event.pointerId, startX: event.screenX, startY: event.screenY, moved: false }
+    character?.setDragging(true)
+    mascot.setPointerCapture(event.pointerId)
+    ipcRenderer.send('pet:drag-start', { x: event.screenX, y: event.screenY })
+  })
+  mascot.addEventListener('pointermove', event => {
+    if (drag === undefined || drag.pointerId !== event.pointerId) return
+    if (Math.abs(event.screenX - drag.startX) >= CLICK_DRAG_THRESHOLD
+      || Math.abs(event.screenY - drag.startY) >= CLICK_DRAG_THRESHOLD) drag.moved = true
+    ipcRenderer.send('pet:drag-move', { x: event.screenX, y: event.screenY })
+  })
+  const endActiveDrag = (pointerId: number): { moved: boolean } | undefined => {
+    if (drag === undefined || drag.pointerId !== pointerId) return undefined
+    const finished = { moved: drag.moved }
+    drag = undefined
+    character?.setDragging(false)
+    if (mascot.hasPointerCapture(pointerId)) mascot.releasePointerCapture(pointerId)
+    ipcRenderer.send('pet:drag-end')
+    return finished
+  }
+  const finishDrag = (event: PointerEvent, open: boolean): void => {
+    const finished = endActiveDrag(event.pointerId)
+    if (finished === undefined) return
+    updateInteraction(event.clientX, event.clientY)
+    if (open && !finished.moved) ipcRenderer.send('pet:focus-main')
+  }
+  const cancelActiveDrag = (): void => {
+    if (drag === undefined) return
+    endActiveDrag(drag.pointerId)
+    updateInteraction(-1, -1)
+  }
+  mascot.addEventListener('pointerup', event => { finishDrag(event, true) })
+  mascot.addEventListener('pointercancel', event => { finishDrag(event, false) })
+  mascot.addEventListener('lostpointercapture', event => {
+    if (endActiveDrag(event.pointerId) !== undefined) updateInteraction(-1, -1)
+  })
+  window.addEventListener('blur', cancelActiveDrag)
+  window.addEventListener('pagehide', () => { cancelActiveDrag(); character?.dispose() })
+  document.addEventListener('visibilitychange', applySkin)
+  mascot.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); ipcRenderer.send('pet:focus-main') }
   })
-  document.addEventListener('mousemove', event => { updateInteraction(event.target) })
-  document.addEventListener('mouseleave', () => { updateInteraction(null) })
+  document.addEventListener('mousemove', event => { updateInteraction(event.clientX, event.clientY) })
+  document.addEventListener('mouseleave', () => { updateInteraction(-1, -1) })
   ipcRenderer.on('pet:state', (_event, value: unknown) => { render(value) })
-  ipcRenderer.on('pet:skin', (_event, value: unknown) => {
-    const next = skinUrl(value)
-    if (next !== undefined) element<HTMLImageElement>('pet-skin').src = next
+  ipcRenderer.on('pet:visibility', (_event, visible: unknown) => {
+    if (typeof visible !== 'boolean') return
+    petWindowVisible = visible
+    applySkin()
   })
+  ipcRenderer.on('pet:skin', (_event, value: unknown) => {
+    const next = parsePetSkinSource(value)
+    if (next !== undefined) { latestSkin = next; applySkin() }
+  })
+  reducedMotion.addEventListener('change', applySkin)
+  applySkin()
   render({ mode: 'idle' })
   ipcRenderer.send('pet:ready')
 })

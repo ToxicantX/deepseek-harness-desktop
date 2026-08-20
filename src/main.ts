@@ -23,7 +23,7 @@ import { openPluginTerminal } from './cli-shell.ts'
 import { McpManager, type McpList } from './mcp-manager.ts'
 import { mutateMcpWithRuntime } from './mcp-restart.ts'
 import { PersonalizationManager } from './personalization-manager.ts'
-import { PetWindowController, type PetRendererState as PetWindowState } from './pet-window.ts'
+import { parsePetWindowShape, PetWindowController, type PetRendererState as PetWindowState } from './pet-window.ts'
 import { PluginManager } from './plugin-manager.ts'
 import { PluginRestartCoordinator } from './plugin-restart.ts'
 import { RuntimeController, type RuntimeView } from './runtime-controller.ts'
@@ -75,6 +75,7 @@ let petSkinMutationActive = false
 let latestView: RuntimeView | undefined
 let cliDirectory: string | undefined
 let trustedOrigin: string | undefined
+let mainUiLoaded = false
 let quitting = false
 
 function runtimeRoot(): string {
@@ -139,9 +140,9 @@ async function choosePetSkin(): Promise<void> {
   petSkinMutationActive = true
   try {
     const options = {
-      title: '选择个性化皮肤',
+      title: '选择静态图片或动态 GIF',
       properties: ['openFile' as const],
-      filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
+      filters: [{ name: '宠物皮肤', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }],
     }
     const parent = mainWindow === undefined || mainWindow.isDestroyed() ? undefined : mainWindow
     const selected = parent === undefined
@@ -194,6 +195,22 @@ function installTrayMenu(): void {
     { type: 'separator' },
     { label: '退出', click: () => { app.quit() } },
   ]))
+}
+
+function clearMainMenu(): void {
+  Menu.setApplicationMenu(null)
+  mainWindow?.setMenuBarVisibility(false)
+}
+
+function syncMainMenuVisibility(): void {
+  const window = mainWindow
+  if (window === undefined || window.isDestroyed()) return
+  let trustedPageLoaded = false
+  if (mainUiLoaded && latestView?.phase === 'ready' && trustedOrigin !== undefined) {
+    try { trustedPageLoaded = new URL(window.webContents.getURL()).origin === trustedOrigin }
+    catch { trustedPageLoaded = false }
+  }
+  window.setMenuBarVisibility(trustedPageLoaded)
 }
 
 function createWindow(options: { utility?: 'manager' | 'repair' | 'plugin' | 'mcp' | 'personalization' | 'update' } = {}): BrowserWindow {
@@ -254,8 +271,12 @@ function createWindow(options: { utility?: 'manager' | 'repair' | 'plugin' | 'mc
       if (url.startsWith('https://') || url.startsWith('http://')) void shell.openExternal(url)
     }
   })
+  if (utility === undefined) window.setMenuBarVisibility(false)
   window.once('ready-to-show', () => { window.show() })
-  window.webContents.on('did-finish-load', () => { sendView(window) })
+  window.webContents.on('did-finish-load', () => {
+    sendView(window)
+    if (window === mainWindow) syncMainMenuVisibility()
+  })
   return window
 }
 
@@ -274,6 +295,10 @@ function createTray(): void {
 }
 
 async function showSetup(window: BrowserWindow): Promise<void> {
+  if (window === mainWindow) {
+    mainUiLoaded = false
+    clearMainMenu()
+  }
   const current = window.webContents.getURL()
   if (!current.startsWith('file:')) await window.loadFile(setupPage)
   sendView(window)
@@ -348,6 +373,8 @@ async function openSettings(): Promise<void> {
 function broadcast(view: RuntimeView): void {
   latestView = view
   if (view.phase !== 'ready') {
+    mainUiLoaded = false
+    mainWindow?.setMenuBarVisibility(false)
     activePetSession = undefined
     petEvents?.setActiveSession(undefined)
     petEvents?.stop()
@@ -572,6 +599,10 @@ async function setMcpEnabled(event: IpcMainInvokeEvent, value: unknown): Promise
 }
 
 function installMenu(): void {
+  if (!mainUiLoaded) {
+    clearMainMenu()
+    return
+  }
   const template: MenuItemConstructorOptions[] = [
     {
       label: '文件',
@@ -580,7 +611,7 @@ function installMenu(): void {
         {
           label: '个性化皮肤',
           submenu: [
-            { label: '选择本地图片...', enabled: petWindow !== undefined && !petSkinMutationActive, click: () => { void choosePetSkin() } },
+            { label: '选择静态图片或动态 GIF...', enabled: petWindow !== undefined && !petSkinMutationActive, click: () => { void choosePetSkin() } },
             { label: '恢复默认皮肤', enabled: petWindow?.customSkinConfigured === true && !petSkinMutationActive, click: () => { void resetPetSkin() } },
           ],
         },
@@ -650,9 +681,12 @@ function installMenu(): void {
     },
   ]
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+  syncMainMenuVisibility()
 }
 
 async function startApplication(): Promise<void> {
+  mainUiLoaded = false
+  clearMainMenu()
   latestView = {
     phase: 'checking',
     message: '正在检查可用的 DSH 版本',
@@ -701,6 +735,8 @@ async function startApplication(): Promise<void> {
     ...(process.env.DSH_DESKTOP_CATALOG_URL === undefined ? {} : { catalogUrl: process.env.DSH_DESKTOP_CATALOG_URL }),
     onView: broadcast,
     async onReady(url, _runtime, preparedCliDirectory) {
+      mainUiLoaded = false
+      clearMainMenu()
       cliDirectory = preparedCliDirectory
       trustedOrigin = url.origin
       activePetSession = undefined
@@ -708,7 +744,12 @@ async function startApplication(): Promise<void> {
       petEvents?.start(url.origin)
       installMenu()
       installTrayMenu()
-      if (mainWindow !== undefined) await mainWindow.loadURL(url.href)
+      const window = mainWindow
+      if (window === undefined) return
+      await window.loadURL(url.href)
+      if (mainWindow !== window || window.isDestroyed()) return
+      mainUiLoaded = true
+      installMenu()
     },
     onOpenSettingsDocument: openTextDocument,
   })
@@ -759,8 +800,31 @@ ipcMain.on('pet:set-active-session', (event, value: unknown) => {
     // Invalid page messages cannot change the foreground reply source.
   }
 })
+function parsePetDragPoint(value: unknown): { x: number; y: number } | undefined {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const input = value as Record<string, unknown>
+  if (typeof input.x !== 'number' || !Number.isFinite(input.x) || Math.abs(input.x) > 1_000_000
+    || typeof input.y !== 'number' || !Number.isFinite(input.y) || Math.abs(input.y) > 1_000_000) return undefined
+  return { x: input.x, y: input.y }
+}
+
 ipcMain.on('pet:ready', (event) => { petSender(event)?.rendererDidLoad() })
 ipcMain.on('pet:interaction', (event, value: unknown) => { petSender(event)?.setInteraction(value === true) })
+ipcMain.on('pet:set-shape', (event, value: unknown) => {
+  const pet = petSender(event)
+  if (pet === undefined) return
+  try { pet.setBubbleShape(parsePetWindowShape(value)) }
+  catch { /* Invalid renderer geometry cannot expand the native pet window region. */ }
+})
+ipcMain.on('pet:drag-start', (event, value: unknown) => {
+  const point = parsePetDragPoint(value)
+  if (point !== undefined) petSender(event)?.startDrag(point)
+})
+ipcMain.on('pet:drag-move', (event, value: unknown) => {
+  const point = parsePetDragPoint(value)
+  if (point !== undefined) petSender(event)?.dragTo(point)
+})
+ipcMain.on('pet:drag-end', (event) => { petSender(event)?.endDrag() })
 ipcMain.on('pet:focus-main', (event) => { if (petSender(event) !== undefined) showMainWindow() })
 ipcMain.on('pet:hide', (event) => { if (petSender(event) !== undefined) void setPetEnabled(false) })
 ipcMain.handle('pet:respond', async (event, approvalId: unknown, outcome: unknown) => {

@@ -41,6 +41,25 @@ describe('runtime startup UI contract', () => {
     expect(html).not.toMatch(/<script| on[a-z]+=/iu)
   })
 
+  it('keeps the application menu hidden until the trusted DSH page finishes loading', () => {
+    const createWindow = main.slice(main.indexOf('function createWindow'), main.indexOf('function showMainWindow'))
+    const setup = main.slice(main.indexOf('async function showSetup'), main.indexOf('function sendView'))
+    const sync = main.slice(main.indexOf('function syncMainMenuVisibility'), main.indexOf('function createWindow'))
+    expect(createWindow).toContain('window.setMenuBarVisibility(false)')
+    expect(createWindow).toContain("window.webContents.on('did-finish-load'")
+    expect(createWindow).toContain('syncMainMenuVisibility()')
+    expect(setup).toContain('clearMainMenu()')
+    expect(sync).toContain("mainUiLoaded && latestView?.phase === 'ready'")
+    expect(sync).toContain('new URL(window.webContents.getURL()).origin === trustedOrigin')
+    expect(sync).toContain('window.setMenuBarVisibility(trustedPageLoaded)')
+    expect(setup).toContain('mainUiLoaded = false')
+    expect(main).toContain('await window.loadURL(url.href)')
+    expect(main).toContain('mainUiLoaded = true\n      installMenu()')
+    expect(main).toContain('Menu.setApplicationMenu(null)')
+    expect(main).toContain('if (!mainUiLoaded) {\n    clearMainMenu()\n    return')
+    expect(main).toContain('Menu.setApplicationMenu(Menu.buildFromTemplate(template))\n  syncMainMenuVisibility()')
+  })
+
   it('separates automatic and pinned policies without changing the IPC contract', () => {
     expect(html).toContain('value="latest-compatible"')
     expect(html).toContain('value="pinned"')

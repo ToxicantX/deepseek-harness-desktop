@@ -23,6 +23,28 @@ import {
 
 const STATE_SCHEMA = 1
 const MANIFEST_FILE = 'runtime-manifest.json'
+const ZIP_SYMLINK_MODE = 0o120000
+const ZIP_FILE_TYPE_MASK = 0o170000
+const MAX_ARCHIVE_ENTRY_NAME_LENGTH = 1_024
+
+interface RuntimeArchiveEntry {
+  fileName: string
+  externalFileAttributes: number
+}
+
+// Runtime links are materialized from validated runtime-links.json after extraction; ZIP links are never valid input.
+export function validateRuntimeArchiveEntry(entry: RuntimeArchiveEntry): void {
+  const name = entry.fileName.replaceAll('\\', '/')
+  const segments = name.split('/')
+  if (name.length === 0 || name.length > MAX_ARCHIVE_ENTRY_NAME_LENGTH || name.includes('\0')
+    || name.startsWith('/') || /^[A-Za-z]:/u.test(name) || segments.some(segment => segment === '.' || segment === '..' || segment.includes(':'))) {
+    throw new Error(`runtime archive contains an unsafe path: ${entry.fileName}`)
+  }
+  const mode = (entry.externalFileAttributes >>> 16) & 0xffff
+  if ((mode & ZIP_FILE_TYPE_MASK) === ZIP_SYMLINK_MODE) {
+    throw new Error(`runtime archive contains a forbidden symbolic link: ${entry.fileName}`)
+  }
+}
 
 export interface RuntimeState {
   schemaVersion: 1
@@ -209,7 +231,7 @@ export class RuntimeStore {
     try {
       await this.download(manifest, archiveFile, onProgress)
       await mkdir(staging, { recursive: true })
-      await extract(archiveFile, { dir: staging })
+      await extract(archiveFile, { dir: staging, onEntry: validateRuntimeArchiveEntry })
       await writeFile(join(staging, MANIFEST_FILE), `${JSON.stringify(manifest, undefined, 2)}\n`, 'utf8')
       const hadExisting = await pathExists(finalDirectory)
       if (hadExisting) {

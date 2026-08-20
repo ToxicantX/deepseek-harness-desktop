@@ -39,9 +39,11 @@ This document is a user-preference layer. It does not modify an Agent preset or 
 
 ## Desktop pet skins
 
-Choose a PNG, JPEG, or WebP still image from **File → Pet Skin → Choose Local Image...**. The Shell rejects files larger than 8 MB or images larger than 4096×4096, normalizes valid images to PNG with a longest edge of 512 pixels, and stores the result as `desktop-pet-skin.png` under application `userData`. The original image path never reaches the pet renderer or DSH Runtime.
+The default pet is an original anime sprite character rendered entirely inside the transparent Electron desktop window. Local transparent PNG strips provide separate frame animations for idle, thinking, speaking, approval, success, error, unavailable, and dragging states; missing, malformed, or undecodable strips fall back to the original procedural Canvas robot. The pet loads no network assets and launches no Web page. When Windows reduced motion is enabled, each state holds a representative frame.
 
-Select **File → Pet Skin → Restore Default Skin** to delete the custom file and immediately restore the bundled icon. A custom skin remains active after Shell restarts and pet renderer recovery.
+Choose a PNG, JPEG, or WebP still image, or an animated GIF, from **File → Pet Skin → Choose Still Image or Animated GIF...**. Still images are limited to 8 MB and 4096×4096, then normalized to PNG with a longest edge of 512 pixels. Animated GIFs preserve their source frames and are limited to 2 MB, a 512-pixel longest edge, 2–120 frames, and 16777216 aggregate frame pixels before being stored as `desktop-pet-skin.gif` under application `userData`. When reduced motion is enabled, the renderer uses a first-frame PNG generated in the main process. The original source path never reaches the pet renderer or DSH Runtime.
+
+Select **File → Pet Skin → Restore Default Skin** to delete both still and animated custom files and immediately restore the built-in anime character. A custom skin remains active after Shell restarts and pet renderer recovery.
 
 ## Plugins
 

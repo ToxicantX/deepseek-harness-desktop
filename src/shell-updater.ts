@@ -102,7 +102,7 @@ export class ShellUpdater {
       await this.withUpdaterErrors(() => autoUpdater.downloadUpdate())
       this.onProgress({ state: 'preparing-restart', version })
       await this.stopRuntime()
-      autoUpdater.quitAndInstall(false, true)
+      autoUpdater.quitAndInstall(true, true)
     } catch (error: unknown) {
       this.onProgress({ state: 'error', message: error instanceof Error ? error.message : String(error) })
       await this.failure(error)
