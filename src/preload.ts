@@ -1,9 +1,24 @@
-import { ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer } from 'electron'
 import type { RuntimePreference } from './catalog.ts'
 import type { PluginEntry, PluginList, PluginOperationStatus, PluginStartInput } from './plugin-manager.ts'
 import type { RuntimeView } from './runtime-controller.ts'
 import type { SessionRepairAnomalyKind, SessionRepairInspection, SessionRepairResult, SessionRepairRollbackResult } from './session-repair.ts'
 import type { ShellUpdateProgress } from './shell-updater.ts'
+
+contextBridge.exposeInMainWorld('dshDesktopSkins', {
+  list: () => ipcRenderer.invoke('shell-skins:list'),
+  preview: (skinId: string, index: number) => ipcRenderer.invoke('shell-skins:preview', skinId, index),
+  install: (skinId: string) => ipcRenderer.invoke('shell-skins:install', skinId),
+  activate: (skinId: string) => ipcRenderer.invoke('shell-skins:activate', skinId),
+  selectVariant: (skinId: string, variantId: string) => ipcRenderer.invoke('shell-skins:select-variant', skinId, variantId),
+  deactivate: () => ipcRenderer.invoke('shell-skins:deactivate'),
+  uninstall: (skinId: string) => ipcRenderer.invoke('shell-skins:uninstall', skinId),
+  onProgress: (listener: (progress: unknown) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, progress: unknown) => listener(progress)
+    ipcRenderer.on('shell-skins:progress', wrapped)
+    return () => { ipcRenderer.removeListener('shell-skins:progress', wrapped) }
+  },
+})
 
 function element<T extends HTMLElement>(id: string): T {
   const value = document.querySelector<T>('#' + id)
