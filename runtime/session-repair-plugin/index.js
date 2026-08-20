@@ -236,10 +236,11 @@ async function encodeArtifact(headerLine, events, compression) {
     return serialized + '\n'
   })]
   if (compression === 'none') return Buffer.from(lines.join(''), 'utf8')
-  const frames = []
+  // The session reader requires the first frame to contain exactly one header line.
+  const frames = [await compressZstd(Buffer.from(lines[0]), CHECKSUM_OPTIONS)]
   let batch = ''
   let bytes = 0
-  for (const line of lines) {
+  for (const line of lines.slice(1)) {
     const lineBytes = Buffer.byteLength(line)
     if (bytes > 0 && bytes + lineBytes > MAX_FRAME_PLAINTEXT_BYTES) {
       frames.push(await compressZstd(Buffer.from(batch), CHECKSUM_OPTIONS))

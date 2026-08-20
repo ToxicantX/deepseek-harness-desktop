@@ -163,6 +163,7 @@ describe('Runtime session repair Host API', () => {
     const frames = zstdFrameRanges(physical)
     expect(frames.length).toBeGreaterThan(1)
     expect(frames.every(frame => frame.checksum)).toBe(true)
+    expect(zstdDecompressSync(physical.subarray(frames[0].start, frames[0].end)).toString('utf8')).toBe(harness.original.slice(0, harness.original.indexOf('\n') + 1))
     const repaired = decodeZstdFrames(physical).trim().split('\n').slice(1).map(JSON.parse)
     expect(repaired.map(event => event.seq)).toEqual([0, 1, 2])
     expect(decodeZstdFrames(await readFile(harness.path + '.bak'))).toBe(harness.original)
