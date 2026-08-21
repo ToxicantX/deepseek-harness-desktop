@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { RuntimePreference } from './catalog.ts'
 import type { McpEndpointView, McpEntryView, McpList } from './mcp-manager.ts'
 import type { PluginEntry, PluginList, PluginOperationStatus, PluginStartInput, PluginUpdateList } from './plugin-manager.ts'
@@ -6,8 +6,8 @@ import type { RuntimeView } from './runtime-controller.ts'
 import type { SessionRepairAnomalyKind, SessionRepairInspection, SessionRepairResult, SessionRepairRollbackResult } from './session-repair.ts'
 import type { ShellUpdateProgress } from './shell-updater.ts'
 
-contextBridge.exposeInMainWorld('dshDesktopOcr', {
-  recognize: (buffer: ArrayBuffer) => ipcRenderer.invoke('ocr:recognize', buffer),
+contextBridge.exposeInMainWorld('dshDesktopFiles', {
+  getAbsolutePath: (file: File): string => webUtils.getPathForFile(file),
 })
 
 contextBridge.exposeInMainWorld('dshDesktopSkins', {

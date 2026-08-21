@@ -35,10 +35,10 @@ import { SettingsDocumentClient } from './settings-document.ts'
 import { RuntimeStore } from './runtime-store.ts'
 import { ShellUpdater, type ShellUpdateProgress } from './shell-updater.ts'
 import { createFileContextInjectorScript } from './file-context-injector.ts'
-import { recognizeImage } from './ocr.ts'
 import { createClientBundleAdapterScript, createSkinDisposerScript, createSkinMarketInjectorScript } from './skin-market-injector.ts'
 import { ShellSkinStore } from './shell-skin-store.ts'
 import { allowDshWebPermission, shouldOpenInSystemBrowser } from './window-security.ts'
+import { createWebContextMenuTemplate } from './web-context-menu.ts'
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'dsh-skin', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }])
 
@@ -285,6 +285,10 @@ function createWindow(options: { utility?: 'manager' | 'repair' | 'plugin' | 'mc
       contextIsolation: true,
       sandbox: true,
     },
+  })
+  window.webContents.on('context-menu', (_event, params) => {
+    if (window.isDestroyed()) return
+    Menu.buildFromTemplate(createWebContextMenuTemplate(params)).popup({ window })
   })
   window.webContents.session.setPermissionRequestHandler((contents, permission, callback, details) => {
     callback(allowDshWebPermission({
@@ -907,10 +911,6 @@ ipcMain.on('pet:drag-end', (event) => { petSender(event)?.endDrag() })
 ipcMain.on('pet:focus-main', (event) => { if (petSender(event) !== undefined) showMainWindow() })
 ipcMain.on('pet:context-menu', showPetContextMenu)
 ipcMain.on('pet:hide', (event) => { if (petSender(event) !== undefined) void setPetEnabled(false) })
-ipcMain.handle('ocr:recognize', async (event, value: unknown) => {
-  if (!fromTrustedDshWindow(event) || !(value instanceof ArrayBuffer)) throw new Error('OCR 请求来源或数据无效')
-  return recognizeImage(new Uint8Array(value))
-})
 ipcMain.handle('shell-skins:list', event => skinService(event).list())
 ipcMain.handle('shell-skins:preview', async (event, skinId: unknown, index: unknown) => skinService(event).preview(String(skinId), Number(index)))
 ipcMain.handle('shell-skins:install', async (event, skinId: unknown) => skinService(event).install(String(skinId)))
