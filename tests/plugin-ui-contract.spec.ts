@@ -47,11 +47,14 @@ describe('plugin manager UI contract', () => {
 
   it('exposes confirmed recovery actions only through the Runtime setup page', () => {
     expect(runtimeHtml).toContain('id="recover-stale-plugins"')
+    expect(runtimeHtml).toContain('id="recover-profile-bundles"')
     expect(runtimeHtml).toContain('id="recover-plugin-preset"')
     expect(preload).toContain("ipcRenderer.invoke('runtime:recover-stale-local-plugins')")
+    expect(preload).toContain("ipcRenderer.invoke('runtime:recover-profile-bundles')")
     expect(preload).toContain("ipcRenderer.invoke('runtime:recover-plugin-preset')")
     expect(preload).toContain('window.confirm(message)')
     expect(main).toContain("ipcMain.handle('runtime:recover-plugin-preset'")
+    expect(main).toContain("ipcMain.handle('runtime:recover-profile-bundles'")
     expect(main).toContain('event.sender === mainWindow.webContents')
     expect(main).toContain('event.sender === managerWindow.webContents')
     expect(main).toContain('if (!fromMainWindow && !fromManagerWindow)')

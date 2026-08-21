@@ -49,6 +49,7 @@ function element<T extends HTMLElement>(id: string): T {
 
 let runtimeRecoveryIds: string[] = []
 let runtimeRecoveryCount = 0
+let runtimeBundleRecovery: { packageNames: string[]; count: number } | undefined
 let runtimePresetRecovery: { pluginName: string; presetId: string } | undefined
 let runtimeLatestView: RuntimeView | undefined
 let runtimeDraftMode: RuntimePreference['mode'] | undefined
@@ -96,12 +97,18 @@ function renderRuntime(view: RuntimeView): void {
     : '当前使用：DSH ' + view.currentVersion
   runtimeRecoveryIds = view.recovery?.kind === 'stale-local-plugins' ? view.recovery.entryIds : []
   runtimeRecoveryCount = view.recovery?.kind === 'stale-local-plugins' ? view.recovery.count : runtimeRecoveryIds.length
+  runtimeBundleRecovery = view.recovery?.kind === 'profile-bundle-mismatch'
+    ? { packageNames: view.recovery.packageNames, count: view.recovery.count }
+    : undefined
   runtimePresetRecovery = view.recovery?.kind === 'plugin-preset-conflict'
     ? { pluginName: view.recovery.pluginName, presetId: view.recovery.presetId }
     : undefined
   const staleDetail = runtimeRecoveryIds.length === 0 ? '' : '检测到失效的本地插件：' + runtimeRecoveryIds.join('、')
+  const bundleDetail = runtimeBundleRecovery === undefined
+    ? ''
+    : '检测到不兼容的 Profile bundle：' + runtimeBundleRecovery.packageNames.join('、')
   const presetDetail = runtimePresetRecovery === undefined ? '' : '检测到冲突的插件预设：' + runtimePresetRecovery.presetId
-  element('detail').textContent = [versionDetail, staleDetail, presetDetail].filter(value => value.length > 0).join('\n')
+  element('detail').textContent = [versionDetail, staleDetail, bundleDetail, presetDetail].filter(value => value.length > 0).join('\n')
 
   const progressElement = element('runtime-progress')
   const progressRow = element('runtime-progress-row')
@@ -194,10 +201,16 @@ function renderRuntime(view: RuntimeView): void {
   recoverButton.textContent = runtimeRecoveryCount <= 1
     ? '禁用失效本地插件并重试'
     : '禁用 ' + String(runtimeRecoveryCount) + ' 个失效本地插件并重试'
+  const bundleButton = element<HTMLButtonElement>('recover-profile-bundles')
+  bundleButton.hidden = runtimeBundleRecovery === undefined
+  bundleButton.disabled = busy || runtimeBundleRecovery === undefined
+  bundleButton.textContent = runtimeBundleRecovery === undefined || runtimeBundleRecovery.count <= 1
+    ? '修复不兼容插件配置并重试'
+    : '修复 ' + String(runtimeBundleRecovery.count) + ' 个不兼容插件配置并重试'
   const presetButton = element<HTMLButtonElement>('recover-plugin-preset')
   presetButton.hidden = runtimePresetRecovery === undefined
   presetButton.disabled = busy || runtimePresetRecovery === undefined
-  element<HTMLElement>('startup-actions').hidden = startupRetry.hidden && recoverButton.hidden && presetButton.hidden
+  element<HTMLElement>('startup-actions').hidden = startupRetry.hidden && recoverButton.hidden && bundleButton.hidden && presetButton.hidden
 }
 
 function initializeShellUpdatePage(): void {
@@ -271,6 +284,15 @@ function initializeRuntimePage(): void {
     const names = runtimeRecoveryIds.join('、')
     if (!window.confirm('将备份配置并禁用 ' + String(runtimeRecoveryCount) + ' 个失效本地插件：' + names + '。会话、设置和其他插件不会被删除。是否继续？')) return
     void ipcRenderer.invoke('runtime:recover-stale-local-plugins').catch(showError)
+  })
+  element<HTMLButtonElement>('recover-profile-bundles').addEventListener('click', () => {
+    const recovery = runtimeBundleRecovery
+    if (recovery === undefined) return
+    const names = recovery.packageNames.join('、')
+    const message = '将备份 Web profile 配置，并从 bundle 层列表移除不兼容项：' + names
+      + '。插件依赖、插件配置、会话和设置都会保留。是否继续？'
+    if (!window.confirm(message)) return
+    void ipcRenderer.invoke('runtime:recover-profile-bundles').catch(showError)
   })
   element<HTMLButtonElement>('recover-plugin-preset').addEventListener('click', () => {
     const recovery = runtimePresetRecovery

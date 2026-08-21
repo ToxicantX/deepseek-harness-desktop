@@ -54,11 +54,16 @@ function started(): RunningBackend {
   }
 }
 
+function diagnosticProfileBundle(): string {
+  return 'dsh: profile bundle "dsh-channel-telegram" declares no dsh.bundle in its package.json'
+}
+
 function harness(
   state: RuntimeState,
   catalog: RuntimeCatalog,
   inspectStaleLocalPlugins: NonNullable<RuntimeControllerOptions['inspectStaleLocalPlugins']> = vi.fn(async () => undefined),
   inspectPluginPreset: NonNullable<RuntimeControllerOptions['inspectPluginPreset']> = vi.fn(async () => undefined),
+  inspectProfileBundles: NonNullable<RuntimeControllerOptions['inspectProfileBundles']> = vi.fn(async () => undefined),
 ) {
   const store = new RuntimeStore('C:\\store')
   const views: RuntimeView[] = []
@@ -73,12 +78,13 @@ function harness(
     userData: 'C:\\user-data',
     environment: { DSH_HOME: process.cwd() },
     inspectStaleLocalPlugins,
+    inspectProfileBundles,
     inspectPluginPreset,
     onView: view => { views.push(view) },
     onReady: vi.fn(async () => {}),
     onOpenSettingsDocument: vi.fn(async () => {}),
   })
-  return { controller, store, views, inspectStaleLocalPlugins, inspectPluginPreset }
+  return { controller, store, views, inspectStaleLocalPlugins, inspectProfileBundles, inspectPluginPreset }
 }
 
 beforeEach(() => { vi.mocked(startBackend).mockReset() })
@@ -152,6 +158,40 @@ describe('RuntimeController', () => {
     expect(startBackend).toHaveBeenCalledTimes(2)
     expect(views.at(-1)).toMatchObject({ phase: 'ready' })
     expect(views.at(-1)?.recovery).toBeUndefined()
+  })
+
+  it('offers exact profile bundle recovery and retries only after apply', async () => {
+    const target = manifest('0.1.0-rc.8')
+    const catalog = { schemaVersion: 1 as const, generatedAt: new Date().toISOString(), releases: [target] }
+    const apply = vi.fn(async () => ({ removedPackageNames: ['dsh-channel-telegram'], count: 1 }))
+    const inspect = vi.fn(async () => ({ packageNames: ['dsh-channel-telegram'], count: 1, apply }))
+    const { controller, store, views } = harness(
+      { schemaVersion: 1, preference: { mode: 'latest-compatible' } },
+      catalog,
+      vi.fn(async () => undefined),
+      vi.fn(async () => undefined),
+      inspect,
+    )
+    vi.spyOn(store, 'installed').mockResolvedValue(installed(target))
+    vi.mocked(startBackend)
+      .mockRejectedValueOnce(new Error(diagnosticProfileBundle()))
+      .mockResolvedValueOnce(started())
+
+    await controller.start()
+
+    expect(inspect).toHaveBeenCalledWith({ home: process.cwd(), diagnostics: diagnosticProfileBundle() })
+    expect(apply).not.toHaveBeenCalled()
+    expect(views.at(-1)).toMatchObject({
+      phase: 'error',
+      recovery: { kind: 'profile-bundle-mismatch', packageNames: ['dsh-channel-telegram'], count: 1 },
+    })
+    await expect(controller.recoverStaleLocalPlugins()).rejects.toThrow('失效本地插件')
+
+    await controller.recoverProfileBundles()
+
+    expect(apply).toHaveBeenCalledOnce()
+    expect(startBackend).toHaveBeenCalledTimes(2)
+    expect(views.at(-1)).toMatchObject({ phase: 'ready' })
   })
 
   it('offers exact plugin preset recovery, applies it only after confirmation, and retries', async () => {

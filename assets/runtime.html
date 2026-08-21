@@ -75,7 +75,7 @@
     #selection-detail { min-width: 0; color: #69707d; font-size: 12px; line-height: 1.45; text-align: right; overflow-wrap: anywhere; }
     .section-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
     .startup-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
-    #recover-stale-plugins, #recover-plugin-preset { border-color: #a96b18; color: #7a4a0d; background: #fff8ed; }
+    #recover-stale-plugins, #recover-profile-bundles, #recover-plugin-preset { border-color: #a96b18; color: #7a4a0d; background: #fff8ed; }
     .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
     @keyframes shell-enter { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     @keyframes mark-enter { from { opacity: 0; transform: scale(0.82); } to { opacity: 1; transform: scale(1); } }
@@ -125,6 +125,7 @@
         <div id="startup-actions" class="startup-actions" hidden>
           <button id="startup-retry" type="button" hidden>重新检查并启动</button>
           <button id="recover-stale-plugins" type="button" hidden>禁用失效本地插件并重试</button>
+          <button id="recover-profile-bundles" type="button" hidden>修复不兼容插件配置并重试</button>
           <button id="recover-plugin-preset" type="button" hidden>备份并重置冲突插件预设</button>
         </div>
       </div>

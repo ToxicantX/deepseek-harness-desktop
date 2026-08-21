@@ -12,6 +12,7 @@ import {
 } from './catalog.ts'
 import { desktopEnvironment, startBackend, type RunningBackend } from './backend.ts'
 import { prepareCliShim } from './cli-shell.ts'
+import { inspectProfileBundleRecovery, type ProfileBundleRecoveryPlan } from './profile-bundle-recovery.ts'
 import { inspectPluginPresetRecovery, type PluginPresetRecoveryPlan } from './plugin-preset-recovery.ts'
 import { RuntimeStore, type InstalledRuntime, type RuntimeState } from './runtime-store.ts'
 import {
@@ -32,6 +33,7 @@ export interface RuntimeVersionView {
 
 export type RuntimeRecoveryView =
   | { kind: 'stale-local-plugins'; entryIds: string[]; count: number }
+  | { kind: 'profile-bundle-mismatch'; packageNames: string[]; count: number }
   | { kind: 'plugin-preset-conflict'; pluginName: string; presetId: string }
 
 export interface RuntimeView {
@@ -50,9 +52,11 @@ export interface RuntimeView {
 }
 
 type StaleLocalPluginRecoveryInspector = typeof inspectStaleLocalPluginRecovery
+type ProfileBundleRecoveryInspector = typeof inspectProfileBundleRecovery
 type PluginPresetRecoveryInspector = typeof inspectPluginPresetRecovery
 type RuntimeRecoveryPlan =
   | { kind: 'stale-local-plugins'; plan: StaleLocalPluginRecoveryPlan }
+  | { kind: 'profile-bundle-mismatch'; plan: ProfileBundleRecoveryPlan }
   | { kind: 'plugin-preset-conflict'; plan: PluginPresetRecoveryPlan }
 
 export interface RuntimeControllerOptions {
@@ -63,6 +67,7 @@ export interface RuntimeControllerOptions {
   catalogUrl?: string
   environment?: NodeJS.ProcessEnv
   inspectStaleLocalPlugins?: StaleLocalPluginRecoveryInspector
+  inspectProfileBundles?: ProfileBundleRecoveryInspector
   inspectPluginPreset?: PluginPresetRecoveryInspector
   onView(view: RuntimeView): void
   onReady(url: URL, runtime: InstalledRuntime, cliDirectory: string): Promise<void>
@@ -77,6 +82,7 @@ export class RuntimeController {
   private readonly catalogUrl: string
   private readonly environment: NodeJS.ProcessEnv
   private readonly inspectStaleLocalPlugins: StaleLocalPluginRecoveryInspector
+  private readonly inspectProfileBundles: ProfileBundleRecoveryInspector
   private readonly inspectPluginPreset: PluginPresetRecoveryInspector
   private readonly onView: (view: RuntimeView) => void
   private readonly onReady: (url: URL, runtime: InstalledRuntime, cliDirectory: string) => Promise<void>
@@ -104,6 +110,7 @@ export class RuntimeController {
     this.catalogUrl = options.catalogUrl ?? DEFAULT_CATALOG_URL
     this.environment = options.environment ?? process.env
     this.inspectStaleLocalPlugins = options.inspectStaleLocalPlugins ?? inspectStaleLocalPluginRecovery
+    this.inspectProfileBundles = options.inspectProfileBundles ?? inspectProfileBundleRecovery
     this.inspectPluginPreset = options.inspectPluginPreset ?? inspectPluginPresetRecovery
     this.onView = options.onView
     this.onReady = options.onReady
@@ -122,6 +129,16 @@ export class RuntimeController {
     return this.enqueue(async () => {
       const recovery = this.recoveryPlan
       if (recovery?.kind !== 'stale-local-plugins') throw new Error('没有可恢复的失效本地插件')
+      await recovery.plan.apply()
+      this.recoveryPlan = undefined
+      await this.boot()
+    })
+  }
+
+  recoverProfileBundles(): Promise<void> {
+    return this.enqueue(async () => {
+      const recovery = this.recoveryPlan
+      if (recovery?.kind !== 'profile-bundle-mismatch') throw new Error('没有可恢复的不兼容 Profile bundle')
       await recovery.plan.apply()
       this.recoveryPlan = undefined
       await this.boot()
@@ -190,6 +207,12 @@ export class RuntimeController {
               entryIds: [...this.recoveryPlan.plan.entryIds],
               count: this.recoveryPlan.plan.count,
             }
+          : this.recoveryPlan.kind === 'profile-bundle-mismatch'
+            ? {
+                kind: 'profile-bundle-mismatch' as const,
+                packageNames: [...this.recoveryPlan.plan.packageNames],
+                count: this.recoveryPlan.plan.count,
+              }
           : {
               kind: 'plugin-preset-conflict' as const,
               pluginName: this.recoveryPlan.plan.pluginName,
@@ -305,6 +328,15 @@ export class RuntimeController {
   }
 
   private async detectRecovery(home: string, runtime: InstalledRuntime, diagnostics: string): Promise<void> {
+    try {
+      const plan = await this.inspectProfileBundles({ home, diagnostics })
+      if (plan !== undefined) {
+        this.recoveryPlan = { kind: 'profile-bundle-mismatch', plan }
+        return
+      }
+    } catch {
+      // Recovery inspection must not replace the Runtime startup failure.
+    }
     try {
       const plan = await this.inspectStaleLocalPlugins({ home, diagnostics })
       if (plan !== undefined) {

@@ -964,6 +964,11 @@ ipcMain.handle('runtime:recover-stale-local-plugins', async (event) => {
   if (mainWindow !== undefined) await showSetup(mainWindow)
   await runtimeController.recoverStaleLocalPlugins()
 })
+ipcMain.handle('runtime:recover-profile-bundles', async (event) => {
+  const runtimeController = runtimeClient(event)
+  if (mainWindow !== undefined) await showSetup(mainWindow)
+  await runtimeController.recoverProfileBundles()
+})
 ipcMain.handle('runtime:recover-plugin-preset', async (event) => {
   const runtimeController = runtimeClient(event)
   if (mainWindow !== undefined) await showSetup(mainWindow)
