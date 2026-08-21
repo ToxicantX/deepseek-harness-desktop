@@ -6,6 +6,10 @@ import type { RuntimeView } from './runtime-controller.ts'
 import type { SessionRepairAnomalyKind, SessionRepairInspection, SessionRepairResult, SessionRepairRollbackResult } from './session-repair.ts'
 import type { ShellUpdateProgress } from './shell-updater.ts'
 
+contextBridge.exposeInMainWorld('dshDesktopOcr', {
+  recognize: (buffer: ArrayBuffer) => ipcRenderer.invoke('ocr:recognize', buffer),
+})
+
 contextBridge.exposeInMainWorld('dshDesktopSkins', {
   list: () => ipcRenderer.invoke('shell-skins:list'),
   preview: (skinId: string, index: number) => ipcRenderer.invoke('shell-skins:preview', skinId, index),

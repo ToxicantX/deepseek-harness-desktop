@@ -34,6 +34,8 @@ import { SessionRepairClient } from './session-repair.ts'
 import { SettingsDocumentClient } from './settings-document.ts'
 import { RuntimeStore } from './runtime-store.ts'
 import { ShellUpdater, type ShellUpdateProgress } from './shell-updater.ts'
+import { createFileContextInjectorScript } from './file-context-injector.ts'
+import { recognizeImage } from './ocr.ts'
 import { createClientBundleAdapterScript, createSkinDisposerScript, createSkinMarketInjectorScript } from './skin-market-injector.ts'
 import { ShellSkinStore } from './shell-skin-store.ts'
 import { allowDshWebPermission, shouldOpenInSystemBrowser } from './window-security.ts'
@@ -130,6 +132,7 @@ function injectSkinMarket(window: BrowserWindow): void {
     return
   }
   void (async () => {
+    await window.webContents.executeJavaScript(createFileContextInjectorScript())
     await window.webContents.executeJavaScript(createSkinMarketInjectorScript())
     const active = await shellSkinStore?.activeClientBundle()
     if (active !== undefined && active !== null) await executeClientBundleAdapter(window.webContents, active.bundle, active.id)
@@ -904,6 +907,10 @@ ipcMain.on('pet:drag-end', (event) => { petSender(event)?.endDrag() })
 ipcMain.on('pet:focus-main', (event) => { if (petSender(event) !== undefined) showMainWindow() })
 ipcMain.on('pet:context-menu', showPetContextMenu)
 ipcMain.on('pet:hide', (event) => { if (petSender(event) !== undefined) void setPetEnabled(false) })
+ipcMain.handle('ocr:recognize', async (event, value: unknown) => {
+  if (!fromTrustedDshWindow(event) || !(value instanceof ArrayBuffer)) throw new Error('OCR 请求来源或数据无效')
+  return recognizeImage(new Uint8Array(value))
+})
 ipcMain.handle('shell-skins:list', event => skinService(event).list())
 ipcMain.handle('shell-skins:preview', async (event, skinId: unknown, index: unknown) => skinService(event).preview(String(skinId), Number(index)))
 ipcMain.handle('shell-skins:install', async (event, skinId: unknown) => skinService(event).install(String(skinId)))
