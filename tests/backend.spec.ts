@@ -78,6 +78,14 @@ describe('backendArguments', () => {
     expect(backendArguments(runtime, filename => filename === patch)).toEqual(['web', '--patch', patch, '--port', '0'])
     expect(backendArguments(runtime, () => false)).toEqual(['web', '--port', '0'])
   })
+
+  it('disables rc.8 browser handoff for the Electron-owned Web UI', () => {
+    const rc8Runtime: InstalledRuntime = {
+      ...runtime,
+      manifest: { ...runtime.manifest, dshVersion: '0.1.0-rc.8' },
+    }
+    expect(backendArguments(rc8Runtime, () => false)).toEqual(['web', '--port', '0', '--no-open'])
+  })
 })
 
 describe('startBackend', () => {

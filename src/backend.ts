@@ -1,6 +1,7 @@
 import { fork, type ChildProcess, type ForkOptions, type Serializable } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { dirname, delimiter, extname, isAbsolute, join } from 'node:path'
+import { gte } from 'semver'
 import { pathToFileURL } from 'node:url'
 import type { InstalledRuntime } from './runtime-store.ts'
 
@@ -147,9 +148,12 @@ export function desktopEnvironment(runtime: InstalledRuntime, inherited: NodeJS.
 
 export function backendArguments(runtime: InstalledRuntime, fileExists: (path: string) => boolean = existsSync): string[] {
   const patch = join(runtime.directory, 'app', 'desktop.patch.yml')
-  return fileExists(patch)
+  const args = fileExists(patch)
     ? ['web', '--patch', patch, '--port', '0']
     : ['web', '--port', '0']
+  // rc.8 defaults to opening the Web UI in the system browser; Electron owns the page.
+  if (gte(runtime.manifest.dshVersion, '0.1.0-rc.8')) args.push('--no-open')
+  return args
 }
 
 export async function startBackend(options: StartBackendOptions): Promise<RunningBackend> {

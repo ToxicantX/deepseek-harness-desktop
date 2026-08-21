@@ -104,6 +104,38 @@ function remapSurfaceOp(value, latest) {
   }
 }
 
+function rebuildSurfaceReferences(events) {
+  const surface = []
+  for (const event of events) {
+    if (event.surfaceOp === 'append') {
+      surface.push(event.seq)
+      continue
+    }
+    if (!isRecord(event.surfaceOp) || event.surfaceOp.op !== 'replace') continue
+    const start = surface.indexOf(event.surfaceOp.start)
+    const end = surface.indexOf(event.surfaceOp.end, start < 0 ? 0 : start)
+    if (start < 0 || end < start) continue
+
+    const shadowed = surface.slice(start, end + 1)
+    if (Array.isArray(event.sourceEventSeqs)) {
+      const referenced = new Set(event.sourceEventSeqs)
+      for (const seq of shadowed) {
+        if (!referenced.has(seq)) {
+          event.sourceEventSeqs.push(seq)
+          referenced.add(seq)
+        }
+      }
+      for (const seq of event.sourceEventSeqs) {
+        const source = events[seq]
+        if (!isRecord(source?.data) || !Object.hasOwn(source.data, 'shadowedSeqs')) continue
+        source.data.shadowedSeqs = [...shadowed]
+        source.data.shadowedRange = { start: shadowed[0], end: shadowed[shadowed.length - 1] }
+      }
+    }
+    surface.splice(start, end - start + 1, event.seq)
+  }
+}
+
 export function renumberSessionEvents(events) {
   if (!Array.isArray(events)) throw new TypeError('events must be an array')
   const latest = new Map()
@@ -136,6 +168,7 @@ export function renumberSessionEvents(events) {
     repaired.push(event)
     latest.set(original.seq, index)
   }
+  rebuildSurfaceReferences(repaired)
   return repaired
 }
 

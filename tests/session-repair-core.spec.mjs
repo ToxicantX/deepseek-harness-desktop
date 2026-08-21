@@ -51,6 +51,29 @@ describe('session repair core', () => {
     expect(repaired[4].data.messageSeqs).toEqual([2, 3])
   })
 
+  it('rebuilds every shadowed surface reference after a branch reset', () => {
+    const events = [
+      event(0, { type: 'user/message', surfaceOp: 'append' }),
+      event(1, { type: 'tool/result', surfaceOp: 'append' }),
+      event(2),
+      event(1),
+      event(2, { type: 'tool/result', surfaceOp: 'append' }),
+      event(3, { type: 'compaction/start' }),
+      event(4, { type: 'compaction/summary', data: { shadowedSeqs: [0, 2], shadowedRange: { start: 0, end: 2 } } }),
+      event(5, {
+        type: 'user/message',
+        sourceEventSeqs: [3, 4, 0, 2],
+        surfaceOp: { op: 'replace', start: 0, end: 2 },
+      }),
+    ]
+    const repaired = renumberSessionEvents(events)
+    expect(repaired.map(value => value.seq)).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
+    expect(repaired[6].data.shadowedSeqs).toEqual([0, 1, 4])
+    expect(repaired[6].data.shadowedRange).toEqual({ start: 0, end: 4 })
+    expect(repaired[7].sourceEventSeqs).toEqual(expect.arrayContaining([5, 6, 0, 1, 4]))
+    expect(repaired[7].surfaceOp).toEqual({ op: 'replace', start: 0, end: 4 })
+  })
+
   it('rejects future, malformed, and range-only references', () => {
     expect(() => renumberSessionEvents([event(0, { sourceEventSeqs: [1] }), event(1)])).toThrow(/future/)
     expect(() => renumberSessionEvents([event(0), event(1, { data: { shadowedSeqs: 'bad' } })])).toThrow(/malformed/)
