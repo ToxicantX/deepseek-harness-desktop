@@ -1,6 +1,6 @@
 {
   "name": "deepseek-harness-desktop",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "private": true,
   "description": "Windows desktop shell and versioned runtime manager for DeepSeek Harness",
   "author": "ToxicantX",

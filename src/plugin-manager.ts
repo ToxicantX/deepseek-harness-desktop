@@ -46,6 +46,7 @@ export interface PluginOperationStatus {
   operationId: string
   state: 'running' | 'succeeded' | 'failed'
   action: PluginAction
+  packageName?: string
   output: string
   error?: string
 }
@@ -342,7 +343,13 @@ export class PluginManager {
     const operationId = randomUUID()
     const argument = input.action === 'add' ? input.spec : input.packageName
     const args = ['plugin', '--profile', 'web', input.action, argument]
-    const record: OperationRecord = { operationId, state: 'running', action: input.action, output: '' }
+    const record: OperationRecord = {
+      operationId,
+      state: 'running',
+      action: input.action,
+      ...(input.action === 'add' ? {} : { packageName: input.packageName }),
+      output: '',
+    }
     this.operations.set(operationId, record)
     this.activeOperationId = operationId
     this.trimOperations()
@@ -434,6 +441,7 @@ export class PluginManager {
       operationId: record.operationId,
       state: record.state,
       action: record.action,
+      ...(record.packageName === undefined ? {} : { packageName: record.packageName }),
       output: this.redact(record.output),
       ...(record.error === undefined ? {} : { error: this.redact(record.error) }),
     }

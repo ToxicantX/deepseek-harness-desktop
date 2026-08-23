@@ -351,6 +351,7 @@ function initializePluginManagerPage(): void {
   let busy = false
   let currentEntries: PluginEntry[] = []
   let updateVersions = new Map<string, string>()
+  const completedUpdates = new Set<string>()
   let listGeneration = 0
 
   const setStatus = (message: string, kind: 'normal' | 'success' | 'error' = 'normal'): void => {
@@ -384,14 +385,14 @@ function initializePluginManagerPage(): void {
       name.textContent = entry.name
       const meta = document.createElement('div')
       meta.className = 'plugin-meta'
-      const latestVersion = updateVersions.get(entry.name)
+      const latestVersion = completedUpdates.has(entry.name) ? undefined : updateVersions.get(entry.name)
       meta.textContent = (entry.version === undefined ? '未解析版本' : '版本 ' + entry.version)
         + (latestVersion === undefined ? '' : ' · 可更新至 ' + latestVersion)
         + (entry.spec === undefined ? '' : ' · ' + entry.spec)
       main.append(name, meta)
       const actions = document.createElement('div')
       actions.className = 'plugin-actions'
-      if (latestVersion !== undefined || entry.manualUpdate === true) {
+      if (!completedUpdates.has(entry.name) && (latestVersion !== undefined || entry.manualUpdate === true)) {
         const updateButton = document.createElement('button')
         updateButton.type = 'button'
         updateButton.textContent = latestVersion === undefined ? '更新' : '更新至 ' + latestVersion
@@ -450,6 +451,7 @@ function initializePluginManagerPage(): void {
       const result = current.state === 'running' ? await waitForOperation(current.operationId) : current
       if (result.state === 'failed') throw new Error(result.error ?? '插件操作失败')
       await ipcRenderer.invoke('plugin-manager:restart', result.operationId)
+      if (result.action === 'update' && result.packageName !== undefined) completedUpdates.add(result.packageName)
       await loadEntries()
       setStatus('插件操作已完成', 'success')
     } catch (error: unknown) {
@@ -469,6 +471,7 @@ function initializePluginManagerPage(): void {
       if (result.state === 'failed') throw new Error(result.error ?? '插件操作失败')
       setStatus(label + '完成，正在重启 Runtime...')
       await ipcRenderer.invoke('plugin-manager:restart', started.operationId)
+      if (input.action === 'update') completedUpdates.add(input.packageName)
       await loadEntries()
       if (input.action === 'add') specInput.value = ''
       setStatus(label + '完成', 'success')
@@ -487,7 +490,10 @@ function initializePluginManagerPage(): void {
   specInput.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') installButton.click()
   })
-  refreshButton.addEventListener('click', () => { void resumeOrRefresh() })
+  refreshButton.addEventListener('click', () => {
+    completedUpdates.clear()
+    void resumeOrRefresh()
+  })
   void resumeOrRefresh()
 }
 

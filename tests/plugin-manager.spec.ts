@@ -284,11 +284,13 @@ describe('PluginManager', () => {
       'add',
       'github:owner/example-plugin#main',
     ])
-    expect(value.manager.status(started.operationId)).toMatchObject({
+    const status = value.manager.status(started.operationId)
+    expect(status).toMatchObject({
       state: 'succeeded',
       action: 'add',
       output: 'installing ok\nprogress at [路径已隐藏]',
     })
+    expect(status).not.toHaveProperty('packageName')
   })
 
   it('keeps the operation resumable while Runtime preparation and restart are pending', async () => {
@@ -300,7 +302,11 @@ describe('PluginManager', () => {
       async () => { await preparation },
     )
 
-    expect(value.manager.current()).toMatchObject({ state: 'running', action: 'update' })
+    expect(value.manager.current()).toMatchObject({
+      state: 'running',
+      action: 'update',
+      packageName: 'example-plugin',
+    })
     expect(value.children).toHaveLength(0)
     await expect(value.manager.list()).rejects.toThrow('already running')
     await expect(value.manager.start({ action: 'remove', packageName: 'example-plugin' })).rejects.toThrow('already running')
@@ -309,7 +315,11 @@ describe('PluginManager', () => {
     const started = await starting
     expect(value.children).toHaveLength(1)
     value.children[0]?.close(0)
-    expect(value.manager.current()).toMatchObject({ operationId: started.operationId, state: 'succeeded' })
+    expect(value.manager.current()).toMatchObject({
+      operationId: started.operationId,
+      state: 'succeeded',
+      packageName: 'example-plugin',
+    })
     await expect(value.manager.start({ action: 'remove', packageName: 'example-plugin' })).rejects.toThrow('already running')
     value.manager.markRestarted(started.operationId)
     expect(value.manager.current()).toBeUndefined()
