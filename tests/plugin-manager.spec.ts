@@ -153,6 +153,7 @@ describe('PluginManager', () => {
       name: 'example-plugin',
       spec: 'github:owner/example-plugin',
       version: '1.2.3',
+      manualUpdate: true,
     }] })
     expect(JSON.stringify(result)).not.toContain('C:')
     expect(value.readText).toHaveBeenCalledWith(join('C:/Users/test/.dsh/profiles/web', 'package.json'))
@@ -176,7 +177,7 @@ describe('PluginManager', () => {
     const pending = value.manager.list()
     value.children[0]?.stdout.write(JSON.stringify([{
       path: 'C:/Users/test/.dsh/profiles/web',
-      dependencies: { '@scope/example-plugin': { resolved: 'https://codeload.github.com/owner/example-plugin/tar.gz/abc' } },
+      dependencies: { '@scope/example-plugin': { version: 'link:C:/workspace/example-plugin', resolved: 'https://codeload.github.com/owner/example-plugin/tar.gz/abc' } },
     }]))
     value.children[0]?.close(0)
 
@@ -184,6 +185,7 @@ describe('PluginManager', () => {
       name: '@scope/example-plugin',
       spec: 'github:owner/example-plugin',
       version: '1.2.3',
+      manualUpdate: true,
     }] })
     expect(value.readText).toHaveBeenCalledWith(installedManifest)
   })
@@ -223,6 +225,28 @@ describe('PluginManager', () => {
     await expect(pending).rejects.not.toThrow('registry.example.test')
   })
 
+  it('marks linked dependencies for manual update while recovering their package version', async () => {
+    const profileManifest = join('C:/Users/test/.dsh/profiles/web', 'package.json')
+    const installedManifest = join('C:/Users/test/.dsh/profiles/web', 'node_modules', 'linked-plugin', 'package.json')
+    const value = harness(vi.fn(async (filename: string) => {
+      if (filename === profileManifest) return JSON.stringify({ dependencies: { 'linked-plugin': 'link:C:/workspace/linked-plugin' } })
+      if (filename === installedManifest) return JSON.stringify({ name: 'linked-plugin', version: '0.4.0' })
+      throw new Error('unexpected file: ' + filename)
+    }))
+    const pending = value.manager.list()
+    value.children[0]?.stdout.write(JSON.stringify([{
+      path: 'C:/Users/test/.dsh/profiles/web',
+      dependencies: { 'linked-plugin': { version: 'link:C:/workspace/linked-plugin' } },
+    }]))
+    value.children[0]?.close(0)
+
+    await expect(pending).resolves.toEqual({ entries: [{
+      name: 'linked-plugin',
+      version: '0.4.0',
+      manualUpdate: true,
+    }] })
+  })
+
   it('does not expose local dependency specs to the renderer', async () => {
     const value = harness(vi.fn(async () => JSON.stringify({ dependencies: { 'local-plugin': 'file:C:/private/plugin' } })))
     const pending = value.manager.list()
@@ -232,7 +256,7 @@ describe('PluginManager', () => {
     }]))
     value.children[0]?.close(0)
     const result = await pending
-    expect(result).toEqual({ entries: [{ name: 'local-plugin', version: '1.0.0' }] })
+    expect(result).toEqual({ entries: [{ name: 'local-plugin', version: '1.0.0', manualUpdate: true }] })
     expect(JSON.stringify(result)).not.toContain('C:/private')
   })
 

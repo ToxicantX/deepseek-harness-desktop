@@ -51,7 +51,7 @@ Shell 为 DSH 对话输入框补充原生文本/文件粘贴体验。超过 500 
 
 ## 插件
 
-通过 **Runtime → 管理插件** 打开桌面插件管理器。管理器会列出当前 Web profile 中已安装的插件，并支持安装和移除。安装时请输入受控的 npm package spec，或 GitHub HTTPS / `github:` spec；例如 `@scope/plugin@1.2.3`、`https://github.com/owner/repo.git` 或 `github:owner/repo`。管理器会优先从 pnpm 列表读取已安装版本；列表缺失版本时，再从受控的已安装包清单回退读取。所有直接声明的插件都会显示更新按钮；后台确认 npm 插件存在兼容新版本时，按钮会同时标明目标版本。网络失败或无法确认最新版本不会阻止手动更新。管理器会显示每项操作的进度和日志。
+通过 **Runtime → 管理插件** 打开桌面插件管理器。管理器会列出当前 Web profile 中已安装的插件，并支持安装和移除。安装时请输入受控的 npm package spec，或 GitHub HTTPS / `github:` spec；例如 `@scope/plugin@1.2.3`、`https://github.com/owner/repo.git` 或 `github:owner/repo`。管理器会优先从 pnpm 列表读取已安装版本；列表缺失版本时，再从受控的已安装包清单回退读取。registry 插件只在后台确认存在兼容新版本时显示“更新至”按钮；GitHub、git、link、file 和 workspace 来源提供通用“更新”按钮，不依赖 registry outdated 结果。网络失败或无法确认最新 registry 版本不会影响这些手动更新入口。管理器会显示每项操作的进度和日志。
 
 安装、更新或移除前，Shell 会先停止 Runtime，避免 Web/HMR 在 `node_modules` 变更过程中加载不完整文件。操作成功后 Runtime 自动重启；操作失败时 Shell 也会恢复 Runtime。关闭并重新打开插件管理器不会丢失正在执行的操作或待完成的 Runtime 重启，窗口会继续显示同一操作的进度和日志。若插件加载失败导致 Web 无法就绪，由 Shell 独立提供的插件管理器仍保持可用，可移除或更新有问题的插件并再次重启 Runtime。
 

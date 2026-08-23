@@ -21,6 +21,7 @@ export interface PluginEntry {
   name: string
   spec?: string
   version?: string
+  manualUpdate?: true
 }
 
 export interface PluginList {
@@ -191,7 +192,11 @@ function stringField(value: unknown, label: string, limit: number): string | und
 
 function versionField(value: unknown, label: string): string | undefined {
   const version = stringField(value, label, 256)
-  return version === undefined ? undefined : valid(version) ?? version
+  return version === undefined ? undefined : valid(version) ?? undefined
+}
+
+function supportsManualUpdate(spec: string): boolean {
+  return /^(?:github:|git(?:\+|:)|(?:git\+)?https:\/\/github\.com\/|file:|link:|workspace:)/u.test(spec)
 }
 
 async function readInstalledPluginVersion(
@@ -237,6 +242,7 @@ async function parsePluginList(
     const dependencySpec = boundedText(dependencies[name], 'plugin dependency spec', MAX_PACKAGE_SPEC)
     let spec: string | undefined
     try { spec = validatePackageSpec(dependencySpec) } catch { spec = undefined }
+    const manualUpdate = supportsManualUpdate(dependencySpec)
     const detailValue = listed[name]
     const detail = detailValue === undefined ? undefined : object(detailValue, 'listed plugin')
     const listedVersion = detail === undefined ? undefined : versionField(detail.version, 'plugin version')
@@ -245,6 +251,7 @@ async function parsePluginList(
       name,
       ...(spec === undefined ? {} : { spec }),
       ...(version === undefined ? {} : { version }),
+      ...(manualUpdate ? { manualUpdate: true as const } : {}),
     })
   }
   entries.sort((left, right) => left.name.localeCompare(right.name))
