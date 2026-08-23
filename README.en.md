@@ -31,6 +31,10 @@ Runtimes are stored by default under:
 
 Profiles, sessions, settings, and plugins remain under `%USERPROFILE%\.dsh`, or the existing `DSH_HOME` override. Runtime switching, Shell updates, and reinstallation do not remove that directory.
 
+## Pasting text and files
+
+The Shell adds native text and file paste handling to the DSH conversation composer. Plain text longer than 500 characters and readable text files first appear as pending attachments that can be previewed, removed, or expanded, and are written into the message only on submit. Text files up to 2 MB are sent as inline context; larger text files send only the user-selected absolute path and segmented-read instructions. A paste handles at most 32 text files and inline text is capped at 8 MB. Images, audio/video, archives, PDFs, Office documents, and other binary content remain under DSH Web's own handling. The Web page context menu exposes undo, redo, cut, copy, paste, delete, and select-all according to Electron's edit flags.
+
 ## Agent personalization
 
 Open the global Agent personalization editor from **File → Personalization...**. It directly manages `$DSH_HOME/AGENTS.md` (`%USERPROFILE%\.dsh\AGENTS.md` by default) and supports a starter template, reload, a UTF-8 byte counter, and keyboard save. Saving blank content removes the file. Every mutation checks the observed document revision and uses a same-directory temporary file with atomic replacement. When an external change has already been detected, saving is rejected until the document is reloaded.

@@ -34,9 +34,11 @@ import { SessionRepairClient } from './session-repair.ts'
 import { SettingsDocumentClient } from './settings-document.ts'
 import { RuntimeStore } from './runtime-store.ts'
 import { ShellUpdater, type ShellUpdateProgress } from './shell-updater.ts'
+import { createFileContextInjectorScript } from './file-context-injector.ts'
 import { createClientBundleAdapterScript, createSkinDisposerScript, createSkinMarketInjectorScript } from './skin-market-injector.ts'
 import { ShellSkinStore } from './shell-skin-store.ts'
 import { allowDshWebPermission, shouldOpenInSystemBrowser } from './window-security.ts'
+import { createWebContextMenuTemplate } from './web-context-menu.ts'
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'dsh-skin', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }])
 
@@ -130,6 +132,7 @@ function injectSkinMarket(window: BrowserWindow): void {
     return
   }
   void (async () => {
+    await window.webContents.executeJavaScript(createFileContextInjectorScript())
     await window.webContents.executeJavaScript(createSkinMarketInjectorScript())
     const active = await shellSkinStore?.activeClientBundle()
     if (active !== undefined && active !== null) await executeClientBundleAdapter(window.webContents, active.bundle, active.id)
@@ -282,6 +285,10 @@ function createWindow(options: { utility?: 'manager' | 'repair' | 'plugin' | 'mc
       contextIsolation: true,
       sandbox: true,
     },
+  })
+  window.webContents.on('context-menu', (_event, params) => {
+    if (window.isDestroyed()) return
+    Menu.buildFromTemplate(createWebContextMenuTemplate(params)).popup({ window })
   })
   window.webContents.session.setPermissionRequestHandler((contents, permission, callback, details) => {
     callback(allowDshWebPermission({
