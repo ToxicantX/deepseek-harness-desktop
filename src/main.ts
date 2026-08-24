@@ -21,7 +21,7 @@ import {
 } from 'electron'
 import { MINIMUM_DSH_VERSION, type RuntimePreference } from './catalog.ts'
 import { DesktopPetController as PetEventController, type PetRendererState as PetProtocolState, type PetWebSocket } from './desktop-pet.ts'
-import { openPluginTerminal } from './cli-shell.ts'
+import { openTerminal } from './cli-shell.ts'
 import { McpManager, type McpList } from './mcp-manager.ts'
 import { mutateMcpWithRuntime } from './mcp-restart.ts'
 import { PersonalizationManager } from './personalization-manager.ts'
@@ -712,13 +712,13 @@ function installMenu(): void {
           click: () => { void openMcpManager() },
         },
         {
-          label: '打开插件管理终端',
+          label: '打开终端',
           enabled: cliDirectory !== undefined,
           click: () => {
             if (cliDirectory === undefined) return
             const home = process.env.DSH_HOME ?? join(homedir(), '.dsh')
-            void openPluginTerminal(cliDirectory, home).catch((error: unknown) => {
-              dialog.showErrorBox('无法打开插件管理终端', String(error))
+            void openTerminal(cliDirectory, home).catch((error: unknown) => {
+              dialog.showErrorBox('无法打开终端', String(error))
             })
           },
         },

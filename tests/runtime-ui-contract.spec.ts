@@ -81,6 +81,13 @@ describe('runtime startup UI contract', () => {
     expect(preload).toContain("startupRetry.hidden = runtimeManagerMode || view.phase !== 'error'")
   })
 
+  it('opens the prepared DSH terminal from the Runtime menu', () => {
+    expect(main).toContain("label: '打开终端'")
+    expect(main).toContain('void openTerminal(cliDirectory, home)')
+    expect(main).toContain("dialog.showErrorBox('无法打开终端'")
+    expect(main).not.toContain('打开插件管理终端')
+  })
+
   it('authorizes both exact runtime-page windows and no unrelated utility sender', () => {
     const guard = main.slice(main.indexOf('function runtimeClient'), main.indexOf('function pluginService'))
     expect(guard).toContain('event.sender === mainWindow.webContents')
