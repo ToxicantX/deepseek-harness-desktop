@@ -108,3 +108,44 @@
 - `docs/conversation-edit-retry.md`：补充旧 Runtime 产物共存时的壳侧屏蔽行为。
 - `progress.md`：追加本轮兼容处理与真实共存烟测记录。
 - 回滚点：`5fbe414b491a1845601afac4fc4fe00963bf37eb`。如需回滚整个桌面壳迁移，执行上一轮 Notes 中的完整回滚命令。
+
+
+## 2026-08-25 - Task: 限定长文本粘贴折叠仅对聊天输入框生效
+### What was done
+- 修复桌面壳粘贴注入对页面内第一个可见多行输入框的全局误判，改为根据粘贴事件的实际目标识别聊天输入框。
+- 仅当输入目标同时位于聊天输入卡片和聊天输入滚动区时，才接管超过 500 个字符的文本或文本文件并生成折叠附件；设置菜单、插件配置及其他多行文本框保持默认粘贴行为。
+- 文本、文件和提交展开流程显式复用本次聊天输入框，避免页面同时存在多个编辑器时把内容写入错误区域；同步限制待发送折叠内容的提交拦截范围。
+- 补充非聊天多行文本框不触发 preventDefault/stopImmediatePropagation 的行为回归测试，并更新功能作用范围文档。
+### Testing
+- `npm exec vitest run tests/file-context-ui-contract.spec.ts --maxWorkers=1 --testTimeout=20000`：通过，1 个测试文件、5 个测试；包含非聊天 textarea 粘贴事件不被拦截的行为验证及聊天输入框选择器契约检查。
+- `pnpm exec vitest run --maxWorkers=1 --testTimeout=20000`：通过，36 个测试文件、270 个测试。
+- `pnpm run typecheck`：通过；当前系统 Node.js 22.22.0 低于仓库声明的 Node.js 24，pnpm 输出 engine 警告。
+- `pnpm run build`：通过；生成的 `lib/preload.cjs` 已包含聊天输入框范围判断，同样存在上述 Node.js engine 警告。
+- `git diff --check`：通过。
+- 本轮未启动真实桌面壳进行设置插件页面手工粘贴烟测；行为边界由注入脚本执行测试覆盖。
+### Notes
+- `src/file-context-injector.ts`：将长文本和文本文件粘贴处理限定到实际触发事件的聊天输入框，并限制提交展开范围。
+- `tests/file-context-ui-contract.spec.ts`：增加聊天输入框范围契约及非聊天 textarea 默认粘贴行为回归测试。
+- `docs/conversation-edit-retry.md`：补充粘贴折叠仅作用于聊天输入框的使用说明。
+- `progress.md`：追加本轮施工、验证和回滚记录。
+- 回滚点：`f047c739448cb0dbf2086ff6c8a55640d5163089`。执行 `git restore --source=f047c739448cb0dbf2086ff6c8a55640d5163089 -- src/file-context-injector.ts tests/file-context-ui-contract.spec.ts docs/conversation-edit-retry.md progress.md` 可回滚本轮改动。
+- 补充更正：上述专项测试实际执行命令为 `pnpm exec vitest run tests/file-context-ui-contract.spec.ts --maxWorkers=1 --testTimeout=20000`。
+- 补充更正：文件上下文注入脚本的构建产物落点为 `lib/main.js`，已确认其中包含 `CHAT_EDITOR_SELECTOR`；上文 `lib/preload.cjs` 表述有误。
+
+
+## 2026-08-25 - Task: 合并 Codex 代码研发与工作执行提示词
+### What was done
+- 读取用户提供的提示词全文，并以其语言、逆向分析、质量、协作、目标执行、Notion 项目管理和汇报格式作为基稿。
+- 从 `D:\work\ai\codex` 中筛选 Codex 基础工作提示、GPT-5.2 任务执行规范、编排协作规范和代码审查规则，提炼仓库指令、持续执行、计划、精准改动、工具使用、验证、调试、Git、文档和审查相关内容。
+- 排除沙箱、审批、权限申请、敏感信息边界及其他非实际研发执行内容，对重复规则进行合并，并保留用户原提示中的工作能力部分。
+- 在项目根目录生成可直接使用的完整提示词文件。
+### Testing
+- 提示词结构校验：通过，生成文件共 242 行、25 个 Markdown 标题，要求的研发执行、验证、调试、Git、审查、逆向和项目管理章节均存在。
+- 限制内容关键词校验：通过，未保留 Codex 的沙箱与审批模式说明、调用升级申请说明，以及基稿中的敏感信息和访问边界条目。
+- UTF-8 内容校验：通过，文件不存在 NUL 字节。
+- `git diff --check`：通过。
+### Notes
+- `codex-work-prompt.md`：新增融合后的完整代码研发与工作执行提示词。
+- `progress.md`：追加本轮提示词提取、合并、校验和回滚记录。
+- 只读来源：`C:\Users\karma617\.codex\attachments\6135296f-8bb8-4e78-910a-2183c00edc03\pasted-text.txt`、`D:\work\ai\codex\codex-rs\protocol\src\prompts\base_instructions\default.md`、`D:\work\ai\codex\codex-rs\core\gpt_5_2_prompt.md`、`D:\work\ai\codex\codex-rs\core\templates\agents\orchestrator.md` 和 `D:\work\ai\codex\codex-rs\prompts\templates\review\rubric.md`。
+- 回滚方式：执行 `Remove-Item -LiteralPath 'D:\work\ai\deepseek-harness-desktop\codex-work-prompt.md' -Force` 删除本轮正式交付文件；`progress.md` 按追加式历史记录保留。
