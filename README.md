@@ -53,7 +53,7 @@ https://github.com/ToxicantX/dsh-multi-model-orchestrator
 - **刷新并应用版本策略**：重新读取 Runtime Catalog，按当前策略下载、切换或重启 Runtime。
 - **管理插件**：安装、更新或移除当前 Web Profile 的插件，并查看操作进度与日志。
 - **管理 MCP**：搜索本机 MCP、查看配置来源和 DSH 接入状态，并启用或禁用可管理的条目。
-- **打开插件管理终端**：为高级用户打开已配置好 Node、pnpm 和 `dsh` 命令的终端。
+- **打开终端**：为高级用户打开已配置好 Node、pnpm 和 `dsh` 命令的终端。
 
 插件或 MCP 发生变更时，Shell 会先停止 Runtime，完成原子修改后再自动启动，避免 Web 在依赖变更过程中读取不完整文件。
 
@@ -118,7 +118,7 @@ github:owner/repo
 
 Registry 插件在检测到兼容新版本时显示更新按钮；GitHub、git、link、file 和 workspace 来源提供手动更新。若插件导致 DSH 无法启动，Shell 自带的插件管理器仍可独立打开，用于移除或更新问题插件。
 
-高级用户也可以在 **Runtime → 打开插件管理终端** 中使用：
+高级用户也可以在 **Runtime → 打开终端** 中使用：
 
 ```powershell
 dsh plugin --profile web list

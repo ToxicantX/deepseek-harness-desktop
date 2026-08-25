@@ -25,26 +25,25 @@ export async function prepareCliShim(runtime: InstalledRuntime, userData: string
   return directory
 }
 
-export async function openPluginTerminal(
+export async function openTerminal(
   cliDirectory: string,
   cwd: string,
   inherited: NodeJS.ProcessEnv = process.env,
 ): Promise<void> {
   const environment: NodeJS.ProcessEnv = { ...inherited, Path: `${cliDirectory};${inherited.Path ?? inherited.PATH ?? ''}` }
   environment.PATH = environment.Path
-  const command = [
-    "$Host.UI.RawUI.WindowTitle = 'DeepSeek Harness 插件管理'",
-    "Write-Host 'dsh plugin --profile web list' -ForegroundColor Cyan",
-    "Write-Host 'dsh plugin --profile web add <package-spec>' -ForegroundColor DarkGray",
-  ].join('; ')
   await new Promise<void>((resolve, reject) => {
-    const child = spawn('powershell.exe', ['-NoExit', '-Command', command], {
-      cwd,
-      env: environment,
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: false,
-    })
+    const child = spawn(
+      inherited.ComSpec ?? inherited.COMSPEC ?? 'cmd.exe',
+      ['/d', '/s', '/c', 'start "" "%ComSpec%" /d /k "title DeepSeek Harness"'],
+      {
+        cwd,
+        env: environment,
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true,
+      },
+    )
     child.once('error', reject)
     child.once('spawn', () => { child.unref(); resolve() })
   })
