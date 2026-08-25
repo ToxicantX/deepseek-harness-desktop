@@ -4,6 +4,3 @@
 
     - id: desktop-pet-bridge
       name: '@deepseek-ai/dsh-desktop-pet-bridge'
-
-    - id: desktop-conversation-replay
-      name: '@deepseek-ai/dsh-desktop-conversation-replay'

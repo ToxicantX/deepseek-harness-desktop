@@ -1,10 +1,13 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import { installConversationReplayModuleHook } from './conversation-replay-injector.ts'
 import type { RuntimePreference } from './catalog.ts'
 import type { McpEndpointView, McpEntryView, McpList } from './mcp-manager.ts'
 import type { PluginEntry, PluginList, PluginOperationStatus, PluginStartInput, PluginUpdateList } from './plugin-manager.ts'
 import type { RuntimeView } from './runtime-controller.ts'
 import type { SessionRepairAnomalyKind, SessionRepairInspection, SessionRepairResult, SessionRepairRollbackResult } from './session-repair.ts'
 import type { ShellUpdateProgress } from './shell-updater.ts'
+
+contextBridge.executeInMainWorld({ func: installConversationReplayModuleHook })
 
 contextBridge.exposeInMainWorld('dshDesktopFiles', {
   getAbsolutePath: (file: File): string => webUtils.getPathForFile(file),

@@ -62,3 +62,49 @@
 - `%LOCALAPPDATA%\DeepSeek Harness\runtime-manager\runtimes\0.1.1-rc.2\app\node_modules\@deepseek-ai\dsh-desktop-conversation-replay\client.js`：同步当前 Runtime 实际加载文件。
 - 回滚本轮 Runtime 更新的备份点：`C:\Users\karma617\AppData\Local\Temp\dsh-conversation-textclip-backup-rc2-d07918c0251d43e5918bf75323fd5918\client.js`。
 - 回滚本轮仓库功能：从变更前版本恢复 `runtime/conversation-replay-plugin/client.js`、`tests/conversation-replay-runtime-plugin.spec.mjs` 和 `docs/conversation-edit-retry.md`。
+
+## 2026-08-25 - Task: 将对话编辑、重试和长文本折叠迁移到桌面壳注入
+### What was done
+- 将用户消息编辑、重试、图片重传、会话分支和长文本折叠逻辑迁入桌面壳源码，由 preload 在页面脚本执行前安装主世界 ModuleLoader 劫持。
+- 只包装 DSH 对话模块的工厂和 apply，先保留上游对话初始化，再使用同一个真实上下文覆盖用户消息渲染；同时兼容 DSH 在 ModuleLoader 赋值后继续替换 load，以及皮肤适配器临时接管 load 的流程。
+- 从 Desktop Profile、Runtime 构建依赖闭包和插件目录中移除 conversation-replay，使功能随桌面壳 preload.cjs 发布，不再依赖 Runtime 压缩包。
+- 将原 Runtime 插件测试迁移为桌面壳注入测试，并更新集成与发布文档。
+### Testing
+- `pnpm exec vitest run tests/conversation-replay-shell-injector.spec.ts --maxWorkers=1 --testTimeout=20000`：通过，1 个测试文件、7 个测试；覆盖 ModuleLoader 后置 load 重写、临时接管恢复、原 apply 保留、重复注入、样式释放、500/501 字符边界、图片重传、fork 和首轮新建会话。
+- `pnpm exec vitest run --maxWorkers=1 --testTimeout=20000`：通过，36 个测试文件、268 个测试。
+- `pnpm run typecheck`：通过；当前系统 Node.js 22.22.0 低于仓库声明的 Node.js 24，pnpm 输出 engine 警告。
+- `pnpm run build`：通过；生成的 `lib/preload.cjs` 包含独立可序列化的主世界注入函数，同样存在上述 Node.js engine 警告。
+- 真实桌面壳烟测：使用 DSH 0.1.1-rc.2 和仓库内已移除 conversation-replay 的 `runtime/desktop.patch.yml` 启动独立 Web 服务，再由 Electron 加载当前构建的 `lib/preload.cjs`；页面检测到 hookVersion 1、4 条用户消息行，每条均有复制、重试和编辑入口；进入编辑后载入 272 字符原文，取消后恢复普通消息状态；Electron 退出码 0。未触发确认或重试，避免对现有会话发起模型请求；重新发送行为由自动化测试覆盖。
+- `git diff --check`：通过。
+### Notes
+- `src/conversation-replay-injector.ts`：新增桌面壳主世界 ModuleLoader 代理、对话模块 apply 包装及完整用户消息交互实现。
+- `src/preload.ts`：在其余 preload API 暴露前同步安装对话功能主世界注入。
+- `runtime/desktop.patch.yml`：移除 conversation-replay 的 Desktop Profile 插入项。
+- `scripts/build-runtime.ps1`：移除 conversation-replay 插件复制、本地依赖和 DSH 依赖闭包注册。
+- `runtime/conversation-replay-plugin/client.js`：删除原 Runtime 客户端插件实现。
+- `runtime/conversation-replay-plugin/index.js`：删除原 Runtime 服务端空入口。
+- `runtime/conversation-replay-plugin/package.json`：删除原 Runtime 插件声明。
+- `tests/conversation-replay-runtime-plugin.spec.mjs`：删除旧 Runtime 插件测试入口。
+- `tests/conversation-replay-shell-injector.spec.ts`：新增桌面壳劫持、功能行为和 Runtime 解耦回归测试。
+- `docs/conversation-edit-retry.md`：改写为桌面壳注入架构、打包落点和验证命令。
+- `progress.md`：追加本轮施工、验证和回滚记录。
+- 回滚点：`5fbe414b491a1845601afac4fc4fe00963bf37eb`。执行 `git restore --source=5fbe414b491a1845601afac4fc4fe00963bf37eb -- docs/conversation-edit-retry.md runtime/conversation-replay-plugin runtime/desktop.patch.yml scripts/build-runtime.ps1 src/preload.ts tests/conversation-replay-runtime-plugin.spec.mjs progress.md`，再执行 `Remove-Item -LiteralPath 'src\conversation-replay-injector.ts','tests\conversation-replay-shell-injector.spec.ts' -Force`。
+
+## 2026-08-25 - Task: 屏蔽已发布旧 Runtime 中的对话插件
+### What was done
+- 桌面壳在 ModuleLoader 注册阶段识别旧的 `@deepseek-ai/dsh-desktop-conversation-replay` 客户端模块，并将其工厂替换为空插件，避免用户本机保留旧 Runtime 产物时与壳侧实现重复注册。
+- 保留壳侧对真实 DSH conversation 模块的 apply 劫持，旧 Runtime 是否携带该插件不再影响桌面壳功能入口。
+- 补充旧模块屏蔽计数作为壳侧诊断状态，并更新回归测试与集成文档。
+### Testing
+- `pnpm exec vitest run tests/conversation-replay-shell-injector.spec.ts --maxWorkers=1 --testTimeout=20000`：通过，1 个测试文件、7 个测试；新增断言确认旧插件原工厂不执行，替换后的插件 apply 为空实现。
+- `pnpm exec vitest run --maxWorkers=1 --testTimeout=20000`：通过，36 个测试文件、268 个测试。
+- `pnpm run typecheck`：通过；当前系统 Node.js 22.22.0 低于仓库声明的 Node.js 24，pnpm 输出 engine 警告。
+- `pnpm run build`：通过；生成的 `lib/preload.cjs` 已包含旧插件屏蔽逻辑。
+- 旧 Runtime 共存烟测：使用本机 DSH 0.1.1-rc.2 原有 `desktop.patch.yml` 启动服务，该 Patch 仍声明旧 conversation-replay 插件；桌面壳检测到 `legacySuppressions: 1`，旧插件被替换为空实现。随后在有效历史会话中检测到 2 条壳侧用户消息行、复制/重试/编辑入口；1096 字符消息默认折叠，展开后正文长度为 1096，再次点击可收起；编辑框载入完整 1096 字符，取消后恢复；Electron 退出码 0。
+- `git diff --check`：通过。
+### Notes
+- `src/conversation-replay-injector.ts`：增加旧 Runtime conversation-replay 模块识别、空插件替换和屏蔽计数。
+- `tests/conversation-replay-shell-injector.spec.ts`：增加旧插件工厂不执行及空 apply 回归断言。
+- `docs/conversation-edit-retry.md`：补充旧 Runtime 产物共存时的壳侧屏蔽行为。
+- `progress.md`：追加本轮兼容处理与真实共存烟测记录。
+- 回滚点：`5fbe414b491a1845601afac4fc4fe00963bf37eb`。如需回滚整个桌面壳迁移，执行上一轮 Notes 中的完整回滚命令。

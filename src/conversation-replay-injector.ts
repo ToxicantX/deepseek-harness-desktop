@@ -1,7 +1,14 @@
-window.__ModuleLoader__.load({
-  id: '@deepseek-ai/dsh-desktop-conversation-replay',
-  factory: (require) => {
-    const module = { exports: {} }
+// @ts-nocheck
+
+export function installConversationReplayModuleHook(): string {
+  const globalObject = globalThis
+  const hookKey = '__dshDesktopConversationReplayHook'
+  const targetModuleId = '@deepseek-ai/dsh-client-ui-conversation'
+  const legacyModuleId = '@deepseek-ai/dsh-desktop-conversation-replay'
+  const existingHook = globalObject[hookKey]
+  if (existingHook?.version === 1) return 'already-installed'
+
+  function createConversationReplayFeature(require) {
     const React = require('react')
     const {
       IconCheckOutline16,
@@ -486,7 +493,6 @@ window.__ModuleLoader__.load({
       })
     }
 
-    const inject = ['slots', 'sessions', 'workspaces']
     function apply(ctx) {
       let style = document.getElementById(STYLE_ID)
       let ownsStyle = false
@@ -497,19 +503,18 @@ window.__ModuleLoader__.load({
         document.head.appendChild(style)
         ownsStyle = true
       }
-      if (ownsStyle) ctx.effect(() => () => { style.remove() }, 'desktop-conversation-replay: styles')
+      if (ownsStyle) ctx.effect(() => () => { style.remove() }, 'desktop-shell-conversation-replay: styles')
       const UserMessageNodeView = createUserMessageNodeView(ctx)
       ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
         name: 'conversation.chat.node',
         key: 'user',
         priority: -100,
-        registrant: '@deepseek-ai/dsh-desktop-conversation-replay',
+        registrant: '@deepseek-ai/dsh-desktop-shell-conversation-replay',
       }, UserMessageNodeView))
     }
 
-    module.exports = {
+    return {
       apply,
-      inject,
       contentParts,
       isLongTextClip,
       previousCompletedTurnSeq,
@@ -518,7 +523,108 @@ window.__ModuleLoader__.load({
       replayMessage,
       workspaceFor,
     }
-    return module.exports
-  },
-})
+  }
 
+  const installedContexts = new WeakSet()
+  const wrappedFactories = new WeakMap()
+  const loaderProxies = new WeakMap()
+  let legacySuppressions = 0
+
+  function wrapFactory(factory) {
+    const existing = wrappedFactories.get(factory)
+    if (existing !== undefined) return existing
+    const wrapped = function (require) {
+      const exports = factory(require)
+      if (exports === null || (typeof exports !== 'object' && typeof exports !== 'function')) return exports
+      const originalApply = exports.apply
+      if (typeof originalApply !== 'function') return exports
+      let feature
+      const wrappedApply = function (...args) {
+        const result = originalApply.apply(this, args)
+        const ctx = args[0]
+        if (ctx !== null && (typeof ctx === 'object' || typeof ctx === 'function') && !installedContexts.has(ctx)) {
+          try {
+            feature ??= createConversationReplayFeature(require)
+            feature.apply(ctx)
+            installedContexts.add(ctx)
+          } catch (error) {
+            console.error('桌面壳对话编辑与重试功能注入失败', error)
+          }
+        }
+        return result
+      }
+      Object.defineProperty(exports, 'apply', {
+        ...Object.getOwnPropertyDescriptor(exports, 'apply'),
+        value: wrappedApply,
+      })
+      return exports
+    }
+    wrappedFactories.set(factory, wrapped)
+    return wrapped
+  }
+
+  function wrapLoader(loader) {
+    if (loader === undefined || loader === null || (typeof loader !== 'object' && typeof loader !== 'function')) return loader
+    const existing = loaderProxies.get(loader)
+    if (existing !== undefined) return existing
+    const wrappers = new WeakMap()
+    const delegates = new WeakMap()
+    const proxy = new Proxy(loader, {
+      get(target, property, receiver) {
+        if (property !== 'load') return Reflect.get(target, property, receiver)
+        const delegate = Reflect.get(target, property, target)
+        if (typeof delegate !== 'function') return delegate
+        const existingWrapper = wrappers.get(delegate)
+        if (existingWrapper !== undefined) return existingWrapper
+        const wrapper = function (handoff) {
+          if (handoff?.id === targetModuleId && typeof handoff.factory === 'function') {
+            return Reflect.apply(delegate, target, [{ ...handoff, factory: wrapFactory(handoff.factory) }])
+          }
+          if (handoff?.id === legacyModuleId && typeof handoff.factory === 'function') {
+            legacySuppressions += 1
+            return Reflect.apply(delegate, target, [{
+              ...handoff,
+              factory: () => ({ inject: [], apply() {} }),
+            }])
+          }
+          return Reflect.apply(delegate, target, [handoff])
+        }
+        wrappers.set(delegate, wrapper)
+        delegates.set(wrapper, delegate)
+        return wrapper
+      },
+      set(target, property, value) {
+        const delegate = property === 'load' && typeof value === 'function' ? delegates.get(value) : undefined
+        return Reflect.set(target, property, delegate ?? value, target)
+      },
+      defineProperty(target, property, descriptor) {
+        if (property !== 'load' || typeof descriptor.value !== 'function') return Reflect.defineProperty(target, property, descriptor)
+        const delegate = delegates.get(descriptor.value)
+        return Reflect.defineProperty(target, property, { ...descriptor, value: delegate ?? descriptor.value })
+      },
+    })
+    loaderProxies.set(loader, proxy)
+    return proxy
+  }
+
+  let currentLoader = wrapLoader(globalObject.__ModuleLoader__)
+  Object.defineProperty(globalObject, '__ModuleLoader__', {
+    configurable: true,
+    enumerable: false,
+    get() { return currentLoader },
+    set(value) { currentLoader = wrapLoader(value) },
+  })
+  Object.defineProperty(globalObject, hookKey, {
+    configurable: true,
+    enumerable: false,
+    writable: false,
+    value: Object.freeze({
+      version: 1,
+      targetModuleId,
+      legacyModuleId,
+      createFeature: createConversationReplayFeature,
+      get legacySuppressions() { return legacySuppressions },
+    }),
+  })
+  return 'installed'
+}

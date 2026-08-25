@@ -24,19 +24,22 @@
 - 复制、编辑和重试仍使用完整原文；进入编辑状态时，编辑框会载入全部内容。
 - 500 个字符及以内的普通消息维持原有气泡展示。
 
-## Runtime 集成
+## 桌面壳集成
 
-该能力由 `runtime/conversation-replay-plugin` 提供。Runtime 构建会：
+该能力由桌面壳自身提供，不再写入或依赖 Runtime 插件：
 
-1. 将插件复制到 `app/plugins/conversation-replay`。
-2. 在 Runtime 的 `app/package.json` 中注册本地插件依赖。
-3. 将插件加入 DSH manifest 的依赖闭包，保证 Profile 能解析插件。
-4. 通过 `runtime/desktop.patch.yml` 将插件插入 Desktop Profile。
+1. `src/preload.ts` 在页面脚本执行前，通过 `contextBridge.executeInMainWorld` 安装主世界注入。
+2. 注入逻辑提前接管 `window.__ModuleLoader__` 的赋值，并只包装 `@deepseek-ai/dsh-client-ui-conversation` 模块的工厂函数。
+3. 上游对话模块执行原始 `apply(ctx)` 后，桌面壳使用同一个真实 `ctx` 注册用户消息渲染覆盖，因此可直接使用 `slots`、`sessions` 和 `workspaces`。
+4. 样式、消息分支、附件重传和长文本折叠代码随桌面壳的 `preload.cjs` 一起打包；`runtime/desktop.patch.yml` 和 Runtime 构建不再包含 conversation-replay 插件。
+5. 如果用户本机仍保留旧 Runtime 产物中的 conversation-replay 插件，桌面壳会在模块注册阶段将旧客户端入口替换为空实现，避免旧插件与壳侧实现重复注册。
+
+发布时必须重新构建并发布桌面壳安装包。只更新 Runtime 压缩包不会带上本功能。
 
 ## 验证入口
 
 ```powershell
-pnpm exec vitest run tests/conversation-replay-runtime-plugin.spec.mjs --maxWorkers=1 --testTimeout=20000
+pnpm exec vitest run tests/conversation-replay-shell-injector.spec.ts --maxWorkers=1 --testTimeout=20000
 pnpm exec vitest run --maxWorkers=1 --testTimeout=20000
 pnpm run typecheck
 pnpm run build
