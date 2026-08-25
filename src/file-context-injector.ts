@@ -16,7 +16,10 @@ export function createFileContextInjectorScript(): string {
   let clipSequence = 0;
   let busy = false;
   let replayingSubmit = false;
-  const findEditor = () => [...document.querySelectorAll('textarea,[contenteditable="true"]')].find(node => node instanceof HTMLElement && node.getBoundingClientRect().width > 0 && node.getBoundingClientRect().height > 0) || null;
+  const CHAT_EDITOR_SELECTOR = '[data-composer-card="true"] [data-input-scroll="true"] textarea,[data-composer-card="true"] [data-input-scroll="true"] [contenteditable="true"]';
+  const isChatEditor = node => node instanceof HTMLElement && node.matches('textarea,[contenteditable="true"]') && Boolean(node.closest('[data-composer-card="true"]')) && Boolean(node.closest('[data-input-scroll="true"]'));
+  const editorFromTarget = target => target instanceof Element ? target.closest('textarea,[contenteditable="true"]') : null;
+  const findEditor = () => [...document.querySelectorAll(CHAT_EDITOR_SELECTOR)].find(node => isChatEditor(node) && node.getBoundingClientRect().width > 0 && node.getBoundingClientRect().height > 0) || null;
   const readValue = node => node instanceof HTMLTextAreaElement || node instanceof HTMLInputElement ? node.value : node.innerText;
   const writeValue = (node, value) => {
     if (node instanceof HTMLTextAreaElement || node instanceof HTMLInputElement) {
@@ -195,27 +198,20 @@ export function createFileContextInjectorScript(): string {
     clips.set(id, { name, text, isFile, element, ...(largeFile || {}) });
     ensureTray(editor).appendChild(element);
   };
-  const appendText = text => {
+  const appendText = (editor, text) => {
     if (new TextEncoder().encode(text).byteLength > MAX_BYTES) throw new Error('粘贴文本超过 8 MB 限制');
-    const editor = findEditor();
-    if (!editor) throw new Error('未找到 DSH 对话输入框');
     const length = Array.from(text).length;
     if (length <= MAX_INLINE_CHARS) { writeValue(editor, readValue(editor) + text); return; }
     insertClip(editor, textClipName(text), text, false);
   };
-  const appendContext = (name, text) => {
-    const editor = findEditor();
-    if (!editor) throw new Error('未找到 DSH 对话输入框');
+  const appendContext = (editor, name, text) => {
     insertClip(editor, name, text, true);
   };
-  const appendLargeFilePath = (name, absolutePath, bytes) => {
-    const editor = findEditor();
-    if (!editor) throw new Error('未找到 DSH 对话输入框');
+  const appendLargeFilePath = (editor, name, absolutePath, bytes) => {
     insertClip(editor, name, '', true, { absolutePath, bytes });
   };
-  const expandClips = () => {
-    const editor = findEditor();
-    if (!editor || clips.size === 0) return false;
+  const expandClips = editor => {
+    if (clips.size === 0) return false;
     let value = readValue(editor);
     for (const entry of clips.values()) value = appendEntry(value, entry);
     for (const tray of document.querySelectorAll('[' + TRAY_ATTR + ']')) tray.remove();
@@ -236,20 +232,22 @@ export function createFileContextInjectorScript(): string {
     if (file.type.startsWith('image/') || BINARY_EXTENSIONS.test(name)) return true;
     return /^(?:audio|video|font)\//i.test(file.type) || /^(?:application\/(?:pdf|zip|gzip|x-7z-compressed|x-rar-compressed|java-archive|msdownload)|binary\/)/i.test(file.type);
   };
-  const handleFile = async file => {
+  const handleFile = async (editor, file) => {
     const name = file.name || 'clipboard-file';
     if (isBinaryFile(file)) return;
     if (file.size > LARGE_FILE_BYTES) {
       const api = window.dshDesktopFiles;
       const absolutePath = api && typeof api.getAbsolutePath === 'function' ? api.getAbsolutePath(file) : '';
       if (typeof absolutePath !== 'string' || absolutePath.length === 0) throw new Error('无法获取大文本文件的绝对路径：' + name);
-      appendLargeFilePath(name, absolutePath, file.size);
+      appendLargeFilePath(editor, name, absolutePath, file.size);
       return;
     }
     const text = await readTextFile(file);
-    if (text !== null) appendContext(name, text);
+    if (text !== null) appendContext(editor, name, text);
   };
   const onPaste = event => {
+    const editor = editorFromTarget(event.target);
+    if (!isChatEditor(editor)) return;
     const items = event.clipboardData && event.clipboardData.items;
     if (!items || busy) return;
     const files = [];
@@ -259,7 +257,7 @@ export function createFileContextInjectorScript(): string {
       if (Array.from(text).length <= MAX_INLINE_CHARS) return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      appendText(text);
+      appendText(editor, text);
       return;
     }
     const textFiles = files.filter(file => !isBinaryFile(file)).slice(0, MAX_FILES);
@@ -267,11 +265,9 @@ export function createFileContextInjectorScript(): string {
     event.preventDefault();
     event.stopImmediatePropagation();
     busy = true;
-    Promise.all(textFiles.map(handleFile)).catch(error => console.error('[dsh file context]', error)).finally(() => { busy = false; });
+    Promise.all(textFiles.map(file => handleFile(editor, file))).catch(error => console.error('[dsh file context]', error)).finally(() => { busy = false; });
   };
-  const replayKeydown = event => {
-    const editor = findEditor();
-    if (!editor) return;
+  const replayKeydown = (event, editor) => {
     const init = { key: 'Enter', code: event.code || 'Enter', bubbles: true, cancelable: true, ctrlKey: event.ctrlKey, metaKey: event.metaKey, altKey: event.altKey };
     setTimeout(() => {
       replayingSubmit = true;
@@ -291,16 +287,21 @@ export function createFileContextInjectorScript(): string {
   };
   const onSubmit = event => {
     if (replayingSubmit) return;
+    let editor = null;
     if (event.type === 'keydown') {
       if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
-      const editor = findEditor();
-      if (!editor || (event.target !== editor && !editor.contains(event.target))) return;
+      editor = editorFromTarget(event.target);
+      if (!isChatEditor(editor)) return;
+    } else {
+      const form = event.target instanceof HTMLFormElement ? event.target : null;
+      editor = findEditor();
+      if (!form || !editor || !form.contains(editor)) return;
     }
     if (clips.size === 0) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    if (!expandClips()) return;
-    if (event.type === 'keydown') replayKeydown(event); else replayFormSubmit(event);
+    if (!expandClips(editor)) return;
+    if (event.type === 'keydown') replayKeydown(event, editor); else replayFormSubmit(event);
   };
   window.addEventListener('paste', onPaste, true);
   document.addEventListener('paste', onPaste, true);
