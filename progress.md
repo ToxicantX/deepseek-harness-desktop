@@ -149,3 +149,24 @@
 - `progress.md`：追加本轮提示词提取、合并、校验和回滚记录。
 - 只读来源：`C:\Users\karma617\.codex\attachments\6135296f-8bb8-4e78-910a-2183c00edc03\pasted-text.txt`、`D:\work\ai\codex\codex-rs\protocol\src\prompts\base_instructions\default.md`、`D:\work\ai\codex\codex-rs\core\gpt_5_2_prompt.md`、`D:\work\ai\codex\codex-rs\core\templates\agents\orchestrator.md` 和 `D:\work\ai\codex\codex-rs\prompts\templates\review\rubric.md`。
 - 回滚方式：执行 `Remove-Item -LiteralPath 'D:\work\ai\deepseek-harness-desktop\codex-work-prompt.md' -Force` 删除本轮正式交付文件；`progress.md` 按追加式历史记录保留。
+
+
+## 2026-08-26 - Task: 修复主题安装客户端入口解析
+### What was done
+- 修复主题安装入口解析器与错误提示不一致的问题：补充 `lib/plugin/dist/client.js`、`plugin/dist/client.js` 等历史包布局的候选路径。
+- 扩展 `exports["./client"]` 条件导出解析，支持回退数组并补充 `node` 条件，避免合法清单因导出形态不同而误报“未找到可注入的客户端入口”。
+- 增加临时主题包目录回归测试，覆盖嵌套 legacy plugin bundle 和数组/条件导出两种入口。
+- 增加主题市场入口解析文档，记录候选路径和验证命令。
+### Testing
+- `pnpm exec vitest run tests/shell-skin-store.spec.ts --maxWorkers=1 --testTimeout=20000`：通过，1 个测试文件、2 个测试。
+- `pnpm exec vitest run --maxWorkers=1 --testTimeout=20000`：通过，37 个测试文件、272 个测试。
+- `pnpm run typecheck`：通过；当前系统 Node.js 22.22.0 低于仓库声明的 Node.js 24，pnpm 输出 engine 警告。
+- `pnpm run build`：通过；桌面壳构建产物已包含新的客户端入口候选解析逻辑，同样存在上述 Node.js engine 警告。
+- `git diff --check`：通过。
+- 本轮未执行真实在线主题下载和桌面壳 UI 手工安装烟测；入口解析行为已用临时目录回归测试覆盖。
+### Notes
+- `src/shell-skin-store.ts`：补充 nested plugin/dist 客户端入口和条件导出数组解析。
+- `tests/shell-skin-store.spec.ts`：新增主题客户端入口解析回归测试。
+- `docs/shell-skin-marketplace.md`：记录主题包入口解析规则和验证命令。
+- `progress.md`：追加本轮施工、验证和回滚记录。
+- 回滚点：`2ae19a20339e2ccdf9bbf1706718d29e3d76b985`。执行 `git restore --source=2ae19a20339e2ccdf9bbf1706718d29e3d76b985 -- src/shell-skin-store.ts`，并删除 `tests/shell-skin-store.spec.ts` 与 `docs/shell-skin-marketplace.md` 可回滚本轮代码、测试和文档改动；`progress.md` 按追加式历史记录保留。

@@ -10,14 +10,32 @@ export interface ShellSkinState { activeSkinId:string|null; installed:Record<str
 type ClientManifest = { exports?: Record<string, unknown>; dsh?: { client?: unknown } }
 function exportTarget(value: unknown): string | undefined {
   if (typeof value === 'string') return value
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const target = exportTarget(item)
+      if (target !== undefined) return target
+    }
+    return undefined
+  }
+  if (value === null || typeof value !== 'object') return undefined
   const record = value as Record<string, unknown>
-  for (const key of ['browser', 'import', 'default', 'require']) { const target = exportTarget(record[key]); if (target !== undefined) return target }
+  for (const key of ['browser', 'import', 'default', 'require', 'node']) {
+    const target = exportTarget(record[key])
+    if (target !== undefined) return target
+  }
   return undefined
 }
 export async function resolveClientEntry(manifest: ClientManifest, source: string): Promise<string> {
   const declared = exportTarget(manifest.exports?.['./client'])
-  const candidates = [declared, './lib/client.js', './plugin/client.js', './dist/client.js', './client.js'].filter((value): value is string => typeof value === 'string')
+  const candidates = [
+    declared,
+    './lib/plugin/dist/client.js',
+    './lib/client.js',
+    './plugin/dist/client.js',
+    './plugin/client.js',
+    './dist/client.js',
+    './client.js',
+  ].filter((value): value is string => typeof value === 'string')
   for (const candidate of candidates) {
     if (candidate.startsWith('/') || candidate.includes('..')) continue
     const target = resolve(source, candidate)
