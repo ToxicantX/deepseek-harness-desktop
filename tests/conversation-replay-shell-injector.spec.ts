@@ -152,6 +152,34 @@ describe('desktop shell conversation replay injector', () => {
     expect(style.remove).toHaveBeenCalledOnce()
   })
 
+  it('keeps one loader proxy across temporary takeover and repairs a replaced accessor', () => {
+    expect(installConversationReplayModuleHook()).toBe('installed')
+    const rawLoad = vi.fn()
+    const rawLoader = { load: rawLoad }
+    ;(globalThis as any).__ModuleLoader__ = rawLoader
+    const hookedLoader = (globalThis as any).__ModuleLoader__
+
+    ;(globalThis as any).__ModuleLoader__ = { load: vi.fn() }
+    ;(globalThis as any).__ModuleLoader__ = hookedLoader
+    expect((globalThis as any).__ModuleLoader__).toBe(hookedLoader)
+
+    Object.defineProperty(globalThis, '__ModuleLoader__', {
+      configurable: true,
+      value: rawLoader,
+    })
+    expect(installConversationReplayModuleHook()).toBe('already-installed')
+    const repairedLoader = (globalThis as any).__ModuleLoader__
+    expect(repairedLoader).not.toBe(rawLoader)
+
+    const factory = vi.fn(() => ({ apply: vi.fn() }))
+    repairedLoader.load({ id: '@deepseek-ai/dsh-client-ui-conversation', factory })
+    expect(rawLoad).toHaveBeenCalledWith(expect.objectContaining({
+      id: '@deepseek-ai/dsh-client-ui-conversation',
+      factory: expect.any(Function),
+    }))
+    expect(rawLoad.mock.calls[0]?.[0].factory).not.toBe(factory)
+  })
+
   it('finds the completed turn immediately before a user message', () => {
     const { previousCompletedTurnSeq } = feature()
     const target = user('user-3', 31)

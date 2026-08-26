@@ -6,7 +6,10 @@ export function installConversationReplayModuleHook(): string {
   const targetModuleId = '@deepseek-ai/dsh-client-ui-conversation'
   const legacyModuleId = '@deepseek-ai/dsh-desktop-conversation-replay'
   const existingHook = globalObject[hookKey]
-  if (existingHook?.version === 1) return 'already-installed'
+  if (existingHook?.version === 1) {
+    if (typeof existingHook.ensureLoaderAccessor === 'function') existingHook.ensureLoaderAccessor()
+    return 'already-installed'
+  }
 
   function createConversationReplayFeature(require) {
     const React = require('react')
@@ -604,16 +607,47 @@ export function installConversationReplayModuleHook(): string {
       },
     })
     loaderProxies.set(loader, proxy)
+    loaderProxies.set(proxy, proxy)
     return proxy
   }
 
   let currentLoader = wrapLoader(globalObject.__ModuleLoader__)
+  const loaderGetter = () => currentLoader
+  const loaderSetter = value => { currentLoader = wrapLoader(value) }
+  const ensureLoaderAccessor = () => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalObject, '__ModuleLoader__')
+    if (descriptor?.get === loaderGetter && descriptor?.set === loaderSetter) return
+    const value = descriptor === undefined
+      ? undefined
+      : typeof descriptor.get === 'function'
+        ? descriptor.get.call(globalObject)
+        : descriptor.value
+    currentLoader = wrapLoader(value)
+    Object.defineProperty(globalObject, '__ModuleLoader__', {
+      configurable: true,
+      enumerable: false,
+      get: loaderGetter,
+      set: loaderSetter,
+    })
+  }
+  const repairLoaderAccessor = () => {
+    try {
+      ensureLoaderAccessor()
+    } catch (error) {
+      console.error('桌面壳 ModuleLoader 接管恢复失败', error)
+    }
+  }
   Object.defineProperty(globalObject, '__ModuleLoader__', {
     configurable: true,
     enumerable: false,
-    get() { return currentLoader },
-    set(value) { currentLoader = wrapLoader(value) },
+    get: loaderGetter,
+    set: loaderSetter,
   })
+  if (typeof globalObject.addEventListener === 'function') {
+    globalObject.addEventListener('DOMContentLoaded', repairLoaderAccessor, { once: true })
+    globalObject.addEventListener('pageshow', repairLoaderAccessor)
+  }
+  if (typeof globalObject.queueMicrotask === 'function') globalObject.queueMicrotask(repairLoaderAccessor)
   Object.defineProperty(globalObject, hookKey, {
     configurable: true,
     enumerable: false,
@@ -623,6 +657,7 @@ export function installConversationReplayModuleHook(): string {
       targetModuleId,
       legacyModuleId,
       createFeature: createConversationReplayFeature,
+      ensureLoaderAccessor,
       get legacySuppressions() { return legacySuppressions },
     }),
   })

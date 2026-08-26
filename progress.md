@@ -170,3 +170,22 @@
 - `docs/shell-skin-marketplace.md`：记录主题包入口解析规则和验证命令。
 - `progress.md`：追加本轮施工、验证和回滚记录。
 - 回滚点：`2ae19a20339e2ccdf9bbf1706718d29e3d76b985`。执行 `git restore --source=2ae19a20339e2ccdf9bbf1706718d29e3d76b985 -- src/shell-skin-store.ts`，并删除 `tests/shell-skin-store.spec.ts` 与 `docs/shell-skin-marketplace.md` 可回滚本轮代码、测试和文档改动；`progress.md` 按追加式历史记录保留。
+
+## 2026-08-26 - Task: 修复对话重试与编辑按钮偶发失效
+### What was done
+- 修复桌面壳对 `ModuleLoader` 的临时接管恢复逻辑，主题适配器恢复原加载器时复用同一个代理，避免多次进入主题流程后代理层叠导致后续模块注册路径不稳定。
+- 增加加载器访问器自修复：页面脚本重新定义 `window.__ModuleLoader__` 后，在微任务、`DOMContentLoaded` 和 `pageshow` 时恢复桌面壳接管；重复安装调用也会先校正访问器，不再只依据已存在的 hook 标记直接返回。
+- 增加回归测试，覆盖临时接管/恢复后的代理身份、访问器被替换后的自动恢复以及对话模块工厂仍被正确包装。
+### Testing
+- `pnpm exec vitest run tests/conversation-replay-shell-injector.spec.ts --maxWorkers=1 --testTimeout=20000`：通过，1 个测试文件、8 个测试。
+- `pnpm exec vitest run --maxWorkers=1 --testTimeout=20000`：通过，5 个测试文件、22 个测试。
+- `pnpm run typecheck`：通过；当前系统 Node.js 22.22.0 低于仓库声明的 Node.js 24，pnpm 输出 engine 警告。
+- `pnpm run build`：通过；构建产物包含更新后的 ModuleLoader 自修复逻辑，同样存在上述 Node.js engine 警告。
+- `git diff --check`：通过。
+- 本轮未对真实会话执行确认/重试请求；功能行为继续由现有会话分支测试覆盖，当前改动重点由 ModuleLoader 时序回归测试覆盖。
+### Notes
+- `src/conversation-replay-injector.ts`：复用代理并增加 ModuleLoader 访问器自修复与页面生命周期兜底。
+- `tests/conversation-replay-shell-injector.spec.ts`：增加代理恢复和访问器替换回归测试。
+- `docs/conversation-edit-retry.md`：补充注入稳定性和主题适配器恢复说明。
+- `progress.md`：追加本轮修复、验证和回滚记录。
+- 回滚点：`7d03fa1e4262ec470b5d6dc2278c45d2365830e4`。执行 `git restore --source=7d03fa1e4262ec470b5d6dc2278c45d2365830e4 -- src/conversation-replay-injector.ts tests/conversation-replay-shell-injector.spec.ts docs/conversation-edit-retry.md progress.md` 可回滚本轮修改；`progress.md` 按追加式历史记录保留。

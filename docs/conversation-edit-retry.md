@@ -40,6 +40,8 @@
 4. 样式、消息分支、附件重传和长文本折叠代码随桌面壳的 `preload.cjs` 一起打包；`runtime/desktop.patch.yml` 和 Runtime 构建不再包含 conversation-replay 插件。
 5. 如果用户本机仍保留旧 Runtime 产物中的 conversation-replay 插件，桌面壳会在模块注册阶段将旧客户端入口替换为空实现，避免旧插件与壳侧实现重复注册。
 
+注入器会复用同一个 `ModuleLoader` 代理，主题适配器临时接管并恢复加载器时不会叠加代理；页面启动阶段若加载器属性被重新定义，桌面壳会在微任务、`DOMContentLoaded` 和 `pageshow` 时机自动恢复接管，避免按钮因加载时序丢失。
+
 发布时必须重新构建并发布桌面壳安装包。只更新 Runtime 压缩包不会带上本功能。
 
 ## 验证入口
