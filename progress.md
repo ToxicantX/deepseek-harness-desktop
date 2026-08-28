@@ -189,3 +189,26 @@
 - `docs/conversation-edit-retry.md`：补充注入稳定性和主题适配器恢复说明。
 - `progress.md`：追加本轮修复、验证和回滚记录。
 - 回滚点：`7d03fa1e4262ec470b5d6dc2278c45d2365830e4`。执行 `git restore --source=7d03fa1e4262ec470b5d6dc2278c45d2365830e4 -- src/conversation-replay-injector.ts tests/conversation-replay-shell-injector.spec.ts docs/conversation-edit-retry.md progress.md` 可回滚本轮修改；`progress.md` 按追加式历史记录保留。
+
+## 2026-08-28 - Task: 通过桌面壳注入开放自定义提供方图片输入
+### What was done
+- 复用桌面壳启动 DSH 子进程时已有的 `--import lib/shutdown-hook.js` 预加载入口，在 Node 模块首次加载阶段定点劫持 `llm-pi-ai` 适配器。
+- 将模型和提供方都未声明输入类型时的默认能力从纯文本扩展为 `text + image`，同时保留模型级 `input`、提供方级 `defaultInput` 和内置模型目录声明的优先级。
+- 图片继续走 DSH 既有的附件校验、持久化和请求转换链路；本轮未修改 Runtime、已安装 DSH 包或用户 `%USERPROFILE%\.dsh\settings.yaml`。
+- 补充定点源码转换、模块范围和显式输入声明优先级回归测试，并增加使用及升级兼容说明。
+### Testing
+- `pnpm exec vitest run tests/custom-provider-image-injector.spec.ts --maxWorkers=1 --testTimeout=20000`：通过，1 个测试文件、2 个测试；覆盖默认图片能力、显式模型/提供方/目录输入声明优先级、幂等转换及仅处理 `llm-pi-ai` 入口。
+- `pnpm exec vitest run --maxWorkers=1 --testTimeout=20000`：通过，6 个测试文件、24 个测试。
+- `pnpm run typecheck`：通过；当前系统 Node.js 22.22.0 低于仓库声明的 Node.js 24，pnpm 输出 engine 警告。
+- `pnpm run build`：通过；生成的 `lib/shutdown-hook.js` 包含 Node `registerHooks` 及 `llm-pi-ai` 默认输入转换，同样存在上述 Node.js engine 警告。
+- Runtime Node 24.19.0 真实模块加载：通过当前 `lib/shutdown-hook.js` 预加载后成功导入 DSH 0.1.1-rc.2 的真实 `@deepseek-ai/dsh-llm-pi-ai` 入口。
+- 独立请求体烟测：使用隔离 `DSH_HOME`、DSH 0.1.1-rc.2、未声明输入类型的 Mock 自定义提供方及 PNG 图片完成发送；页面未出现模型图片能力提示，Mock `/v1/chat/completions` 收到 1 个 `image_url` PNG data URL；页面错误和控制台错误均为 0。
+- 当前工作区 Electron 桌面壳烟测：通过隔离用户数据目录和同一 Mock 提供方完成图片发送；DSH 子进程命令行确认预加载当前工作区 `lib/shutdown-hook.js`，接口收到 1 个 `image_url` PNG data URL，页面错误为 0。烟测同时观察到 2 条 `conversation.chat.node` 的 React #130 控制台错误，未阻断图片预览、发送和回复；该渲染错误不在本任务改动范围内。
+- `git diff --check`：通过。
+### Notes
+- `src/custom-provider-image-injector.ts`：新增 Node 同步模块加载钩子，只转换 `llm-pi-ai` 的未声明输入默认值。
+- `src/shutdown-hook.ts`：在原 DSH 关机 IPC 预加载脚本中安装自定义提供方图片能力钩子。
+- `tests/custom-provider-image-injector.spec.ts`：增加转换范围、输入声明优先级和幂等性测试。
+- `docs/custom-provider-image-input.md`：记录业务行为、配置覆盖方式、注入落点、发布要求和 DSH 升级兼容风险。
+- `progress.md`：追加本轮施工、验证和回滚记录。
+- 回滚点：`c49e73e4e85263cf0a7693aae1b32d5b2c8bf628`。执行 `git restore --source=c49e73e4e85263cf0a7693aae1b32d5b2c8bf628 -- src/shutdown-hook.ts`，再执行 `Remove-Item -LiteralPath 'src\custom-provider-image-injector.ts','tests\custom-provider-image-injector.spec.ts','docs\custom-provider-image-input.md' -Force` 可回滚代码、测试和文档；`progress.md` 按追加式历史记录保留，通过后续追加更正记录处理。

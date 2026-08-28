@@ -1,3 +1,4 @@
+import { installCustomProviderImageHook } from './custom-provider-image-injector.ts'
 import type { Serializable } from 'node:child_process'
 
 const SHUTDOWN_MESSAGE = 'dsh/shutdown'
@@ -35,4 +36,5 @@ export function installShutdownHook(target: ShutdownProcess): void {
   })
 }
 
+installCustomProviderImageHook()
 if (process.send !== undefined) installShutdownHook(process)
