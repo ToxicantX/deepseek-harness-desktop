@@ -99,4 +99,5 @@ jobs:
           version='${{ github.ref_name }}'
           version="${version#shell-v}"
           [[ "$version" == *-* ]] && prerelease+=(--prerelease)
-          gh release create '${{ github.ref_name }}' release/* --repo "$GITHUB_REPOSITORY" --generate-notes "${prerelease[@]}"
+          signing_notes=$'## Code signing policy\n\nFree code signing for eligible Shell releases is provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org). Verify each artifact\'s actual signature status in Windows; historical releases may be unsigned. See the [project policy](https://github.com/ToxicantX/deepseek-harness-desktop/blob/main/docs/code-signing-policy.md).'
+          gh release create '${{ github.ref_name }}' release/* --repo "$GITHUB_REPOSITORY" --generate-notes --notes "$signing_notes" "${prerelease[@]}"
