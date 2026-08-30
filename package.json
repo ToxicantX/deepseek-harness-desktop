@@ -1,6 +1,6 @@
 {
   "name": "deepseek-harness-desktop",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "private": true,
   "description": "Windows desktop shell and versioned runtime manager for DeepSeek Harness",
   "author": "ToxicantX",
@@ -52,7 +52,8 @@
     "productName": "DeepSeek Harness",
     "asar": true,
     "asarUnpack": [
-      "lib/shutdown-hook.js"
+      "lib/shutdown-hook.js",
+      "resources/goal-no-progress-guard/index.js"
     ],
     "npmRebuild": false,
     "directories": {
@@ -64,6 +65,7 @@
       "lib/*.cjs",
       "assets/*",
       "assets/pet-character/runtime/*.png",
+      "resources/goal-no-progress-guard/index.js",
       "package.json"
     ],
     "win": {

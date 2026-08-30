@@ -3,7 +3,7 @@ import {
   GoalNoProgressTracker,
   apply,
   normalizeAssistantText,
-} from '../runtime/goal-no-progress-guard-plugin/index.js'
+} from '../resources/goal-no-progress-guard/index.js'
 
 const completed = { kind: 'completed' }
 

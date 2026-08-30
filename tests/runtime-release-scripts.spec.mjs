@@ -59,29 +59,28 @@ describe('Runtime release scripts', () => {
     const catalog = JSON.parse(await readFile(outputFile, 'utf8'))
     expect(catalog.releases).toEqual([revisionOne])
     await expect(execFileAsync(process.execPath, [resolve('scripts/update-runtime-catalog.mjs'), '--manifest', manifestFile, '--existing', outputFile, '--output', existingFile])).rejects.toThrow('runtime revision must increase')
+
+    const revisionTwo = { ...legacy, runtimeRevision: 2, archive: { sha256: 'c'.repeat(64) } }
+    await writeFile(manifestFile, JSON.stringify(revisionTwo))
+    await execFileAsync(process.execPath, [
+      resolve('scripts/update-runtime-catalog.mjs'),
+      '--manifest', manifestFile,
+      '--existing', outputFile,
+      '--output', existingFile,
+    ])
+    const upgraded = JSON.parse(await readFile(existingFile, 'utf8'))
+    expect(upgraded.releases).toEqual([revisionTwo])
   })
 
-  it('copies, packages, and exposes the goal guard through the DSH closure', async () => {
-    expect(buildScript).toContain("$GoalGuardPluginSource = Join-Path $RepositoryRoot 'runtime/goal-no-progress-guard-plugin'")
-    expect(buildScript).toContain("$GoalGuardPlugin = Join-Path $App 'plugins/goal-no-progress-guard'")
-    expect(buildScript).toContain("Copy-Item (Join-Path $GoalGuardPluginSource '*') $GoalGuardPlugin -Recurse -Force")
-    expect(buildScript).toContain('"@deepseek-ai/dsh-desktop-goal-no-progress-guard": "file:./plugins/goal-no-progress-guard"')
-    expect(buildScript).toContain('value.dependencies["@deepseek-ai/dsh-desktop-goal-no-progress-guard"] = "0.1.0"')
-
+  it('does not package the goal guard into the Runtime', () => {
+    expect(buildScript).not.toContain('GoalGuard')
+    expect(buildScript).not.toContain('goal-no-progress-guard')
     const inserts = Array.isArray(patch) ? patch.flatMap(entry => entry?.insert ?? []) : []
-    expect(inserts).toContainEqual({ id: 'desktop-goal-no-progress-guard', name: '@deepseek-ai/dsh-desktop-goal-no-progress-guard' })
-
-    const pluginManifest = join(root, 'runtime', 'goal-no-progress-guard-plugin', 'package.json')
-    const packageJson = JSON.parse(readFileSync(pluginManifest, 'utf8'))
-    expect(packageJson).toMatchObject({ name: '@deepseek-ai/dsh-desktop-goal-no-progress-guard', version: '0.1.0', main: 'index.js' })
+    expect(inserts.some(entry => entry?.name === '@deepseek-ai/dsh-desktop-goal-no-progress-guard')).toBe(false)
+    expect(smokeScript).not.toContain('goal-no-progress-guard')
   })
 
-  it('smokes archive contents, patch registration, API loading, and Runtime startup', () => {
-    expect(smokeScript).toContain("await access(join(goalGuardSource, 'index.js'))")
-    expect(smokeScript).toContain("await access(join(goalGuardInstalled, 'package.json'))")
-    expect(smokeScript).toContain("goalGuardPatch?.id !== 'desktop-goal-no-progress-guard'")
-    expect(smokeScript).toContain("dshManifest.dependencies?.[goalGuardName] !== '0.1.0'")
-    expect(smokeScript).toContain("typeof module.apply !== 'function'")
+  it('smokes Runtime startup and Host APIs', () => {
     expect(smokeScript).toContain('backend = await startBackend({')
     expect(smokeScript).toContain("if (!html.includes('__DSH_BOOT__'))")
     expect(smokeScript).toContain('const exit = await backend.stop()')

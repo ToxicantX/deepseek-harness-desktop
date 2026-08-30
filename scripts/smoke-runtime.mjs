@@ -1,10 +1,9 @@
 import { execFile } from 'node:child_process'
-import { access, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { pathToFileURL } from 'node:url'
-import { parse as parseYaml } from 'yaml'
 
 const execFileAsync = promisify(execFile)
 if (process.argv[2] === undefined || process.argv[3] === undefined) {
@@ -20,30 +19,6 @@ const runtime = {
   pnpmExecutable: resolve(runtimeRoot, manifest.paths.pnpm),
   dshBin: resolve(runtimeRoot, manifest.paths.dsh),
 }
-const appRoot = join(runtimeRoot, 'app')
-const goalGuardName = '@deepseek-ai/dsh-desktop-goal-no-progress-guard'
-const goalGuardSource = join(appRoot, 'plugins', 'goal-no-progress-guard')
-const goalGuardInstalled = join(appRoot, 'node_modules', '@deepseek-ai', 'dsh-desktop-goal-no-progress-guard')
-const appPackage = JSON.parse(await readFile(join(appRoot, 'package.json'), 'utf8'))
-if (appPackage.dependencies?.[goalGuardName] !== 'file:./plugins/goal-no-progress-guard') {
-  throw new Error('Goal guard is missing from the packaged app dependencies')
-}
-await access(join(goalGuardSource, 'index.js'))
-await access(join(goalGuardInstalled, 'package.json'))
-const patch = parseYaml(await readFile(join(appRoot, 'desktop.patch.yml'), 'utf8'))
-const inserted = Array.isArray(patch) ? patch.flatMap(entry => Array.isArray(entry?.insert) ? entry.insert : []) : []
-const goalGuardPatch = inserted.find(entry => entry?.name === goalGuardName)
-if (goalGuardPatch?.id !== 'desktop-goal-no-progress-guard') {
-  throw new Error('Desktop patch does not register the goal guard globally')
-}
-const dshManifest = JSON.parse(await readFile(join(appRoot, 'node_modules', '@deepseek-ai', 'dsh', 'package.json'), 'utf8'))
-if (dshManifest.dependencies?.[goalGuardName] !== '0.1.0') {
-  throw new Error('Goal guard is missing from the packaged DSH dependency closure')
-}
-await execFileAsync(runtime.nodeExecutable, ['--input-type=module', '-e', [
-  "const module = await import(process.argv[1]);",
-  "if (typeof module.name !== 'string' || typeof module.apply !== 'function') throw new Error('goal guard plugin API is incomplete');",
-].join(' '), pathToFileURL(join(goalGuardInstalled, 'index.js')).href], { cwd: appRoot })
 const { desktopEnvironment, startBackend } = await import(pathToFileURL(resolve('lib/backend.js')).href)
 const home = await mkdtemp(join(tmpdir(), 'dsh-desktop-runtime-smoke-'))
 let openedSettingsPath

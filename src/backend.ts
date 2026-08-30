@@ -33,6 +33,8 @@ export interface StartBackendOptions {
   env: NodeJS.ProcessEnv
   startTimeoutMs?: number
   stopTimeoutMs?: number
+  additionalPatches?: readonly string[]
+  cleanup?: () => Promise<void>
   forkProcess?: typeof fork
   onOpenSettingsDocument?(path: string): Promise<void>
 }
@@ -146,11 +148,27 @@ export function desktopEnvironment(runtime: InstalledRuntime, inherited: NodeJS.
   return environment
 }
 
-export function backendArguments(runtime: InstalledRuntime, fileExists: (path: string) => boolean = existsSync): string[] {
+export function backendArguments(
+  runtime: InstalledRuntime,
+  additionalPatches?: readonly string[],
+  fileExists?: (path: string) => boolean,
+): string[]
+export function backendArguments(
+  runtime: InstalledRuntime,
+  fileExists?: (path: string) => boolean,
+): string[]
+export function backendArguments(
+  runtime: InstalledRuntime,
+  additionalPatchesOrFileExists: readonly string[] | ((path: string) => boolean) = [],
+  fileExists: (path: string) => boolean = existsSync,
+): string[] {
+  const additionalPatches = typeof additionalPatchesOrFileExists === 'function' ? [] : additionalPatchesOrFileExists
+  const exists = typeof additionalPatchesOrFileExists === 'function' ? additionalPatchesOrFileExists : fileExists
   const patch = join(runtime.directory, 'app', 'desktop.patch.yml')
-  const args = fileExists(patch)
-    ? ['web', '--patch', patch, '--port', '0']
-    : ['web', '--port', '0']
+  const args = ['web']
+  if (exists(patch)) args.push('--patch', patch)
+  for (const overlayPatch of additionalPatches) args.push('--patch', overlayPatch)
+  args.push('--port', '0')
   // rc.8 defaults to opening the Web UI in the system browser; Electron owns the page.
   if (gte(runtime.manifest.dshVersion, '0.1.0-rc.8')) args.push('--no-open')
   return args
@@ -158,17 +176,38 @@ export function backendArguments(runtime: InstalledRuntime, fileExists: (path: s
 
 export async function startBackend(options: StartBackendOptions): Promise<RunningBackend> {
   const diagnostics = new DiagnosticTail()
-  const child = (options.forkProcess ?? fork)(
-    options.runtime.dshBin,
-    backendArguments(options.runtime),
-    {
-      cwd: options.cwd,
-      env: options.env,
-      execPath: options.runtime.nodeExecutable,
-      execArgv: ['--import', pathToFileURL(options.shutdownHook).href],
-      stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
-    } satisfies ForkOptions,
-  )
+  let cleanupPromise: Promise<void> | undefined
+  const cleanupOnce = (): Promise<void> => {
+    if (cleanupPromise !== undefined) return cleanupPromise
+    cleanupPromise = (async () => {
+      try {
+        await options.cleanup?.()
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error)
+        diagnostics.append(`Runtime overlay cleanup failed: ${message}`)
+      }
+    })()
+    return cleanupPromise
+  }
+  let child: ChildProcess
+  try {
+    child = (options.forkProcess ?? fork)(
+      options.runtime.dshBin,
+      backendArguments(options.runtime, options.additionalPatches),
+      {
+        cwd: options.cwd,
+        env: options.env,
+        execPath: options.runtime.nodeExecutable,
+        execArgv: ['--import', pathToFileURL(options.shutdownHook).href],
+        stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+      } satisfies ForkOptions,
+    )
+  } catch (error: unknown) {
+    await cleanupOnce()
+    const message = error instanceof Error ? error.message : String(error)
+    const detail = diagnostics.toString()
+    throw new Error(detail.length === 0 || message.includes(detail) ? message : `${message}\n\n${detail}`)
+  }
   const onMessage = (message: unknown): void => { void handleOpenSettingsRequest(child, message, options.onOpenSettingsDocument) }
   child.on('message', onMessage)
   let spawnError: Error | undefined
@@ -176,11 +215,13 @@ export async function startBackend(options: StartBackendOptions): Promise<Runnin
     child.once('error', (error) => { spawnError = error })
     child.once('close', (exitCode, signal) => {
       child.off('message', onMessage)
-      resolve({
-        exitCode,
-        signal,
-        diagnostics: diagnostics.toString(),
-        ...(spawnError === undefined ? {} : { error: spawnError }),
+      void cleanupOnce().then(() => {
+        resolve({
+          exitCode,
+          signal,
+          diagnostics: diagnostics.toString(),
+          ...(spawnError === undefined ? {} : { error: spawnError }),
+        })
       })
     })
   })

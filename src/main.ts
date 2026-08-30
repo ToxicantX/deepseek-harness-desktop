@@ -56,6 +56,9 @@ const petPreload = join(moduleDirectory, 'pet-preload.cjs')
 const shutdownHook = app.isPackaged
   ? join(process.resourcesPath, 'app.asar.unpacked', 'lib', 'shutdown-hook.js')
   : join(moduleDirectory, 'shutdown-hook.js')
+const goalGuardPlugin = app.isPackaged
+  ? join(process.resourcesPath, 'app.asar.unpacked', 'resources', 'goal-no-progress-guard', 'index.js')
+  : join(app.getAppPath(), 'resources', 'goal-no-progress-guard', 'index.js')
 
 let mainWindow: BrowserWindow | undefined
 let tray: Tray | undefined
@@ -815,6 +818,7 @@ async function startApplication(): Promise<void> {
     store,
     shutdownHook,
     userData: app.getPath('userData'),
+    goalGuardPlugin,
     ...(process.env.DSH_DESKTOP_CATALOG_URL === undefined ? {} : { catalogUrl: process.env.DSH_DESKTOP_CATALOG_URL }),
     onView: broadcast,
     async onReady(url, _runtime, preparedCliDirectory) {
