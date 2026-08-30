@@ -4,3 +4,6 @@
 
     - id: desktop-pet-bridge
       name: '@deepseek-ai/dsh-desktop-pet-bridge'
+
+    - id: desktop-goal-no-progress-guard
+      name: '@deepseek-ai/dsh-desktop-goal-no-progress-guard'
