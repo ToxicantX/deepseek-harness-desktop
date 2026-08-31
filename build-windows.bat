@@ -3,6 +3,9 @@ setlocal
 set "EXIT_CODE=1"
 set "NO_PAUSE="
 set "PNPM_CMD=pnpm"
+set "NODE_EXE="
+set "NODE_VERSION="
+set "NODE_DIR="
 
 if /i "%~1"=="--no-pause" set "NO_PAUSE=1"
 if defined CI set "NO_PAUSE=1"
@@ -11,10 +14,31 @@ cd /d "%~dp0"
 if errorlevel 1 goto :cd_failed
 
 echo Checking required tools...
-where node >nul 2>&1
-if errorlevel 1 goto :node_missing
-node -e "const major=Number(process.versions.node.split('.')[0]); if(major!==24||process.arch!=='x64'){console.error('Expected Node.js 24 x64, found '+process.version+' '+process.arch); process.exit(1)}"
-if errorlevel 1 goto :environment_invalid
+if defined DSH_DESKTOP_RUNTIME_ROOT if exist "%DSH_DESKTOP_RUNTIME_ROOT%\node\node.exe" set "NODE_EXE=%DSH_DESKTOP_RUNTIME_ROOT%\node\node.exe"
+if not defined NODE_EXE if defined LOCALAPPDATA (
+    for /d %%R in ("%LOCALAPPDATA%\DeepSeek Harness\runtime-manager\runtimes\*") do if exist "%%~fR\node\node.exe" if not defined NODE_EXE set "NODE_EXE=%%~fR\node\node.exe"
+)
+if not defined NODE_EXE if defined NVM_HOME (
+    for /d %%R in ("%NVM_HOME%\v24*") do if exist "%%~fR\node.exe" if not defined NODE_EXE set "NODE_EXE=%%~fR\node.exe"
+)
+if not defined NODE_EXE if defined LOCALAPPDATA (
+    for /d %%R in ("%LOCALAPPDATA%\nvm\v24*") do if exist "%%~fR\node.exe" if not defined NODE_EXE set "NODE_EXE=%%~fR\node.exe"
+)
+if not defined NODE_EXE (
+    for /f "delims=" %%N in ('where node 2^>nul') do if not defined NODE_EXE set "NODE_EXE=%%~fN"
+)
+if not defined NODE_EXE goto :node_missing
+set "NODE_VERSION="
+set "NODE_ARCH="
+set "NODE_MAJOR="
+for /f "delims=" %%V in ('call "%NODE_EXE%" -p "process.versions.node" 2^>nul') do if not defined NODE_VERSION set "NODE_VERSION=%%V"
+for /f "delims=" %%A in ('call "%NODE_EXE%" -p "process.arch" 2^>nul') do if not defined NODE_ARCH set "NODE_ARCH=%%A"
+for /f "tokens=1 delims=." %%M in ("%NODE_VERSION%") do set "NODE_MAJOR=%%M"
+if not "%NODE_MAJOR%"=="24" goto :environment_invalid
+if /i not "%NODE_ARCH%"=="x64" goto :environment_invalid
+for %%D in ("%NODE_EXE%") do set "NODE_DIR=%%~dpD"
+set "PATH=%NODE_DIR%;%PATH%"
+echo Using Node.js %NODE_VERSION% x64 from %NODE_EXE%
 
 where pnpm >nul 2>&1
 if errorlevel 1 (
@@ -24,10 +48,10 @@ if errorlevel 1 (
     set "PNPM_CMD=corepack pnpm"
 )
 
-for /f "delims=" %%V in ('node -p "require('./package.json').packageManager.split('@').pop()"') do set "EXPECTED_PNPM=%%V"
+for /f "delims=" %%V in ('call "%NODE_EXE%" -p "require('./package.json').packageManager.split('@').pop()"') do set "EXPECTED_PNPM=%%V"
 for /f "delims=" %%V in ('%PNPM_CMD% --version 2^>nul') do set "PNPM_VERSION=%%V"
 if not "%PNPM_VERSION%"=="%EXPECTED_PNPM%" goto :pnpm_version_invalid
-for /f "delims=" %%V in ('node -p "require('./package.json').version"') do set "APP_VERSION=%%V"
+for /f "delims=" %%V in ('call "%NODE_EXE%" -p "require('./package.json').version"') do set "APP_VERSION=%%V"
 
 where powershell >nul 2>&1
 if errorlevel 1 goto :powershell_missing
@@ -74,12 +98,13 @@ echo ERROR: Could not change to the script directory.
 goto :done
 
 :node_missing
-echo ERROR: Node.js was not found on PATH. Install Node.js 24 x64 and try again.
+echo ERROR: Node.js 24 x64 was not found.
+echo ERROR: Install Node.js 24 x64, enable it in PATH, or install a DSH Runtime so this script can reuse its bundled Node.js.
 goto :done
 
 :environment_invalid
-set "EXIT_CODE=%ERRORLEVEL%"
 echo ERROR: This build requires Node.js 24 x64.
+echo ERROR: Found %NODE_VERSION% %NODE_ARCH% at %NODE_EXE%.
 goto :done
 
 :pnpm_missing

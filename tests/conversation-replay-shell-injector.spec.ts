@@ -180,6 +180,101 @@ describe('desktop shell conversation replay injector', () => {
     expect(rawLoad.mock.calls[0]?.[0].factory).not.toBe(factory)
   })
 
+  it('wraps queued module handoffs before the loader enters live mode', () => {
+    expect(installConversationReplayModuleHook()).toBe('installed')
+    const originalFactory = vi.fn(() => ({ apply: vi.fn() }))
+    const queue = [{ id: '@deepseek-ai/dsh-client-ui-conversation', factory: originalFactory }]
+    const rawLoader: any = {
+      mode: 'queue',
+      pendingQueue: queue,
+      create: vi.fn(function (this: any) {
+        this.mode = 'live'
+        return this.pendingQueue
+      }),
+    }
+    ;(globalThis as any).__ModuleLoader__ = rawLoader
+    const hookedLoader = (globalThis as any).__ModuleLoader__
+
+    const drained = hookedLoader.create()
+    expect(drained).toBe(queue)
+    expect(drained[0]?.factory).not.toBe(originalFactory)
+    const { require } = clientRequire()
+    expect(drained[0]?.factory(require)).toEqual(expect.objectContaining({ apply: expect.any(Function) }))
+    expect((globalThis as any).__dshDesktopConversationReplayHook.diagnostics).toMatchObject({
+      targetRegistrations: 1,
+      targetFactories: 1,
+    })
+  })
+
+  it('recovers from a live module system by applying through the captured root context', async () => {
+    expect(installConversationReplayModuleHook()).toBe('installed')
+    const style = { id: '', textContent: '', remove: vi.fn() }
+    const appendChild = vi.fn()
+    globalThis.document = {
+      getElementById: vi.fn(() => null),
+      createElement: vi.fn(() => style),
+      head: { appendChild },
+    } as any
+    const register = vi.fn(() => vi.fn())
+    const inject = vi.fn((_name, factory) => factory())
+    const effect = vi.fn(factory => factory())
+    const ctx = { slots: { inject, register }, effect, sessions: {}, workspaces: {} }
+    const dependencies = clientRequire()
+    const modules = {
+      import: vi.fn(async (id: string) => {
+        if (id === 'react') return dependencies.React
+        if (id === '@deepseek-ai/dsh-client-ui-primitives') return {
+          IconCheckOutline16: () => null,
+          IconCopyOutline16: () => null,
+          IconEditOutline16: () => null,
+          IconRefreshOutline16: () => null,
+          JsonBlock: () => null,
+          MessageText: () => null,
+          Tooltip: () => null,
+          writeClipboard: vi.fn(),
+        }
+        if (id === '@deepseek-ai/dsh-client-ui-attachment') return { ImageGallery: () => null }
+        throw new Error('unexpected module import: ' + id)
+      }),
+    }
+    const bootstrapApply = vi.fn()
+    const bootstrapFactory = vi.fn(() => ({
+      createClientModuleSystem: vi.fn(() => modules),
+      apply: bootstrapApply,
+    }))
+    const queue = [{ id: '@deepseek-ai/dsh-client-modules', factory: bootstrapFactory }]
+    const rawLoader: any = {
+      mode: 'queue',
+      pendingQueue: queue,
+      create: vi.fn(function (this: any) {
+        const handoff = this.pendingQueue.shift()
+        const exports = handoff.factory(() => { throw new Error('bootstrap require should not run') })
+        this.mode = 'live'
+        this.load = vi.fn()
+        this.bootstrapExports = exports
+        return exports.createClientModuleSystem(this)
+      }),
+    }
+    ;(globalThis as any).__ModuleLoader__ = rawLoader
+    const hookedLoader = (globalThis as any).__ModuleLoader__
+    hookedLoader.create()
+    rawLoader.bootstrapExports.apply(ctx)
+    await Promise.resolve()
+    await Promise.resolve()
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(modules.import).toHaveBeenCalledWith('react')
+    expect(register).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'conversation.chat.node',
+      key: 'user',
+      registrant: '@deepseek-ai/dsh-desktop-shell-conversation-replay',
+    }), expect.any(Function))
+    expect((globalThis as any).__dshDesktopConversationReplayHook.diagnostics).toMatchObject({
+      featureApplications: 1,
+      featureFailures: 0,
+    })
+  })
+
   it('finds the completed turn immediately before a user message', () => {
     const { previousCompletedTurnSeq } = feature()
     const target = user('user-3', 31)

@@ -191,6 +191,8 @@ pnpm run start
 pnpm run dist
 ```
 
+`build-windows.bat` 会优先使用 PATH 中的 Node.js 24 x64；如果当前 PATH 仍是其他版本，脚本会继续查找 nvm 安装目录以及 `%LOCALAPPDATA%\DeepSeek Harness\runtime-manager\runtimes\*\node\node.exe` 中的 Node.js 24 x64。只有这些位置都没有兼容 Node.js 时才需要另行安装 Node.js 24 x64。
+
 构建完整 Runtime：
 
 ```powershell

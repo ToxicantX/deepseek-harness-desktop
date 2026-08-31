@@ -370,9 +370,8 @@ export function installConversationReplayModuleHook(): string {
     }
 
     function createUserMessageNodeView(ctx) {
-      return React.memo(function UserMessageNodeView({ node, loadImage, sessionId, useSession }) {
+      return React.memo(function UserMessageNodeView({ node, loadImage, renderMessageImages, sessionId, useSession }) {
         const data = node.data
-        const chat = useSession(snapshot => snapshot.chat)
         const removed = useSession(snapshot => snapshot.removed)
         const { text, images, rest } = React.useMemo(() => contentParts(data.content), [data.content])
         const longTextClip = React.useMemo(() => isLongTextClip(text), [text])
@@ -420,6 +419,14 @@ export function installConversationReplayModuleHook(): string {
           void run(draft)
         }, [draft, images.length, run])
 
+        const imageContent = images.length === 0
+          ? null
+          : typeof renderMessageImages === 'function'
+            ? renderMessageImages({ images, align: 'end' })
+            : typeof loadImage === 'function'
+              ? React.createElement(ImageGallery, { images, load: loadImage, align: 'end', labels: imageLabels() })
+              : null
+
         const bubble = editing
           ? React.createElement(React.Fragment, null,
             React.createElement('textarea', {
@@ -452,9 +459,7 @@ export function installConversationReplayModuleHook(): string {
             ),
           )
           : React.createElement(React.Fragment, null,
-            images.length > 0 && React.createElement(ImageGallery, {
-              images, load: loadImage, align: 'end', labels: imageLabels(),
-            }),
+            imageContent,
             text !== '' && longTextClip
               ? React.createElement(LongTextClip, { text })
               : (text !== '' || rest.length > 0) && React.createElement('div', { 'data-dsh-conversation-replay-bubble': true },
@@ -531,28 +536,104 @@ export function installConversationReplayModuleHook(): string {
   const installedContexts = new WeakSet()
   const wrappedFactories = new WeakMap()
   const loaderProxies = new WeakMap()
+  const bootstrapModuleId = '@deepseek-ai/dsh-client-modules'
+  const featureDependencyIds = [
+    'react',
+    '@deepseek-ai/dsh-client-ui-primitives',
+    '@deepseek-ai/dsh-client-ui-attachment',
+  ]
   let legacySuppressions = 0
+  let targetRegistrations = 0
+  let targetFactories = 0
+  let targetApplies = 0
+  let featureApplications = 0
+  let featureFailures = 0
+  let lastSlotEntries = []
+  let capturedContext
+  let capturedModules = globalObject.__DSH_MODULES__
+  let feature
+  let featureRequire
+  let recoveryPromise
+  let loaderRepairAttempts = 0
 
-  function wrapFactory(factory) {
+  function exposeModules(modules) {
+    if (modules === null || (typeof modules !== 'object' && typeof modules !== 'function')) return
+    capturedModules = modules
+  }
+
+  function captureContext(ctx) {
+    if (ctx === null || (typeof ctx !== 'object' && typeof ctx !== 'function')) return
+    capturedContext = ctx
+    applyFeature(ctx)
+  }
+
+  function applyFeature(ctx, require) {
+    if (ctx === null || (typeof ctx !== 'object' && typeof ctx !== 'function') || installedContexts.has(ctx)) return
+    if (typeof require === 'function') featureRequire = require
+    if (feature === undefined && featureRequire !== undefined) {
+      try { feature = createConversationReplayFeature(featureRequire) }
+      catch (error) {
+        featureFailures += 1
+        console.error('桌面壳对话编辑与重试功能注入失败', error)
+        return
+      }
+    }
+    if (feature !== undefined) {
+      try {
+        feature.apply(ctx)
+        featureApplications += 1
+        installedContexts.add(ctx)
+      } catch (error) {
+        featureFailures += 1
+        console.error('桌面壳对话编辑与重试功能注入失败', error)
+      }
+      return
+    }
+    const modules = capturedModules
+    if (recoveryPromise !== undefined || typeof modules?.import !== 'function') return
+    recoveryPromise = Promise.resolve().then(() => Promise.all(featureDependencyIds.map(id => modules.import(id)))).then(values => {
+      const dependencies = new Map(featureDependencyIds.map((id, index) => [id, values[index]]))
+      const requireFromModules = id => {
+        if (!dependencies.has(id)) throw new Error('对话编辑与重试注入依赖未找到：' + id)
+        return dependencies.get(id)
+      }
+      applyFeature(ctx, requireFromModules)
+    }).catch(error => {
+      featureFailures += 1
+      console.error('桌面壳对话编辑与重试功能注入失败', error)
+    }).finally(() => { recoveryPromise = undefined })
+  }
+
+  function wrapFactory(factory, moduleId) {
     const existing = wrappedFactories.get(factory)
     if (existing !== undefined) return existing
     const wrapped = function (require) {
+      if (moduleId === targetModuleId) targetFactories += 1
       const exports = factory(require)
       if (exports === null || (typeof exports !== 'object' && typeof exports !== 'function')) return exports
       const originalApply = exports.apply
       if (typeof originalApply !== 'function') return exports
-      let feature
       const wrappedApply = function (...args) {
-        const result = originalApply.apply(this, args)
         const ctx = args[0]
-        if (ctx !== null && (typeof ctx === 'object' || typeof ctx === 'function') && !installedContexts.has(ctx)) {
+        if (moduleId === targetModuleId) {
+          targetApplies += 1
+          applyFeature(ctx, require)
+        } else if (moduleId === bootstrapModuleId) captureContext(ctx)
+        const result = originalApply.apply(this, args)
+        if (ctx !== null && (typeof ctx === 'object' || typeof ctx === 'function')) {
           try {
-            feature ??= createConversationReplayFeature(require)
-            feature.apply(ctx)
-            installedContexts.add(ctx)
-          } catch (error) {
-            console.error('桌面壳对话编辑与重试功能注入失败', error)
-          }
+            const entries = typeof ctx.slots?.entriesOfSlot === 'function'
+              ? ctx.slots.entriesOfSlot('conversation.chat.node')
+              : typeof ctx.slots?.entries === 'function'
+                ? ctx.slots.entries('conversation.chat.node')
+                : []
+            lastSlotEntries = entries.map(entry => ({
+              key: entry?.options?.key,
+              priority: entry?.options?.priority,
+              registrant: entry?.options?.registrant,
+              component: entry?.component?.name,
+            }))
+          } catch {}
         }
         return result
       }
@@ -560,6 +641,20 @@ export function installConversationReplayModuleHook(): string {
         ...Object.getOwnPropertyDescriptor(exports, 'apply'),
         value: wrappedApply,
       })
+      if (moduleId === bootstrapModuleId) {
+        const originalCreate = exports.createClientModuleSystem
+        if (typeof originalCreate === 'function') {
+          Object.defineProperty(exports, 'createClientModuleSystem', {
+            ...Object.getOwnPropertyDescriptor(exports, 'createClientModuleSystem'),
+            value: function (...args) {
+              const modules = originalCreate.apply(this, args)
+              exposeModules(modules)
+              applyFeature(capturedContext)
+              return modules
+            },
+          })
+        }
+      }
       return exports
     }
     wrappedFactories.set(factory, wrapped)
@@ -571,9 +666,37 @@ export function installConversationReplayModuleHook(): string {
     const existing = loaderProxies.get(loader)
     if (existing !== undefined) return existing
     const wrappers = new WeakMap()
+    const createWrappers = new WeakMap()
     const delegates = new WeakMap()
     const proxy = new Proxy(loader, {
       get(target, property, receiver) {
+        if (property === 'create') {
+          const delegate = Reflect.get(target, property, target)
+          if (typeof delegate !== 'function') return delegate
+          const existingWrapper = createWrappers.get(delegate)
+          if (existingWrapper !== undefined) return existingWrapper
+          const wrapper = function (...args) {
+            const queue = Reflect.get(target, 'pendingQueue', target)
+            if (Array.isArray(queue)) {
+              for (let index = 0; index < queue.length; index += 1) {
+                const handoff = queue[index]
+                if (handoff?.id === targetModuleId && typeof handoff.factory === 'function') {
+                  const factory = wrapFactory(handoff.factory, handoff.id)
+                  if (factory !== handoff.factory) targetRegistrations += 1
+                  queue[index] = { ...handoff, factory }
+                } else if (handoff?.id === bootstrapModuleId && typeof handoff.factory === 'function') {
+                  queue[index] = { ...handoff, factory: wrapFactory(handoff.factory, handoff.id) }
+                } else if (handoff?.id === legacyModuleId && typeof handoff.factory === 'function') {
+                  legacySuppressions += 1
+                  queue[index] = { ...handoff, factory: () => ({ inject: [], apply() {} }) }
+                }
+              }
+            }
+            return Reflect.apply(delegate, target, args)
+          }
+          createWrappers.set(delegate, wrapper)
+          return wrapper
+        }
         if (property !== 'load') return Reflect.get(target, property, receiver)
         const delegate = Reflect.get(target, property, target)
         if (typeof delegate !== 'function') return delegate
@@ -581,7 +704,11 @@ export function installConversationReplayModuleHook(): string {
         if (existingWrapper !== undefined) return existingWrapper
         const wrapper = function (handoff) {
           if (handoff?.id === targetModuleId && typeof handoff.factory === 'function') {
-            return Reflect.apply(delegate, target, [{ ...handoff, factory: wrapFactory(handoff.factory) }])
+            targetRegistrations += 1
+            return Reflect.apply(delegate, target, [{ ...handoff, factory: wrapFactory(handoff.factory, handoff.id) }])
+          }
+          if (handoff?.id === bootstrapModuleId && typeof handoff.factory === 'function') {
+            return Reflect.apply(delegate, target, [{ ...handoff, factory: wrapFactory(handoff.factory, handoff.id) }])
           }
           if (handoff?.id === legacyModuleId && typeof handoff.factory === 'function') {
             legacySuppressions += 1
@@ -633,6 +760,7 @@ export function installConversationReplayModuleHook(): string {
   const repairLoaderAccessor = () => {
     try {
       ensureLoaderAccessor()
+      applyFeature(capturedContext)
     } catch (error) {
       console.error('桌面壳 ModuleLoader 接管恢复失败', error)
     }
@@ -645,9 +773,21 @@ export function installConversationReplayModuleHook(): string {
   })
   if (typeof globalObject.addEventListener === 'function') {
     globalObject.addEventListener('DOMContentLoaded', repairLoaderAccessor, { once: true })
+    globalObject.addEventListener('load', repairLoaderAccessor, { once: true })
     globalObject.addEventListener('pageshow', repairLoaderAccessor)
   }
   if (typeof globalObject.queueMicrotask === 'function') globalObject.queueMicrotask(repairLoaderAccessor)
+  const pollLoaderAccessor = () => {
+    repairLoaderAccessor()
+    loaderRepairAttempts += 1
+    if (loaderRepairAttempts < 120 && targetApplies === 0 && featureApplications === 0 && typeof globalObject.setTimeout === 'function') {
+      globalObject.setTimeout(pollLoaderAccessor, 250)
+    }
+  }
+  const protocol = typeof globalObject.location?.protocol === 'string' ? globalObject.location.protocol : ''
+  if ((protocol === 'http:' || protocol === 'https:') && typeof globalObject.setTimeout === 'function') {
+    globalObject.setTimeout(pollLoaderAccessor, 0)
+  }
   Object.defineProperty(globalObject, hookKey, {
     configurable: true,
     enumerable: false,
@@ -659,6 +799,16 @@ export function installConversationReplayModuleHook(): string {
       createFeature: createConversationReplayFeature,
       ensureLoaderAccessor,
       get legacySuppressions() { return legacySuppressions },
+      get diagnostics() {
+        return {
+          targetRegistrations,
+          targetFactories,
+          targetApplies,
+          featureApplications,
+          featureFailures,
+          lastSlotEntries,
+        }
+      },
     }),
   })
   return 'installed'

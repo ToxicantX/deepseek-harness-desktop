@@ -212,3 +212,66 @@
 - `docs/custom-provider-image-input.md`：记录业务行为、配置覆盖方式、注入落点、发布要求和 DSH 升级兼容风险。
 - `progress.md`：追加本轮施工、验证和回滚记录。
 - 回滚点：`c49e73e4e85263cf0a7693aae1b32d5b2c8bf628`。执行 `git restore --source=c49e73e4e85263cf0a7693aae1b32d5b2c8bf628 -- src/shutdown-hook.ts`，再执行 `Remove-Item -LiteralPath 'src\custom-provider-image-injector.ts','tests\custom-provider-image-injector.spec.ts','docs\custom-provider-image-input.md' -Force` 可回滚代码、测试和文档；`progress.md` 按追加式历史记录保留，通过后续追加更正记录处理。
+
+## 2026-08-28 - Task: 修复对话重试、编辑与长文本折叠注入的时序不稳定
+### What was done
+- 补强桌面壳对 DSH `ModuleLoader` 的启动接管：除目标对话模块外，同时捕获 `dsh-client-modules` 创建出的真实模块系统和根 `Context`。
+- 在对话模块已进入 live/materialized、但目标工厂包装未命中的时序下，使用模块系统的导入能力补齐 React/UI 依赖，并在同一根上下文补注册用户消息渲染覆盖；保留已有代理复用、访问器自修复和旧 Runtime 插件抑制逻辑。
+- 增加页面启动阶段的短时访问器轮询与 `load` 生命周期兜底，缩小页面脚本或主题适配器临时改写加载器造成的竞态窗口。
+- 增加 live 模块系统上下文恢复回归测试，并更新对话编辑/重试注入文档。
+### Testing
+- `pnpm exec vitest run tests/conversation-replay-shell-injector.spec.ts --maxWorkers=1 --testTimeout=20000`：通过，1 个测试文件、10 个测试。
+- `pnpm exec vitest run --maxWorkers=1 --testTimeout=20000`：通过，6 个测试文件、26 个测试。
+- `pnpm run typecheck`：通过；当前 Node.js 22.22.0 低于仓库声明的 Node.js 24，pnpm 输出 engine 警告。
+- `pnpm run build`：通过；`lib/preload.cjs` 已包含新的模块系统捕获、上下文恢复和加载器轮询逻辑，同样存在上述 Node.js engine 警告。
+- `node scripts/smoke-runtime.mjs "C:\Users\karma617\AppData\Local\DeepSeek Harness\runtime-manager\runtimes\0.1.1-rc.2" "C:\Users\karma617\AppData\Local\DeepSeek Harness\runtime-manager\runtimes\0.1.1-rc.2\runtime-manifest.json"`：通过，DSH 0.1.1-rc.2 Runtime HTTP/Host API/关闭流程正常。
+- `git diff --check`：通过。
+- 未执行真实 Electron 会话中的连续刷新、SPA 切换及实际重试/编辑按钮点击烟测；本轮验证集中在注入时序回归、完整自动化测试、构建和 Runtime smoke。
+### Notes
+- `src/conversation-replay-injector.ts`：新增 bootstrap 模块系统/根上下文捕获、延迟依赖恢复和短时 ModuleLoader 轮询。
+- `tests/conversation-replay-shell-injector.spec.ts`：新增 live 模块系统上下文恢复回归测试。
+- `docs/conversation-edit-retry.md`：补充 live/materialized 状态下的上下文恢复说明。
+- `progress.md`：追加本轮施工、验证和回滚记录。
+- 回滚方式：当前工作树未提交；如需整体回滚当前三文件的未提交改动，执行 `git restore --source=HEAD -- src/conversation-replay-injector.ts tests/conversation-replay-shell-injector.spec.ts docs/conversation-edit-retry.md`（会同时回退此前这些文件上的未提交会话功能改动）；`progress.md` 按追加式历史记录保留。
+
+## 2026-08-29 - Task: 修复 Windows 构建脚本误用 Node.js 22
+### What was done
+- 调整 `build-windows.bat` 的 Node.js 选择顺序：优先复用 `DSH_DESKTOP_RUNTIME_ROOT` 或本机已安装 DSH Runtime 内置的 Node.js 24 x64，其次查找 nvm 的 v24，最后才使用 PATH 中的 Node.js。
+- 对最终选中的 Node.js 继续执行主版本和 x64 架构校验，并将其目录前置到 PATH，确保 pnpm、测试、构建和 electron-builder 全程使用同一个 Node.js 24。
+- 改进不兼容环境提示，并在开发说明中记录构建脚本的自动查找规则。
+### Testing
+- Node.js 22 隔离路径校验：通过；在隐藏 DSH Runtime 和 nvm、PATH 仅保留 Node.js 22.22.0 时，脚本明确报告实际版本并以错误码 1 结束，没有继续执行测试或打包。
+- `build-windows.bat --no-pause` 真实全流程：通过；当前 PATH 为 Node.js 22.22.0，脚本自动选中 DSH Runtime 内置 Node.js 24.19.0 x64，完成依赖安装、6 个测试文件/26 个测试、TypeScript/tsdown 构建和 electron-builder 打包。
+- 安装包产物校验：通过；生成 `dist/DeepSeek-Harness-Shell-0.1.15-x64.exe`（102204374 字节）和 `dist/DeepSeek-Harness-Shell-Portable-0.1.15-x64.exe`（101975074 字节）。
+- `git diff --check`：通过。
+### Notes
+- `build-windows.bat`：自动发现并固定使用 Node.js 24 x64，同时保持 Windows BAT 的 CRLF 行尾。
+- `README.md`：补充 Node.js 24 自动查找与手动安装条件。
+- `progress.md`：追加本轮施工、验证和回滚记录。
+- 回滚方式：执行 `git restore --source=HEAD -- build-windows.bat README.md` 可回滚本轮脚本和文档改动；`progress.md` 按追加式历史记录保留。
+
+## 2026-08-28 - Task: 持久化 Windows 构建脚本 CRLF 行尾修正
+### What was done
+- 在 `.gitattributes` 中声明 `*.bat text eol=crlf`，让 `build-windows.bat` 在 Git checkout、切换分支和后续编辑后继续保持 Windows CMD 所需的 CRLF 行尾，避免 `goto` 解析异常导致错误分支误报。
+- 保持当前构建脚本内容不变，仅补上行尾持久化规则，并复核脚本仍为纯 CRLF。
+### Testing
+- `build-windows.bat --no-pause` 真实全流程：通过；自动选中 DSH Runtime 内置 Node.js 24.19.0 x64，6 个测试文件/26 个测试通过，TypeScript/tsdown 与 electron-builder 通过。
+- Node.js 22 隔离路径校验：通过；仅保留 PATH 中 Node.js 22.22.0 时，脚本明确报告版本不兼容并以错误码 1 结束，未继续执行测试或打包。
+- 行尾校验：通过；`build-windows.bat` 为纯 CRLF，`.gitattributes` 已包含 `*.bat text eol=crlf`。
+- `git diff --check`：通过（Git 仅提示现有 `progress.md` 的 CRLF 将按仓库规则规范化为 LF）。
+### Notes
+- `.gitattributes`：新增 BAT 文件 CRLF 持久化规则。
+- `progress.md`：追加本轮行尾修正、构建验证和回滚记录。
+- 回滚方式：执行 `git restore --source=HEAD -- .gitattributes` 可撤销本轮行尾规则；`progress.md` 按追加式历史记录保留。
+## 2026-08-29 - Task: 调整主题皮肤市场列表排序
+### What was done
+- 为皮肤安装记录持久化成功安装时间；已有安装记录首次加载时使用皮肤目录修改时间补齐历史安装时间。
+- 皮肤市场列表现在优先展示当前正在使用的皮肤，其余已安装皮肤按安装时间从新到旧排列，所有未安装皮肤继续保持市场目录原有顺序并排在后面。
+### Testing
+- `git diff --check -- src/shell-skin-store.ts`：通过。
+- 静态差异检查确认安装时间写入、当前皮肤置顶和已安装皮肤倒序逻辑均已落在目标代码中。
+- 按用户要求未执行测试、构建或打包，未终止任何当前运行中的进程；实际弹窗效果留待用户手动打包验证。
+### Notes
+- `src/shell-skin-store.ts`：记录/迁移皮肤安装时间，并在市场列表输出前执行分组排序。
+- `progress.md`：追加本轮改动、静态检查和回滚记录。
+- 回滚方式：执行 `git restore --source=HEAD -- src/shell-skin-store.ts` 可回滚本轮代码改动；`progress.md` 按追加式历史记录保留。
