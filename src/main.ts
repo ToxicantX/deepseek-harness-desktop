@@ -871,6 +871,7 @@ async function startApplication(): Promise<void> {
     quitting = true
   }, showUpdateProgress)
   installMenu()
+  await mcpManager.repairInvalidManagedNpmImports().catch(logFatalError)
   await controller.start()
   const updateTimer = setTimeout(() => { void updater?.check(false) }, 5_000)
   updateTimer.unref()

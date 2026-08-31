@@ -11,6 +11,8 @@ const MAX_BUNDLES = 100
 const MAX_NPM_PACKAGES = 200
 const SECRET_FLAG = /(?:api[-_]?key|auth|bearer|credential|password|secret|token)/iu
 const PACKAGE_NAME = /^(?:@[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*|[a-z0-9][a-z0-9._-]*)$/u
+const MCP_SERVER_NAME = /^[A-Za-z0-9_-]{1,32}$/u
+const LOCAL_NPM_IMPORT_ID = /^desktop-npm-([a-f0-9]{16})$/u
 
 type McpTransport = 'stdio' | 'streamable-http' | 'unknown'
 type DataPath = (string | number)[]
@@ -277,13 +279,23 @@ export async function discoverLocalNpmMcps(roots: readonly string[]): Promise<Lo
     if (packageName !== candidate.name || !PACKAGE_NAME.test(packageName)) continue
     const version = boundedText(manifest.version, 128) ?? 'unknown'
     for (const [command] of packageBins(manifest)) {
-      const id = 'desktop-npm-' + createHash('sha256').update(packageName).update('\0').update(command).digest('hex').slice(0, 16)
+      const id = localNpmImportId(packageName, command)
       if (seen.has(id)) continue
       seen.add(id)
       found.push({ id, packageName, version, packagePath, command, manifestSource: source })
     }
   }
   return found.sort((left, right) => left.packageName.localeCompare(right.packageName) || left.command.localeCompare(right.command))
+}
+
+function localNpmImportId(packageName: string, command: string): string {
+  return 'desktop-npm-' + createHash('sha256').update(packageName).update('\0').update(command).digest('hex').slice(0, 16)
+}
+
+function localNpmServerName(id: string): string {
+  const suffix = LOCAL_NPM_IMPORT_ID.exec(id)?.[1]
+  if (suffix === undefined) throw new Error('本机 npm MCP 缺少有效的 Desktop 导入 ID')
+  return 'npm_' + suffix
 }
 
 function keyFor(provider: string, id: string | undefined, source: string, index: number): string {
@@ -432,7 +444,7 @@ function toInternalLocalNpmEntry(value: LocalNpmMcp, target: ConfigEntry | undef
   const imported = target?.name === '@deepseek-ai/dsh-mcp-client'
   const identityConflict = target !== undefined && !imported
   const config: Record<string, unknown> = {
-    serverName: value.packageName,
+    serverName: localNpmServerName(value.id),
     transport: 'stdio',
     command: value.command,
   }
@@ -598,6 +610,34 @@ export class McpManager {
   async list(): Promise<McpList> {
     const state = await this.load()
     return { revision: state.revision, entries: state.entries.map(entry => entry.view) }
+  }
+
+  async repairInvalidManagedNpmImports(): Promise<number> {
+    let repaired = 0
+    for (const path of [this.patchPath, this.homePatchPath]) {
+      const source = await readBounded(path, MAX_PATCH_BYTES, true)
+      if (source === undefined) continue
+      const parsed = parsePatch(source, path)
+      let fileRepairs = 0
+      parsed.data.forEach((layer, layerIndex) => {
+        if (!isRecord(layer) || !Array.isArray(layer.insert)) return
+        layer.insert.forEach((entry, entryIndex) => {
+          if (!isRecord(entry) || entry.name !== '@deepseek-ai/dsh-mcp-client' || !isRecord(entry.config)) return
+          const id = boundedText(entry.id, 256)
+          const serverName = boundedText(entry.config.serverName, 256)
+          const command = boundedText(entry.config.command, 4096)
+          if (id === undefined || serverName === undefined || command === undefined
+            || MCP_SERVER_NAME.test(serverName) || !PACKAGE_NAME.test(serverName)
+            || localNpmImportId(serverName, command) !== id) return
+          parsed.document.setIn([layerIndex, 'insert', entryIndex, 'config', 'serverName'], localNpmServerName(id))
+          fileRepairs += 1
+        })
+      })
+      if (fileRepairs === 0) continue
+      await atomicWrite(path, String(parsed.document))
+      repaired += fileRepairs
+    }
+    return repaired
   }
 
   async setEnabled(value: unknown): Promise<McpList> {

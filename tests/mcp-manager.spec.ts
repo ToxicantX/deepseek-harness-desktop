@@ -1,7 +1,8 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { parse } from 'yaml'
 import { discoverLocalNpmMcps, McpManager } from '../src/mcp-manager.ts'
 
 const temporaryDirectories: string[] = []
@@ -65,6 +66,12 @@ describe('local npm MCP discovery', () => {
 
     const enabled = await manager.setEnabled({ key: context7?.key, enabled: true, expectedRevision: discovered.revision })
     expect(enabled.entries.find(entry => entry.name === '@upstash/context7-mcp')).toMatchObject({ enabled: true })
+    const patch = parse(await readFile(join(home, 'profiles', 'web', 'cordis.patch.yml'), 'utf8')) as Array<Record<string, unknown>>
+    const imported = (patch[0]?.insert as Array<Record<string, unknown>> | undefined)?.[0]
+    expect(imported?.config).toMatchObject({
+      serverName: expect.stringMatching(/^npm_[a-f0-9]{16}$/u),
+      command: 'context7-mcp',
+    })
 
     const disabled = await manager.setEnabled({
       key: context7?.key,
@@ -72,5 +79,19 @@ describe('local npm MCP discovery', () => {
       expectedRevision: enabled.revision,
     })
     expect(disabled.entries.find(entry => entry.name === '@upstash/context7-mcp')).toMatchObject({ enabled: false })
+  })
+
+  it('repairs invalid server names written by the 0.1.19 npm importer', async () => {
+    const { root, home } = await fixtureRoot()
+    const manager = new McpManager({ home, npmGlobalRoots: () => [root] })
+    const profile = join(home, 'profiles', 'web')
+    await mkdir(profile, { recursive: true })
+    await writeFile(join(profile, 'cordis.patch.yml'), `- insert:\n    - id: desktop-npm-c50c04ad24824600\n      name: "@deepseek-ai/dsh-mcp-client"\n      config:\n        serverName: "@upstash/context7-mcp"\n        transport: stdio\n        command: context7-mcp\n      disabled: false\n`)
+
+    await expect(manager.repairInvalidManagedNpmImports()).resolves.toBe(1)
+    await expect(manager.repairInvalidManagedNpmImports()).resolves.toBe(0)
+    const patch = parse(await readFile(join(profile, 'cordis.patch.yml'), 'utf8')) as Array<Record<string, unknown>>
+    const imported = (patch[0]?.insert as Array<Record<string, unknown>> | undefined)?.[0]
+    expect(imported?.config).toMatchObject({ serverName: 'npm_c50c04ad24824600' })
   })
 })
