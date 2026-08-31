@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { isScalar, isSeq, parseDocument } from 'yaml'
@@ -8,6 +8,7 @@ import { parseCodexMcpEntries, type CodexMcpEntry } from './codex-mcp.ts'
 const MAX_PACKAGE_BYTES = 256 * 1024
 const MAX_PATCH_BYTES = 1024 * 1024
 const MAX_BUNDLES = 100
+const MAX_NPM_PACKAGES = 200
 const SECRET_FLAG = /(?:api[-_]?key|auth|bearer|credential|password|secret|token)/iu
 const PACKAGE_NAME = /^(?:@[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*|[a-z0-9][a-z0-9._-]*)$/u
 
@@ -35,8 +36,8 @@ export interface McpEntryView {
   key: string
   entryId?: string
   name: string
-  provider: 'DSH MCP Client' | 'MCP Lens' | 'Codex MCP'
-  management: 'dsh' | 'codex-import'
+  provider: 'DSH MCP Client' | 'MCP Lens' | 'Codex MCP' | 'Local npm MCP'
+  management: 'dsh' | 'codex-import' | 'npm-import'
   enabled: boolean
   dynamic?: boolean
   sourceEnabled?: boolean
@@ -63,6 +64,7 @@ interface McpManagerOptions {
   profile?: string
   overlayPaths?: () => readonly string[]
   codexConfigPath?: string
+  npmGlobalRoots?: () => readonly string[]
 }
 
 interface ConfigEntry {
@@ -82,6 +84,17 @@ interface InternalEntry {
   control?: ControlLocation
   codexImported?: boolean
   codexConfig?: Record<string, unknown>
+  npmImported?: boolean
+  npmConfig?: Record<string, unknown>
+}
+
+export interface LocalNpmMcp {
+  id: string
+  packageName: string
+  version: string
+  packagePath: string
+  command: string
+  manifestSource: string
 }
 
 interface ParsedPatch {
@@ -194,6 +207,83 @@ function isDirectClientName(value: string | undefined): boolean {
 
 function isLensEntry(value: ConfigEntry): boolean {
   return value.name === 'dsh-mcp-lens'
+}
+
+function npmEnvironmentPath(environment: NodeJS.ProcessEnv): string[] {
+  const pathValue = Object.entries(environment).find(([key]) => key.toUpperCase() === 'PATH')?.[1]
+  return pathValue === undefined ? [] : pathValue.split(';').filter(value => value.length > 0)
+}
+
+function npmGlobalRoots(environment: NodeJS.ProcessEnv): string[] {
+  const roots = new Set<string>()
+  const add = (value: string | undefined): void => {
+    if (value !== undefined && value.length > 0) roots.add(resolve(value))
+  }
+  for (const directory of npmEnvironmentPath(environment)) {
+    add(join(directory, 'node_modules'))
+    add(join(directory, '..', 'node_modules'))
+  }
+  const prefix = Object.entries(environment).find(([key]) => key.toLowerCase() === 'npm_config_prefix')?.[1]
+  add(prefix === undefined ? undefined : join(prefix, 'node_modules'))
+  const appData = Object.entries(environment).find(([key]) => key.toUpperCase() === 'APPDATA')?.[1]
+  add(appData === undefined ? undefined : join(appData, 'npm', 'node_modules'))
+  return [...roots]
+}
+
+function isMcpPackage(manifest: Record<string, unknown>): boolean {
+  if (boundedText(manifest.mcpName, 256) !== undefined) return true
+  if (!Array.isArray(manifest.keywords)) return false
+  return manifest.keywords.some(keyword => keyword === 'mcp' || keyword === 'modelcontextprotocol' || keyword === 'model-context-protocol')
+}
+
+function packageBins(manifest: Record<string, unknown>): Array<[string, string]> {
+  if (typeof manifest.bin === 'string') {
+    const name = boundedText(manifest.name, 256)
+    return name === undefined ? [] : [[name.startsWith('@') ? name.slice(name.indexOf('/') + 1) : name, manifest.bin]]
+  }
+  if (!isRecord(manifest.bin)) return []
+  return Object.entries(manifest.bin).flatMap(([name, target]) => typeof target === 'string' && target.length > 0 && target.length <= 4096 ? [[name, target]] : [])
+}
+
+export async function discoverLocalNpmMcps(roots: readonly string[]): Promise<LocalNpmMcp[]> {
+  const candidates: Array<{ name: string; path: string }> = []
+  for (const root of [...new Set(roots.map(value => resolve(value)))].slice(0, MAX_NPM_PACKAGES)) {
+    let packages
+    try { packages = await readdir(root, { withFileTypes: true }) } catch { continue }
+    for (const item of packages) {
+      if (!item.isDirectory()) continue
+      if (item.name.startsWith('@')) {
+        let scoped
+        try { scoped = await readdir(join(root, item.name), { withFileTypes: true }) } catch { continue }
+        for (const child of scoped) {
+          if (child.isDirectory()) candidates.push({ name: item.name + '/' + child.name, path: join(root, item.name, child.name) })
+        }
+      } else {
+        candidates.push({ name: item.name, path: join(root, item.name) })
+      }
+      if (candidates.length >= MAX_NPM_PACKAGES) break
+    }
+  }
+  const found: LocalNpmMcp[] = []
+  const seen = new Set<string>()
+  for (const candidate of candidates) {
+    const packagePath = join(candidate.path, 'package.json')
+    const source = await readBounded(packagePath, MAX_PACKAGE_BYTES, true)
+    if (source === undefined) continue
+    let manifest: unknown
+    try { manifest = JSON.parse(source) } catch { continue }
+    if (!isRecord(manifest) || !isMcpPackage(manifest)) continue
+    const packageName = boundedText(manifest.name, 256) ?? candidate.name
+    if (packageName !== candidate.name || !PACKAGE_NAME.test(packageName)) continue
+    const version = boundedText(manifest.version, 128) ?? 'unknown'
+    for (const [command] of packageBins(manifest)) {
+      const id = 'desktop-npm-' + createHash('sha256').update(packageName).update('\0').update(command).digest('hex').slice(0, 16)
+      if (seen.has(id)) continue
+      seen.add(id)
+      found.push({ id, packageName, version, packagePath, command, manifestSource: source })
+    }
+  }
+  return found.sort((left, right) => left.packageName.localeCompare(right.packageName) || left.command.localeCompare(right.command))
 }
 
 function keyFor(provider: string, id: string | undefined, source: string, index: number): string {
@@ -338,6 +428,36 @@ function toInternalEntry(value: ConfigEntry, index: number): InternalEntry | und
   }
 }
 
+function toInternalLocalNpmEntry(value: LocalNpmMcp, target: ConfigEntry | undefined, index: number): InternalEntry {
+  const imported = target?.name === '@deepseek-ai/dsh-mcp-client'
+  const identityConflict = target !== undefined && !imported
+  const config: Record<string, unknown> = {
+    serverName: value.packageName,
+    transport: 'stdio',
+    command: value.command,
+  }
+  const dynamic = imported && target.disabled !== undefined && target.disabled !== null && typeof target.disabled !== 'boolean'
+  return {
+    view: {
+      key: keyFor('npm', value.id, value.packagePath, index),
+      entryId: value.id,
+      name: value.packageName,
+      provider: 'Local npm MCP',
+      management: 'npm-import',
+      enabled: imported && !dynamic && target.disabled !== true,
+      ...(dynamic ? { dynamic: true } : {}),
+      mutable: !identityConflict && target?.locked !== true,
+      source: '本机 npm 全局包 · ' + value.version,
+      endpoints: [{ name: value.command, transport: 'stdio', command: value.command }],
+    },
+    entryId: value.id,
+    entryName: '@deepseek-ai/dsh-mcp-client',
+    ...(target?.control === undefined ? {} : { control: target.control }),
+    npmImported: imported,
+    npmConfig: config,
+  }
+}
+
 function codexImportId(name: string): string {
   return 'desktop-codex-' + createHash('sha256').update(name).digest('hex').slice(0, 16)
 }
@@ -462,6 +582,7 @@ export class McpManager {
   readonly homePatchPath: string
   readonly codexConfigPath: string | undefined
   private readonly overlayPaths: () => readonly string[]
+  private readonly npmGlobalRoots: () => readonly string[]
 
   constructor(options: McpManagerOptions) {
     const profile = options.profile ?? 'web'
@@ -471,6 +592,7 @@ export class McpManager {
     this.homePatchPath = join(options.home, 'cordis.patch.yml')
     this.codexConfigPath = options.codexConfigPath
     this.overlayPaths = options.overlayPaths ?? (() => [])
+    this.npmGlobalRoots = options.npmGlobalRoots ?? (() => npmGlobalRoots(process.env))
   }
 
   async list(): Promise<McpList> {
@@ -496,7 +618,19 @@ export class McpManager {
     const selected = target.control?.layer === 'home' ? state.homeDocument : state.profileDocument
     if (selected === undefined) throw new Error('MCP 全局配置文件已不存在，请刷新后重试')
     const document = selected.document
-    if (target.view.management === 'codex-import' && target.codexImported !== true) {
+    if (target.view.management === 'npm-import' && target.npmImported !== true) {
+      if (target.npmConfig === undefined) throw new Error('该本机 npm MCP 缺少可用的启动配置')
+      if (!isSeq(document.contents)) throw new Error('MCP 配置必须是顶层 YAML 数组')
+      document.contents.flow = false
+      document.contents.add({
+        insert: [{
+          id: target.entryId,
+          name: target.entryName,
+          config: target.npmConfig,
+          disabled: false,
+        }],
+      })
+    } else if (target.view.management === 'codex-import' && target.codexImported !== true) {
       if (target.codexConfig === undefined) throw new Error('该 Codex MCP 的传输配置无法转换为 DSH MCP Client')
       if (!isSeq(document.contents)) throw new Error('MCP 配置必须是顶层 YAML 数组')
       document.contents.flow = false
@@ -557,15 +691,23 @@ export class McpManager {
       applyPatchLayer(overlay.data, basename(overlayPath), entries, anonymous, { lockLayer: true })
     }
 
+    const localNpmMcps = await discoverLocalNpmMcps(this.npmGlobalRoots())
+    for (const local of localNpmMcps) revisionSources.push(local.packagePath, local.manifestSource)
     const codexIds = new Set(codexEntries.map(entry => codexImportId(entry.name)))
+    const localNpmIds = new Set(localNpmMcps.map(entry => entry.id))
     const dshResolved = [...entries.values(), ...anonymous]
-      .filter(entry => entry.id === undefined || !codexIds.has(entry.id) || !isDirectClientName(entry.name))
+      .filter(entry => entry.id === undefined
+        || (!codexIds.has(entry.id) || !isDirectClientName(entry.name))
+        && (!localNpmIds.has(entry.id) || !isDirectClientName(entry.name)))
       .map((entry, index) => toInternalEntry(entry, index))
       .filter((entry): entry is InternalEntry => entry !== undefined)
     const codexResolved = codexEntries.map((entry, index) => {
       return toInternalCodexEntry(entry, entries.get(codexImportId(entry.name)), index)
     })
-    const resolved = [...dshResolved, ...codexResolved]
+    const localNpmResolved = localNpmMcps.map((entry, index) => {
+      return toInternalLocalNpmEntry(entry, entries.get(entry.id), index)
+    })
+    const resolved = [...dshResolved, ...codexResolved, ...localNpmResolved]
       .sort((left, right) => left.view.name.localeCompare(right.view.name, 'zh-CN'))
     return {
       revision: revision(revisionSources),

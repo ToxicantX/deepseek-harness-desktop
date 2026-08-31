@@ -139,7 +139,9 @@ export async function handleOpenSettingsRequest(
 
 export function desktopEnvironment(runtime: InstalledRuntime, inherited: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const environment = { ...inherited }
-  const path = [dirname(runtime.pnpmExecutable), dirname(runtime.nodeExecutable), inherited.Path ?? inherited.PATH]
+  const appData = Object.entries(inherited).find(([key]) => key.toUpperCase() === 'APPDATA')?.[1]
+  const userNpmBin = appData === undefined ? undefined : join(appData, 'npm')
+  const path = [dirname(runtime.pnpmExecutable), dirname(runtime.nodeExecutable), userNpmBin, inherited.Path ?? inherited.PATH]
     .filter((part): part is string => part !== undefined && part.length > 0)
     .join(delimiter)
   environment.Path = path

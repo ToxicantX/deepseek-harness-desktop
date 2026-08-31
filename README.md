@@ -131,7 +131,7 @@ dsh plugin --profile web remove <package-name>
 
 ### MCP 管理
 
-**Runtime → 管理 MCP** 会按实际 Cordis Patch 顺序读取 Web Profile Bundle、Profile Patch、`$DSH_HOME/cordis.patch.yml` 和 Desktop Runtime Overlay，并只读发现 `%USERPROFILE%\.codex\config.toml` 中的本机 MCP。
+**Runtime → 管理 MCP** 会按实际 Cordis Patch 顺序读取 Web Profile Bundle、Profile Patch、`$DSH_HOME/cordis.patch.yml` 和 Desktop Runtime Overlay，并只读发现 `%USERPROFILE%\.codex\config.toml` 以及当前桌面进程 `PATH` 对应 npm 全局目录中的本机 MCP 包。带有 `mcpName` 或 MCP 关键词且暴露 `bin` 的包会显示为“Local npm MCP”；首次开启会把包的启动命令接入 DSH Profile Patch，之后开关只修改 DSH 接入状态，不修改 npm 安装目录。
 
 - 搜索名称、Provider 或地址，并按 DSH 接入状态筛选。
 - 环境变量与 HTTP Header 只显示键名；URL 凭据、查询参数和疑似密钥参数不会发送到管理窗口。

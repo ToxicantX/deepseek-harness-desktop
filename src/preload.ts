@@ -597,9 +597,10 @@ function initializeMcpManagerPage(): void {
     inner.className = 'details-inner'
     const metadata = document.createElement('dl')
     metadata.className = 'detail-grid'
-    appendDetail(metadata, entry.management === 'codex-import' ? 'DSH 导入 ID' : 'Cordis ID', entry.entryId)
+    appendDetail(metadata, entry.management === 'codex-import' || entry.management === 'npm-import' ? 'DSH 导入 ID' : 'Cordis ID', entry.entryId)
     appendDetail(metadata, '来源', entry.source)
     if (entry.management === 'codex-import') appendDetail(metadata, 'Codex 状态', entry.sourceEnabled === false ? '已禁用' : '已启用')
+    if (entry.management === 'npm-import') appendDetail(metadata, '接入状态', entry.enabled ? '已接入 DSH' : '未接入 DSH')
     if (entry.provider === 'MCP Lens') {
       appendDetail(metadata, '允许规则', entry.allowToolCount === undefined ? undefined : String(entry.allowToolCount))
       appendDetail(metadata, '拒绝规则', entry.denyToolCount === undefined ? undefined : String(entry.denyToolCount))
@@ -621,7 +622,7 @@ function initializeMcpManagerPage(): void {
     const current = snapshot
     if (busy || current === undefined || !entry.mutable) return
     setBusy(true)
-    const action = entry.management === 'codex-import'
+    const action = entry.management === 'codex-import' || entry.management === 'npm-import'
       ? enabled ? '正在接入 DSH ' : '正在从 DSH 禁用 '
       : enabled ? '正在启用 ' : '正在禁用 '
     setStatus(action + entry.name + '，Runtime 将自动重启...')
@@ -632,7 +633,7 @@ function initializeMcpManagerPage(): void {
         expectedRevision: current.revision,
       }) as McpList
       renderEntries()
-      const result = entry.management === 'codex-import'
+      const result = entry.management === 'codex-import' || entry.management === 'npm-import'
         ? enabled ? ' 已接入 DSH' : ' 已从 DSH 禁用'
         : enabled ? ' 已启用' : ' 已禁用'
       setStatus(entry.name + result, 'success')
@@ -709,12 +710,12 @@ function initializeMcpManagerPage(): void {
       toggle.indeterminate = entry.dynamic === true
       toggle.disabled = busy || !entry.mutable
       toggle.dataset.mutable = String(entry.mutable)
-      const toggleAction = entry.management === 'codex-import'
+      const toggleAction = entry.management === 'codex-import' || entry.management === 'npm-import'
         ? entry.enabled ? '从 DSH 禁用 ' : '接入 DSH '
         : entry.dynamic === true || !entry.enabled ? '启用 ' : '禁用 '
       toggle.setAttribute('aria-label', toggleAction + entry.name)
       toggle.title = entry.mutable
-        ? entry.management === 'codex-import'
+        ? entry.management === 'codex-import' || entry.management === 'npm-import'
           ? entry.enabled ? '从 DSH 禁用' : '接入 DSH'
           : entry.dynamic === true ? '设置为明确启用或禁用' : entry.enabled ? '禁用' : '启用'
         : entry.entryId === undefined ? '缺少稳定的 Cordis entry id' : '当前配置无法安全切换'
