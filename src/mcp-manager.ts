@@ -214,7 +214,7 @@ function npmEnvironmentPath(environment: NodeJS.ProcessEnv): string[] {
   return pathValue === undefined ? [] : pathValue.split(';').filter(value => value.length > 0)
 }
 
-function npmGlobalRoots(environment: NodeJS.ProcessEnv): string[] {
+export function npmGlobalRootsFromEnvironment(environment: NodeJS.ProcessEnv): string[] {
   const roots = new Set<string>()
   const add = (value: string | undefined): void => {
     if (value !== undefined && value.length > 0) roots.add(resolve(value))
@@ -592,7 +592,7 @@ export class McpManager {
     this.homePatchPath = join(options.home, 'cordis.patch.yml')
     this.codexConfigPath = options.codexConfigPath
     this.overlayPaths = options.overlayPaths ?? (() => [])
-    this.npmGlobalRoots = options.npmGlobalRoots ?? (() => npmGlobalRoots(process.env))
+    this.npmGlobalRoots = options.npmGlobalRoots ?? (() => npmGlobalRootsFromEnvironment(process.env))
   }
 
   async list(): Promise<McpList> {

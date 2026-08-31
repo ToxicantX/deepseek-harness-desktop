@@ -22,7 +22,7 @@ import {
 import { MINIMUM_DSH_VERSION, type RuntimePreference } from './catalog.ts'
 import { DesktopPetController as PetEventController, type PetRendererState as PetProtocolState, type PetWebSocket } from './desktop-pet.ts'
 import { openTerminal } from './cli-shell.ts'
-import { McpManager, type McpList } from './mcp-manager.ts'
+import { McpManager, npmGlobalRootsFromEnvironment, type McpList } from './mcp-manager.ts'
 import { mutateMcpWithRuntime } from './mcp-restart.ts'
 import { PersonalizationManager } from './personalization-manager.ts'
 import { parsePetWindowShape, PetWindowController, type PetRendererState as PetWindowState } from './pet-window.ts'
@@ -855,6 +855,13 @@ async function startApplication(): Promise<void> {
     overlayPaths() {
       const runtime = controller?.installedRuntime()
       return runtime === undefined ? [] : [join(runtime.directory, 'app', 'desktop.patch.yml')]
+    },
+    npmGlobalRoots() {
+      const runtime = controller?.installedRuntime()
+      return [
+        ...npmGlobalRootsFromEnvironment(process.env),
+        ...(runtime === undefined ? [] : [join(dirname(runtime.nodeExecutable), 'node_modules')]),
+      ]
     },
   })
   updater = new ShellUpdater(mainWindow, async () => {
