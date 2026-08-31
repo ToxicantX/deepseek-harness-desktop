@@ -6,11 +6,11 @@ import { promisify } from 'node:util'
 import { pathToFileURL } from 'node:url'
 
 const execFileAsync = promisify(execFile)
-const runtimeRoot = resolve(process.argv[2] ?? '')
-const manifestFile = resolve(process.argv[3] ?? '')
-if (runtimeRoot.length === 0 || manifestFile.length === 0) {
+if (process.argv[2] === undefined || process.argv[3] === undefined) {
   throw new Error('usage: node scripts/smoke-runtime.mjs <runtime-root> <manifest>')
 }
+const runtimeRoot = resolve(process.argv[2])
+const manifestFile = resolve(process.argv[3])
 const manifest = JSON.parse(await readFile(manifestFile, 'utf8'))
 const runtime = {
   directory: runtimeRoot,

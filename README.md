@@ -168,6 +168,12 @@ dsh plugin --profile web remove <package-name>
 
 未签名构建或尚未积累信誉的新证书都可能触发提示。请只从本仓库的 [Latest Release](https://github.com/ToxicantX/deepseek-harness-desktop/releases/latest) 下载，并在运行前核对发布来源。
 
+## Code signing policy
+
+SignPath Foundation 批准并启用集成后，符合条件的 Shell Release 将使用 [SignPath.io](https://about.signpath.io) 提供的免费代码签名，证书由 [SignPath Foundation](https://signpath.org) 持有。集成启用前的发布和本地构建可能仍未签名；每个文件应以 Windows 显示的实际签名状态为准。
+
+签名只覆盖由本仓库 GitHub Actions 从公开源码构建的 Desktop Shell 产物，不用于 Runtime 压缩包或上游项目二进制。团队角色、隐私声明、审批规则和验证方式见[完整代码签名政策](docs/code-signing-policy.md)。
+
 ## 版本与更新说明
 
 - **Shell Version**：桌面窗口、下载器、版本管理器和 Runtime 协议的版本。

@@ -122,6 +122,12 @@ Most newly issued public certificates require hardware- or cloud-protected priva
 
 Local `dist` artifacts remain unsigned when no certificate is configured. Even with a trusted certificate, SmartScreen reputation may still need to develop through downloads and time.
 
+### Code signing policy
+
+After SignPath Foundation approves and activates the integration, free code signing for eligible Shell releases is provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org). Published and local artifacts may remain unsigned until that integration is active; the signature status shown by Windows is authoritative for each file.
+
+Signing is limited to Desktop Shell artifacts built from this repository's public source by GitHub Actions. Runtime archives and upstream projects' binaries are excluded. See the [complete code signing policy](docs/code-signing-policy.md) for team roles, privacy, approval, and verification details.
+
 ## Current scope
 
 - Windows x64 is the only supported target.

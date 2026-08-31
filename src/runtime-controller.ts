@@ -12,6 +12,7 @@ import {
 } from './catalog.ts'
 import { desktopEnvironment, startBackend, type RunningBackend } from './backend.ts'
 import { prepareCliShim } from './cli-shell.ts'
+import { prepareGoalGuardOverlay } from './goal-guard-overlay.ts'
 import { inspectProfileBundleRecovery, type ProfileBundleRecoveryPlan } from './profile-bundle-recovery.ts'
 import { inspectPluginPresetRecovery, type PluginPresetRecoveryPlan } from './plugin-preset-recovery.ts'
 import { RuntimeStore, type InstalledRuntime, type RuntimeState } from './runtime-store.ts'
@@ -64,6 +65,7 @@ export interface RuntimeControllerOptions {
   store: RuntimeStore
   shutdownHook: string
   userData: string
+  goalGuardPlugin: string
   catalogUrl?: string
   environment?: NodeJS.ProcessEnv
   inspectStaleLocalPlugins?: StaleLocalPluginRecoveryInspector
@@ -79,6 +81,7 @@ export class RuntimeController {
   private readonly store: RuntimeStore
   private readonly shutdownHook: string
   private readonly userData: string
+  private readonly goalGuardPlugin: string
   private readonly catalogUrl: string
   private readonly environment: NodeJS.ProcessEnv
   private readonly inspectStaleLocalPlugins: StaleLocalPluginRecoveryInspector
@@ -107,6 +110,7 @@ export class RuntimeController {
     this.store = options.store
     this.shutdownHook = options.shutdownHook
     this.userData = options.userData
+    this.goalGuardPlugin = options.goalGuardPlugin
     this.catalogUrl = options.catalogUrl ?? DEFAULT_CATALOG_URL
     this.environment = options.environment ?? process.env
     this.inspectStaleLocalPlugins = options.inspectStaleLocalPlugins ?? inspectStaleLocalPluginRecovery
@@ -298,15 +302,29 @@ export class RuntimeController {
     const home = this.environment.DSH_HOME ?? join(homedir(), '.dsh')
     await mkdir(home, { recursive: true })
     let backend: RunningBackend
+    let overlayDisposed = false
+    const overlay = await prepareGoalGuardOverlay({
+      runtime,
+      pluginFile: this.goalGuardPlugin,
+      directory: join(this.userData, 'runtime-overlays'),
+    })
+    const cleanup = overlay === undefined ? undefined : async (): Promise<void> => {
+      if (overlayDisposed) return
+      overlayDisposed = true
+      await overlay.dispose()
+    }
     try {
       backend = await startBackend({
         runtime,
         shutdownHook: this.shutdownHook,
         cwd: home,
         env: desktopEnvironment(runtime, this.environment),
+        additionalPatches: overlay === undefined ? [] : [overlay.path],
+        ...(cleanup === undefined ? {} : { cleanup }),
         onOpenSettingsDocument: this.onOpenSettingsDocument,
       })
     } catch (error: unknown) {
+      if (cleanup !== undefined) await cleanup().catch(() => {})
       const diagnostics = error instanceof Error ? error.message : String(error)
       await this.detectRecovery(home, runtime, diagnostics)
       throw error
@@ -314,17 +332,24 @@ export class RuntimeController {
     this.recoveryPlan = undefined
     this.backend = backend
     this.expectedStop = false
-    this.state = await this.store.promote(runtime.manifest.dshVersion)
-    this.currentRuntimeRevision = runtime.manifest.runtimeRevision
-    const cliDirectory = await prepareCliShim(runtime, this.userData)
-    this.update('ready', `DSH ${runtime.manifest.dshVersion} 已启动`)
-    await this.onReady(backend.url, runtime, cliDirectory)
     void backend.done.then((exit) => {
       if (this.backend !== backend || this.expectedStop) return
       this.backend = undefined
       const reason = exit.error?.message ?? `退出码 ${exit.exitCode ?? 'unknown'}`
       this.fail(exit.diagnostics.length === 0 ? `DSH runtime 意外退出：${reason}` : `DSH runtime 意外退出：${reason}\n\n${exit.diagnostics}`)
     })
+    try {
+      this.state = await this.store.promote(runtime.manifest.dshVersion)
+      this.currentRuntimeRevision = runtime.manifest.runtimeRevision
+      const cliDirectory = await prepareCliShim(runtime, this.userData)
+      this.update('ready', `DSH ${runtime.manifest.dshVersion} 已启动`)
+      await this.onReady(backend.url, runtime, cliDirectory)
+    } catch (error) {
+      this.expectedStop = true
+      if (this.backend === backend) this.backend = undefined
+      await backend.stop()
+      throw error
+    }
   }
 
   private async detectRecovery(home: string, runtime: InstalledRuntime, diagnostics: string): Promise<void> {
