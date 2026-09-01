@@ -28,6 +28,7 @@
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "semver": "7.7.4",
+    "tar": "7.5.22",
     "toml-eslint-parser": "1.0.3",
     "yaml": "2.8.3"
   },

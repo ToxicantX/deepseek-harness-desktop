@@ -275,3 +275,67 @@
 - `src/shell-skin-store.ts`：记录/迁移皮肤安装时间，并在市场列表输出前执行分组排序。
 - `progress.md`：追加本轮改动、静态检查和回滚记录。
 - 回滚方式：执行 `git restore --source=HEAD -- src/shell-skin-store.ts` 可回滚本轮代码改动；`progress.md` 按追加式历史记录保留。
+
+## 2026-08-31 - Task: 修复源码型主题缺少客户端构建产物时的安装失败
+### What was done
+- 修复主题固定 commit 只包含源码、未提交 `lib/client.js` 等构建产物时的一键安装：入口解析失败后读取同名同版本的 npm 已构建包。
+- npm 回退严格校验 package、version、gitHead、官方 registry 下载地址和 SHA-512，确认与市场锁定 commit 一致后才解包使用；安装过程不执行主题生命周期脚本。
+- 增加回归测试，覆盖 npm 构建包成功回退和 commit 不一致拒绝两种路径，并用 `dsh-theme-machine@0.1.3` 的固定 commit 做在线解析验证。
+- 补充主题市场安装文档和 tar 解包运行依赖。
+### Testing
+- `pnpm exec vitest run tests/shell-skin-store.spec.ts --maxWorkers=1 --testTimeout=20000`：通过，1 个测试文件、4 个测试。
+- `pnpm exec vitest run --maxWorkers=1 --testTimeout=20000`：通过，12 个测试文件、65 个测试。
+- `pnpm run typecheck`：通过；当前系统 Node.js 22.22.0 低于仓库声明的 Node.js 24，pnpm 输出 engine 警告。
+- `pnpm run build`：通过；桌面壳构建产物已包含 npm 构建包回退逻辑，同样存在上述 Node.js engine 警告。
+- 在线固定版本验证：通过；`yuqisun/dsh-theme-machine` commit `e7e7762e16ff6469fe9153e5d75bac1b37b0ef13` 成功解析同 commit 的 `dsh-theme-machine@0.1.3`，入口为 `./lib/client.js`，bundle 通过 ModuleLoader 注入校验。
+- `git diff --check`：通过。
+- 未执行打包后 Electron UI 的手工安装与启用烟测。
+### Notes
+- `src/shell-skin-store.ts`：增加同 commit npm 已构建包下载、完整性校验、受限解包和入口回退。
+- `tests/shell-skin-store.spec.ts`：增加构建包回退成功及 commit 不一致拒绝的回归测试。
+- `docs/shell-skin-marketplace.md`：记录源码缺少构建产物时的 npm 回退规则和校验边界。
+- `package.json`：增加 tar 解包运行依赖。
+- `pnpm-lock.yaml`：锁定 tar 依赖解析。
+- `progress.md`：追加本轮施工、验证和回滚记录。
+- 回滚点：`70bb46c7758432373c29855466a3515fe2e36618`。执行 `git restore --source=70bb46c7758432373c29855466a3515fe2e36618 -- src/shell-skin-store.ts tests/shell-skin-store.spec.ts docs/shell-skin-marketplace.md package.json pnpm-lock.yaml` 可回滚本轮代码、测试、文档和依赖改动；`progress.md` 按追加式历史记录保留。
+
+## 2026-08-31 - Task: 修复主题清单带 UTF-8 BOM 时的安装失败
+### What was done
+- 修复主题 `package.json` 以 UTF-8 BOM 开头时 `JSON.parse` 抛出语法错误的问题，客户端清单读取现在只移除文件开头的 `U+FEFF` 后再解析。
+- 将源码仓库清单和 npm 构建包清单统一走同一读取入口，避免两条安装路径表现不一致。
+- 增加 BOM 清单回归测试，并用 `nlqh7/dsh-beautify` 的市场固定 commit 做在线解析验证。
+- 补充主题市场清单编码兼容说明。
+### Testing
+- `pnpm exec vitest run tests/shell-skin-store.spec.ts --maxWorkers=1 --testTimeout=20000`：通过，1 个测试文件、5 个测试。
+- `pnpm exec vitest run --maxWorkers=1 --testTimeout=20000`：通过，12 个测试文件、66 个测试。
+- `pnpm run typecheck`：通过；当前系统 Node.js 22.22.0 低于仓库声明的 Node.js 24，pnpm 输出 engine 警告。
+- `pnpm run build`：通过；构建产物已包含 BOM 清单兼容逻辑，同样存在上述 Node.js engine 警告。
+- 在线固定版本验证：通过；`nlqh7/dsh-beautify` commit `e44bcc71f06c9fe54e8b4d4f26ecaa1e05c43d5e` 的 `package.json` 前三字节为 `EF BB BF`，成功解析 `./lib/client.js`，bundle 通过 ModuleLoader 注入校验。
+- `git diff --check`：通过。
+- 未执行打包后 Electron UI 的手工安装与启用烟测。
+### Notes
+- `src/shell-skin-store.ts`：统一读取并兼容带 UTF-8 BOM 的主题客户端清单。
+- `tests/shell-skin-store.spec.ts`：增加 BOM 清单解析回归测试。
+- `docs/shell-skin-marketplace.md`：补充主题清单 BOM 兼容规则。
+- `progress.md`：追加本轮施工、验证和回滚记录。
+- 回滚方式：执行 `git restore -p -- src/shell-skin-store.ts tests/shell-skin-store.spec.ts docs/shell-skin-marketplace.md`，仅选择本轮包含 `readClientManifest`、`UTF-8 BOM` 测试和 BOM 文档段落的三个补丁块；`progress.md` 按追加式历史记录保留。
+
+## 2026-08-31 - Task: 修复主题激活缺少 locale.bind 兼容接口
+### What was done
+- 修复客户端适配上下文只有 `locale.register`、缺少 `locale.bind` 导致主题激活失败的问题。
+- 增加命名空间字典注册、稳定翻译函数、`zh-CN -> zh -> en` 语言回退、占位参数替换和停用时字典恢复。
+- 将多语言兼容实现嵌入实际客户端激活脚本，并增加独立回归测试。
+- 补充主题市场客户端多语言兼容文档。
+### Testing
+- `pnpm exec vitest run tests/skin-market-injector.spec.ts --maxWorkers=1 --testTimeout=20000`：通过，1 个测试文件、2 个测试。
+- `pnpm exec vitest run --maxWorkers=1 --testTimeout=20000`：通过，13 个测试文件、68 个测试。
+- `pnpm run typecheck`：通过；当前系统 Node.js 22.22.0 低于仓库声明的 Node.js 24，pnpm 输出 engine 警告。
+- `pnpm run build`：通过；`lib/main.js` 已包含 `createSkinLocaleAdapter` 及激活脚本嵌入逻辑，同样存在上述 Node.js engine 警告。
+- 真实 Electron 激活烟测：通过；使用 `caisiyang123/dsh-theme-dodger-17` commit `07e35f228bc9ba0db7f964c2bfed3536781d2fae` 的原始 `client.js` 执行适配器，返回 `ok: true`，注册 `dodger-17-day`、`dodger-17-night` 两套主题并选中 `dodger-17-day`。
+- `git diff --check`：通过。
+### Notes
+- `src/skin-market-injector.ts`：增加客户端 `locale.bind`、字典注册、翻译回退和销毁兼容实现。
+- `tests/skin-market-injector.spec.ts`：增加命名空间翻译与激活脚本嵌入回归测试。
+- `docs/shell-skin-marketplace.md`：补充客户端多语言兼容规则。
+- `progress.md`：追加本轮施工、验证和回滚记录。
+- 回滚方式：执行 `git restore -p -- src/skin-market-injector.ts docs/shell-skin-marketplace.md`，仅选择本轮包含 `createSkinLocaleAdapter` 和“客户端多语言兼容”的补丁块，再执行 `Remove-Item -LiteralPath 'tests/skin-market-injector.spec.ts' -Force`；`progress.md` 按追加式历史记录保留。
