@@ -5,6 +5,7 @@ export function installConversationReplayModuleHook(): string {
   const hookKey = '__dshDesktopConversationReplayHook'
   const targetModuleId = '@deepseek-ai/dsh-client-ui-conversation'
   const legacyModuleId = '@deepseek-ai/dsh-desktop-conversation-replay'
+  const moduleFactoryTransforms = new Map()
   const existingHook = globalObject[hookKey]
   if (existingHook?.version === 1) {
     if (typeof existingHook.ensureLoaderAccessor === 'function') existingHook.ensureLoaderAccessor()
@@ -661,6 +662,24 @@ export function installConversationReplayModuleHook(): string {
     return wrapped
   }
 
+  function registerModuleFactoryTransform(moduleId, transform) {
+    if (typeof moduleId !== 'string' || moduleId.length === 0 || typeof transform !== 'function') return false
+    moduleFactoryTransforms.set(moduleId, transform)
+    return true
+  }
+
+  function transformFactory(handoff) {
+    const transform = moduleFactoryTransforms.get(handoff?.id)
+    if (typeof transform !== 'function' || typeof handoff?.factory !== 'function') return handoff
+    try {
+      const factory = transform(handoff.factory)
+      return typeof factory === 'function' && factory !== handoff.factory ? { ...handoff, factory } : handoff
+    } catch (error) {
+      console.error('桌面壳客户端模块转换失败', error)
+      return handoff
+    }
+  }
+
   function wrapLoader(loader) {
     if (loader === undefined || loader === null || (typeof loader !== 'object' && typeof loader !== 'function')) return loader
     const existing = loaderProxies.get(loader)
@@ -679,7 +698,7 @@ export function installConversationReplayModuleHook(): string {
             const queue = Reflect.get(target, 'pendingQueue', target)
             if (Array.isArray(queue)) {
               for (let index = 0; index < queue.length; index += 1) {
-                const handoff = queue[index]
+                const handoff = transformFactory(queue[index])
                 if (handoff?.id === targetModuleId && typeof handoff.factory === 'function') {
                   const factory = wrapFactory(handoff.factory, handoff.id)
                   if (factory !== handoff.factory) targetRegistrations += 1
@@ -689,7 +708,7 @@ export function installConversationReplayModuleHook(): string {
                 } else if (handoff?.id === legacyModuleId && typeof handoff.factory === 'function') {
                   legacySuppressions += 1
                   queue[index] = { ...handoff, factory: () => ({ inject: [], apply() {} }) }
-                }
+                } else queue[index] = handoff
               }
             }
             return Reflect.apply(delegate, target, args)
@@ -703,6 +722,7 @@ export function installConversationReplayModuleHook(): string {
         const existingWrapper = wrappers.get(delegate)
         if (existingWrapper !== undefined) return existingWrapper
         const wrapper = function (handoff) {
+          handoff = transformFactory(handoff)
           if (handoff?.id === targetModuleId && typeof handoff.factory === 'function') {
             targetRegistrations += 1
             return Reflect.apply(delegate, target, [{ ...handoff, factory: wrapFactory(handoff.factory, handoff.id) }])
@@ -797,6 +817,7 @@ export function installConversationReplayModuleHook(): string {
       targetModuleId,
       legacyModuleId,
       createFeature: createConversationReplayFeature,
+      registerModuleFactoryTransform,
       ensureLoaderAccessor,
       get legacySuppressions() { return legacySuppressions },
       get diagnostics() {

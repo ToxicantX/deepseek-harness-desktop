@@ -32,6 +32,10 @@
 
 桌面壳的客户端适配上下文支持 `locale.register(namespace, dictionaries)` 和 `locale.bind(namespace)`。翻译函数会按当前语言、主语言代码和英文的顺序回退，例如 `zh-CN` 会命中 `zh` 字典；同时支持 `{name}` 形式的参数替换。注册返回的销毁函数会在皮肤停用时恢复之前的字典状态。
 
+## 客户端会话兼容
+
+桌面壳的客户端适配上下文提供 `sessions.list.getSnapshot()`、`sessions.list.subscribe()` 和 `sessions.binding(id)`。主题可在没有已选会话时安全启动；桌面运行时的当前会话通知会更新列表快照，供宠物、状态栏等非关键视觉功能使用。适配层未获取到的会话运行细节使用空闲、无错误快照，不阻断主题激活。
+
 ## 验证
 
 ```powershell

@@ -3,6 +3,24 @@ import { registerHooks, type LoadFnOutput, type ModuleHooks } from 'node:module'
 const PI_AI_ENTRY_SUFFIX = '/node_modules/@deepseek-ai/dsh-llm-pi-ai/lib/index.js'
 const DEFAULT_INPUT_DECLARATION = /const DEFAULT_INPUT\s*=\s*\["text"\];/u
 const IMAGE_CAPABLE_DEFAULT_INPUT = 'const DEFAULT_INPUT = ["text", "image"];'
+const REQUEST_HEADERS_DECLARATION = `function requestHeaders(headers) {
+\tconst attribution = attributionHeaders();
+\tconst reserved = new Set(Object.keys(attribution).map((name) => name.toLowerCase()));
+\treturn {
+\t\t...Object.fromEntries(Object.entries(headers ?? {}).filter(([name]) => !reserved.has(name.toLowerCase()))),
+\t\t...attribution
+\t};
+}`
+const USER_AGENT_OVERRIDE_REQUEST_HEADERS = `function requestHeaders(headers) {
+\tconst attribution = attributionHeaders();
+\tconst reserved = new Set(Object.keys(attribution).map((name) => name.toLowerCase()));
+\tconst customUserAgent = Object.entries(headers ?? {}).findLast(([name]) => name.toLowerCase() === "user-agent")?.[1];
+\treturn {
+\t\t...Object.fromEntries(Object.entries(headers ?? {}).filter(([name]) => !reserved.has(name.toLowerCase()))),
+\t\t...attribution,
+\t\t...(customUserAgent === void 0 ? {} : { "user-agent": customUserAgent })
+\t};
+}`
 
 export interface CustomProviderImageTransform {
   source: string
@@ -10,8 +28,10 @@ export interface CustomProviderImageTransform {
 }
 
 export function promoteCustomProviderImageInput(source: string): CustomProviderImageTransform {
-  if (!DEFAULT_INPUT_DECLARATION.test(source)) return { source, changed: false }
-  return { source: source.replace(DEFAULT_INPUT_DECLARATION, IMAGE_CAPABLE_DEFAULT_INPUT), changed: true }
+  let transformed = source
+  transformed = transformed.replace(DEFAULT_INPUT_DECLARATION, IMAGE_CAPABLE_DEFAULT_INPUT)
+  transformed = transformed.replace(REQUEST_HEADERS_DECLARATION, USER_AGENT_OVERRIDE_REQUEST_HEADERS)
+  return { source: transformed, changed: transformed !== source }
 }
 
 function isPiAiEntry(url: string): boolean {

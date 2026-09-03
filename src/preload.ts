@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { installConversationReplayModuleHook } from './conversation-replay-injector.ts'
+import { injectCustomProviderUserAgentFactorySource, installCustomProviderUserAgentHook } from './custom-provider-user-agent-injector.ts'
 import type { RuntimePreference } from './catalog.ts'
 import type { McpEndpointView, McpEntryView, McpList } from './mcp-manager.ts'
 import type { PluginEntry, PluginList, PluginOperationStatus, PluginStartInput, PluginUpdateList } from './plugin-manager.ts'
@@ -8,6 +9,10 @@ import type { SessionRepairAnomalyKind, SessionRepairInspection, SessionRepairRe
 import type { ShellUpdateProgress } from './shell-updater.ts'
 
 contextBridge.executeInMainWorld({ func: installConversationReplayModuleHook })
+contextBridge.executeInMainWorld({
+  func: installCustomProviderUserAgentHook,
+  args: [injectCustomProviderUserAgentFactorySource.toString()],
+})
 
 contextBridge.exposeInMainWorld('dshDesktopFiles', {
   getAbsolutePath: (file: File): string => webUtils.getPathForFile(file),

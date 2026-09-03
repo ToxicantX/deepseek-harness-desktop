@@ -339,3 +339,50 @@
 - `docs/shell-skin-marketplace.md`：补充客户端多语言兼容规则。
 - `progress.md`：追加本轮施工、验证和回滚记录。
 - 回滚方式：执行 `git restore -p -- src/skin-market-injector.ts docs/shell-skin-marketplace.md`，仅选择本轮包含 `createSkinLocaleAdapter` 和“客户端多语言兼容”的补丁块，再执行 `Remove-Item -LiteralPath 'tests/skin-market-injector.spec.ts' -Force`；`progress.md` 按追加式历史记录保留。
+
+## 2026-09-01 - Task: 为自定义提供方增加 User-Agent 请求头复写
+### What was done
+- 在桌面壳的“设置 -> 模型 -> 添加自定义提供方”及已有自定义提供方编辑区增加 `User-Agent` 输入项，创建或保存时通过原配置通道写入 `llm-pi-ai.providers.<Provider ID>.headers.User-Agent`。
+- 编辑时按请求头名称大小写无关的规则回读和替换已有 User-Agent；清空后移除该复写项，同时保留其他自定义请求头。
+- 复用现有 `ModuleLoader` 接管点注入设置界面，并通过 Node 模块加载钩子只转换 DSH 的 `@deepseek-ai/dsh-llm-pi-ai/lib/index.js`；模型请求组装时在默认归因头之后应用自定义 User-Agent，未配置时继续使用 DSH 默认值。
+- 补充设置模块转换、请求头覆盖和共享 Loader 注册测试，并增加功能与 DSH Runtime 升级兼容说明。
+### Testing
+- `pnpm exec vitest run tests/custom-provider-user-agent-injector.spec.ts tests/custom-provider-image-injector.spec.ts tests/conversation-replay-shell-injector.spec.ts --maxWorkers=1 --testTimeout=20000`：通过，3 个测试文件、15 个测试。
+- `pnpm exec vitest run --maxWorkers=1 --testTimeout=20000`：通过，14 个测试文件、71 个测试。
+- `pnpm run typecheck`：通过；当前系统 Node.js 22.22.0 低于仓库声明的 Node.js 24，pnpm 输出 engine 警告。
+- `pnpm run build`：通过；`lib/preload.cjs` 包含设置模块 UI 转换及共享 Loader 注册，`lib/shutdown-hook.js` 包含模型请求 User-Agent 覆盖逻辑，同样存在上述 Node.js engine 警告。
+- DSH `0.1.1-rc.2` 上游源码静态转换：通过；设置模块创建/编辑字段及请求模块覆盖点均成功命中并重建。
+- 真实 Electron/DSH 隔离烟测：通过；创建 `ua-smoke` 后配置写入 `headers.User-Agent: DSH-UA-Smoke/1.0`，编辑页成功回读该值，本地 OpenAI-compatible Mock 网关收到 `user-agent: DSH-UA-Smoke/1.0`。
+- 清空复写并再次请求：通过；配置中的 User-Agent 已移除，Mock 网关收到 DSH 默认 `user-agent: deepseek-harness/0.1.1-rc.2 (+https://github.com/deepseek-ai/deepseek-harness)`。
+- 隔离 Electron、DSH Backend、Mock 服务及烟测临时目录/脚本均已停止并清理；未触碰用户正常运行的已安装应用进程与 `C:\Users\karma617\.dsh`。
+- `git diff --check`：通过。
+### Notes
+- `src/conversation-replay-injector.ts`：为现有共享 `ModuleLoader` 接管点增加按模块 ID 注册工厂转换的入口。
+- `src/custom-provider-user-agent-injector.ts`：新增设置模块工厂转换，注入自定义提供方 User-Agent 创建、编辑、回读和清空逻辑。
+- `src/custom-provider-image-injector.ts`：在既有精准 Node 模块转换中增加模型请求 User-Agent 覆盖逻辑。
+- `src/preload.ts`：在页面主世界注册自定义提供方 User-Agent 设置注入。
+- `tests/custom-provider-user-agent-injector.spec.ts`：新增设置模块转换、上游不兼容回退及共享 Loader 注册测试。
+- `tests/custom-provider-image-injector.spec.ts`：新增自定义 User-Agent 覆盖、大小写重复取最后值和默认归因头保留测试。
+- `docs/custom-provider-user-agent.md`：记录业务行为、注入落点、验证入口和 Runtime 升级兼容风险。
+- `progress.md`：追加本轮施工、验证、清理和回滚记录。
+- 回滚点：`97527008f75de6cb0ab64d129eaa64fd850219cc`。执行 `git restore --source=97527008f75de6cb0ab64d129eaa64fd850219cc -- src/conversation-replay-injector.ts src/custom-provider-image-injector.ts src/preload.ts tests/custom-provider-image-injector.spec.ts`，再执行 `Remove-Item -LiteralPath 'src\custom-provider-user-agent-injector.ts','tests\custom-provider-user-agent-injector.spec.ts','docs\custom-provider-user-agent.md' -Force` 可回滚代码、测试和文档；`progress.md` 按追加式历史记录保留，通过后续追加更正记录处理。
+
+## 2026-09-02 - Task: 修复主题激活缺少 sessions.list 兼容服务
+### What was done
+- 修复客户端适配上下文缺少 `ctx.sessions`，导致依赖 `ctx.sessions.list` 的主题在激活阶段直接报错的问题。
+- 增加可订阅的会话列表快照、当前会话更新和安全的 `sessions.binding(id).session` 空闲回退；未取得会话运行细节时不阻断主题主体与视觉组件激活。
+- 接入桌面运行时已有的当前会话消息，并对消息来源、类型和会话 ID 格式进行校验；停用主题时解除监听。
+- 增加会话适配器及激活脚本嵌入回归测试，并补充主题市场兼容文档。
+### Testing
+- `pnpm exec vitest run tests/skin-market-injector.spec.ts --maxWorkers=1 --testTimeout=20000`：通过，1 个测试文件、4 个测试。
+- `pnpm exec vitest run --maxWorkers=1 --testTimeout=20000`：通过，14 个测试文件、73 个测试。
+- `pnpm run typecheck`：通过；当前系统 Node.js 22.22.0 低于仓库声明的 Node.js 24，pnpm 输出 engine 警告。
+- `pnpm run build`：通过；`lib/main.js` 已包含 `createSkinSessionsAdapter`、`sessions` 上下文注入和 `context.get('sessions')` 回退，同样存在上述 Node.js engine 警告。
+- 真实 Electron 激活烟测：通过；校验并解包 `@zsy1126/dsh-rick-and-morty@0.1.0` 的市场 SHA-512 固定产物，使用原始 `lib/client.js` 执行适配器返回 `ok: true`，注入 3 个样式节点并应用 76 个主题 token，未再出现读取 `sessions.list` 的异常。
+- `git diff --check -- src/skin-market-injector.ts tests/skin-market-injector.spec.ts docs/shell-skin-marketplace.md`：通过。
+### Notes
+- `src/skin-market-injector.ts`：增加主题客户端会话服务适配、当前会话消息同步和销毁清理。
+- `tests/skin-market-injector.spec.ts`：增加会话列表、binding 回退及激活脚本嵌入测试。
+- `docs/shell-skin-marketplace.md`：记录客户端会话兼容范围及空闲回退行为。
+- `progress.md`：追加本轮施工、验证和回滚记录。
+- 回滚方式：执行 `git restore --source=HEAD -- src/skin-market-injector.ts tests/skin-market-injector.spec.ts docs/shell-skin-marketplace.md` 可回滚本轮代码、测试和文档改动；`progress.md` 按追加式历史记录保留。

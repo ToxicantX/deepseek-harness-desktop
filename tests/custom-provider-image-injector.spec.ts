@@ -4,13 +4,22 @@ import { installCustomProviderImageHook, promoteCustomProviderImageInput } from 
 
 const originalDefault = 'const DEFAULT_INPUT = ["text"];'
 const promotedDefault = 'const DEFAULT_INPUT = ["text", "image"];'
+const originalHeaders = `function requestHeaders(headers) {
+\tconst attribution = attributionHeaders();
+\tconst reserved = new Set(Object.keys(attribution).map((name) => name.toLowerCase()));
+\treturn {
+\t\t...Object.fromEntries(Object.entries(headers ?? {}).filter(([name]) => !reserved.has(name.toLowerCase()))),
+\t\t...attribution
+\t};
+}`
 
 describe('custom provider image injector', () => {
   it('promotes only the omitted pi-ai input default', () => {
-    const transformed = promoteCustomProviderImageInput(originalDefault)
+    const transformed = promoteCustomProviderImageInput(originalDefault + '\n' + originalHeaders)
 
     expect(transformed.changed).toBe(true)
-    expect(transformed.source).toBe(promotedDefault)
+    expect(transformed.source).toContain(promotedDefault)
+    expect(transformed.source).toContain('{ "user-agent": customUserAgent }')
     const resolveInput = new Function(
       'source',
       'entry',
@@ -30,6 +39,16 @@ describe('custom provider image injector', () => {
     expect(resolveInput({ defaultInput: ['text'] }, {}, undefined, declaredInput)).toEqual(['text'])
     expect(resolveInput({}, { input: ['text'] }, undefined, declaredInput)).toEqual(['text'])
     expect(resolveInput({}, {}, { input: ['text'] }, declaredInput)).toEqual(['text'])
+    const requestHeaders = new Function(
+      'attributionHeaders',
+      `${transformed.source}; return requestHeaders`,
+    )(() => ({ 'user-agent': 'DeepSeek-Harness/default', 'x-title': 'DeepSeek Harness' })) as (headers: Record<string, string>) => Record<string, string>
+    expect(requestHeaders({ 'User-Agent': 'Custom-UA/1.0', 'x-gateway': 'yes' })).toEqual({
+      'user-agent': 'Custom-UA/1.0',
+      'x-gateway': 'yes',
+      'x-title': 'DeepSeek Harness',
+    })
+    expect(requestHeaders({ 'user-agent': 'old', 'User-Agent': 'Custom-UA/2.0' })['user-agent']).toBe('Custom-UA/2.0')
     expect(promoteCustomProviderImageInput('const DEFAULT_INPUT = ["text", "image"];')).toEqual({
       source: 'const DEFAULT_INPUT = ["text", "image"];',
       changed: false,
@@ -46,13 +65,14 @@ describe('custom provider image injector', () => {
     installCustomProviderImageHook(register)
     expect(load).toBeTypeOf('function')
 
-    const nextLoad = vi.fn(() => ({ format: 'module', source: originalDefault }))
+    const nextLoad = vi.fn(() => ({ format: 'module', source: originalDefault + '\n' + originalHeaders }))
     const context = { conditions: [], format: 'module', importAttributes: {} }
     const target = 'file:///runtime/node_modules/.pnpm/pkg/node_modules/@deepseek-ai/dsh-llm-pi-ai/lib/index.js'
     const transformed = load?.(target, context, nextLoad)
-    expect(transformed?.source).toBe(promotedDefault)
+    expect(transformed?.source).toContain(promotedDefault)
+    expect(transformed?.source).toContain('{ "user-agent": customUserAgent }')
 
     const unrelated = load?.('file:///runtime/node_modules/other/lib/index.js', context, nextLoad)
-    expect(unrelated?.source).toBe(originalDefault)
+    expect(unrelated?.source).toBe(originalDefault + '\n' + originalHeaders)
   })
 })
