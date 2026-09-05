@@ -796,7 +796,7 @@ async function startApplication(): Promise<void> {
   petWindow.setMainVisible(mainWindow.isVisible())
   createTray()
   await mainWindow.loadFile(setupPage)
-  const store = new RuntimeStore(runtimeRoot())
+  const store = new RuntimeStore(runtimeRoot(), { sourceResourcesDirectory: join(app.getAppPath(), 'runtime') })
   shellSkinStore = new ShellSkinStore(join(app.getPath('userData'), 'skins'), undefined, progress => {
     if (mainWindow !== undefined && !mainWindow.isDestroyed()) mainWindow.webContents.send('shell-skins:progress', progress)
   })
@@ -964,9 +964,9 @@ ipcMain.handle('pet:respond', async (event, approvalId: unknown, outcome: unknow
   return events.decide({ approvalId, outcome })
 })
 
-ipcMain.handle('runtime:get-view', (event) => {
-  runtimeClient(event)
-  return latestView
+ipcMain.handle('runtime:get-view', async (event) => {
+  const runtimeController = runtimeClient(event)
+  return runtimeController.refreshCatalog()
 })
 ipcMain.handle('runtime:retry', async (event) => {
   const runtimeController = runtimeClient(event)

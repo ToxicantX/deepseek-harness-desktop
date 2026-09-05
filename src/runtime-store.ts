@@ -14,6 +14,11 @@ import {
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import extract from 'extract-zip'
 import {
+  installRuntimeFromSource,
+  type SourceInstallProgress,
+  type SourceRuntimeInstallerOptions,
+} from './source-runtime-installer.ts'
+import {
   DEFAULT_CATALOG_URL,
   parseRuntimeCatalog,
   type RuntimeCatalog,
@@ -61,9 +66,19 @@ export interface InstalledRuntime {
 }
 
 export interface DownloadProgress {
+  stage: 'downloading'
   received: number
   total: number
 }
+
+export type RuntimeInstallProgress = DownloadProgress | SourceInstallProgress
+
+export interface RuntimeStoreOptions {
+  sourceResourcesDirectory?: string
+  sourceInstaller?: (options: SourceRuntimeInstallerOptions) => Promise<void>
+}
+
+class RuntimeArchiveUnavailableError extends Error {}
 
 function stateRecord(value: unknown): RuntimeState {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('runtime state must be an object')
@@ -154,7 +169,12 @@ export class RuntimeStore {
   readonly stateFile: string
   readonly catalogFile: string
 
-  constructor(readonly root: string) {
+  private readonly sourceResourcesDirectory: string | undefined
+  private readonly sourceInstaller: (options: SourceRuntimeInstallerOptions) => Promise<void>
+
+  constructor(readonly root: string, options: RuntimeStoreOptions = {}) {
+    this.sourceResourcesDirectory = options.sourceResourcesDirectory
+    this.sourceInstaller = options.sourceInstaller ?? installRuntimeFromSource
     this.runtimesDirectory = join(root, 'runtimes')
     this.downloadsDirectory = join(root, 'downloads')
     this.stateFile = join(root, 'state.json')
@@ -213,7 +233,7 @@ export class RuntimeStore {
 
   async install(
     manifest: RuntimeManifest,
-    onProgress: (progress: DownloadProgress) => void = () => {},
+    onProgress: (progress: RuntimeInstallProgress) => void = () => {},
   ): Promise<InstalledRuntime> {
     const existing = await this.installed(manifest.dshVersion)
     if (existing !== undefined) {
@@ -229,10 +249,26 @@ export class RuntimeStore {
     const staging = join(this.runtimesDirectory, `${manifest.dshVersion}.staging-${randomUUID()}`)
     let backupPresent = false
     try {
-      await this.download(manifest, archiveFile, onProgress)
-      await mkdir(staging, { recursive: true })
-      await extract(archiveFile, { dir: staging, onEntry: validateRuntimeArchiveEntry })
-      await writeFile(join(staging, MANIFEST_FILE), `${JSON.stringify(manifest, undefined, 2)}\n`, 'utf8')
+      let extractedArchive = false
+      try {
+        await this.download(manifest, archiveFile, onProgress)
+        await mkdir(staging, { recursive: true })
+        await extract(archiveFile, { dir: staging, onEntry: validateRuntimeArchiveEntry })
+        await writeFile(join(staging, MANIFEST_FILE), `${JSON.stringify(manifest, undefined, 2)}\n`, 'utf8')
+        extractedArchive = true
+      } catch (error: unknown) {
+        if (!(error instanceof RuntimeArchiveUnavailableError)) throw error
+        if (this.sourceResourcesDirectory === undefined) {
+          throw new Error(`No prebuilt runtime is available for DSH ${manifest.dshVersion}, and source installation resources are unavailable`)
+        }
+        await this.sourceInstaller({
+          manifest,
+          destination: staging,
+          workDirectory: join(this.downloadsDirectory, `${manifest.dshVersion}.source-${randomUUID()}`),
+          resourcesDirectory: this.sourceResourcesDirectory,
+          onProgress,
+        })
+      }
       const hadExisting = await pathExists(finalDirectory)
       if (hadExisting) {
         await rename(finalDirectory, backupDirectory)
@@ -240,7 +276,7 @@ export class RuntimeStore {
       }
       try {
         await rename(staging, finalDirectory)
-        await this.materializeLinks(finalDirectory)
+        if (extractedArchive) await this.materializeLinks(finalDirectory)
         const installed = this.resolveInstalled(finalDirectory, manifest)
         await Promise.all([
           access(installed.nodeExecutable),
@@ -324,13 +360,14 @@ export class RuntimeStore {
   private async download(
     manifest: RuntimeManifest,
     destination: string,
-    onProgress: (progress: DownloadProgress) => void,
+    onProgress: (progress: RuntimeInstallProgress) => void,
   ): Promise<void> {
     const response = await fetch(manifest.archive.url, {
       headers: { accept: 'application/octet-stream', 'user-agent': 'deepseek-harness-desktop' },
       redirect: 'follow',
       signal: AbortSignal.timeout(30 * 60_000),
     })
+    if (response.status === 404) throw new RuntimeArchiveUnavailableError('runtime archive is unavailable')
     if (!response.ok || response.body === null) {
       throw new Error(`runtime download failed with HTTP ${response.status}`)
     }
@@ -346,7 +383,7 @@ export class RuntimeStore {
         if (received > manifest.archive.size) throw new Error('runtime download exceeded its declared size')
         hash.update(result.value)
         await file.write(result.value)
-        onProgress({ received, total: manifest.archive.size })
+        onProgress({ stage: 'downloading', received, total: manifest.archive.size })
       }
     } finally {
       await file.close()

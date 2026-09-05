@@ -76,6 +76,8 @@ describe('runtime startup UI contract', () => {
     expect(preload).toContain("{ mode: 'latest-compatible' }")
     expect(preload).toContain("{ mode: 'pinned', version: runtimeDraftVersion as string }")
     expect(preload).toContain("ipcRenderer.invoke('runtime:set-preference', preference)")
+    expect(preload).toContain("ipcRenderer.invoke('runtime:get-view')")
+    expect(main).toContain('return runtimeController.refreshCatalog()')
     expect(preload).toContain('select.disabled = busy || !pinned || availableVersions.length === 0')
     expect(preload).toContain('runtimePreferenceMatches(view)')
     expect(preload).toContain("startupRetry.hidden = runtimeManagerMode || view.phase !== 'error'")

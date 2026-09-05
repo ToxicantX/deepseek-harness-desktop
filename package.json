@@ -67,6 +67,7 @@
       "assets/*",
       "assets/pet-character/runtime/*.png",
       "resources/goal-no-progress-guard/index.js",
+      "runtime/**/*",
       "package.json"
     ],
     "win": {

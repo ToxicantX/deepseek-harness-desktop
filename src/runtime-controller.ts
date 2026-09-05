@@ -129,6 +129,18 @@ export class RuntimeController {
     return this.enqueue(async () => { await this.boot() })
   }
 
+  refreshCatalog(): Promise<RuntimeView> {
+    return this.enqueueResult(async () => {
+      const loaded = await this.store.loadCatalog(this.catalogUrl)
+      this.catalog = loaded.catalog
+      this.cachedCatalog = loaded.cached
+      this.state = await this.store.readState()
+      await this.refreshInstalledVersions()
+      this.emit()
+      return this.snapshot()
+    })
+  }
+
   recoverStaleLocalPlugins(): Promise<void> {
     return this.enqueue(async () => {
       const recovery = this.recoveryPlan
@@ -228,8 +240,12 @@ export class RuntimeController {
   }
 
   private enqueue(operation: () => Promise<void>): Promise<void> {
+    return this.enqueueResult(operation)
+  }
+
+  private enqueueResult<T>(operation: () => Promise<T>): Promise<T> {
     const next = this.pending.catch(() => {}).then(operation)
-    this.pending = next
+    this.pending = next.then(() => {}, () => {})
     return next
   }
 
@@ -255,7 +271,11 @@ export class RuntimeController {
         this.update('downloading', `正在下载 DSH ${selected.dshVersion}`)
         try {
           target = await this.store.install(selected, progress => {
-            this.progress = progress
+            this.progress = { received: progress.received, total: progress.total }
+            if (progress.stage === 'cloning') this.message = `正在克隆 DSH ${selected.dshVersion} 源码`
+            else if (progress.stage === 'installing') this.message = `正在安装 DSH ${selected.dshVersion} 构建依赖`
+            else if (progress.stage === 'building') this.message = `正在构建 DSH ${selected.dshVersion}`
+            else if (progress.stage === 'assembling') this.message = `正在准备 DSH ${selected.dshVersion} Runtime`
             this.emit()
           })
           this.installedVersions.add(selected.dshVersion)
