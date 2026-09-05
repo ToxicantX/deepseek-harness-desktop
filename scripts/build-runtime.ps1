@@ -49,7 +49,7 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'Upstream DSH workspace installation failed.' }
   pnpm run build
   if ($LASTEXITCODE -ne 0) { throw 'Upstream DSH workspace build failed.' }
-  pnpm --filter '@deepseek-ai/dsh' deploy --prod $DshPackage
+  pnpm --filter '@deepseek-ai/dsh' deploy --prod --legacy $DshPackage
   if ($LASTEXITCODE -ne 0) { throw 'Upstream DSH runtime deployment failed.' }
 } finally {
   Pop-Location
