@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { readFileSync } from 'node:fs'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
@@ -75,11 +75,27 @@ describe('Runtime release scripts', () => {
   it('builds and deploys the cloned DSH workspace without resolving the CLI from npm', () => {
     expect(buildScript).toContain('pnpm install --frozen-lockfile')
     expect(buildScript).toContain('pnpm run build')
-    expect(buildScript).toContain("pnpm --filter '@deepseek-ai/dsh' deploy --prod $DshPackage")
+    expect(buildScript).toContain("pnpm --filter '@deepseek-ai/dsh' deploy --prod --legacy $DshPackage")
+    expect(buildScript).toContain("normalize-runtime-dependencies.mjs') $DshPackage")
     expect(buildScript).toContain('"@deepseek-ai/dsh": "file:$($DshPackage.Replace(')
     expect(buildScript).not.toContain('"@deepseek-ai/dsh": "$DshVersion"')
     expect(buildScript).toContain('node_modules/@deepseek-ai/dsh/package.json')
     expect(buildScript).toContain('Installed DSH version $InstalledVersion does not match $DshVersion.')
+  })
+
+  it('normalizes deployed workspace dependencies and rejects missing packages', async () => {
+    const directory = await fixtureDirectory()
+    const packageA = join(directory, 'node_modules', 'a')
+    const packageB = join(directory, 'node_modules', 'b')
+    await mkdir(packageA, { recursive: true })
+    await mkdir(packageB, { recursive: true })
+    await writeFile(join(packageA, 'package.json'), JSON.stringify({ name: 'a', version: '1.0.0', dependencies: { b: 'workspace:^' } }))
+    await writeFile(join(packageB, 'package.json'), JSON.stringify({ name: 'b', version: '2.0.0' }))
+    await execFileAsync(process.execPath, [resolve('scripts/normalize-runtime-dependencies.mjs'), directory])
+    expect(JSON.parse(await readFile(join(packageA, 'package.json'), 'utf8')).dependencies.b).toBe('2.0.0')
+
+    await writeFile(join(packageA, 'package.json'), JSON.stringify({ name: 'a', version: '1.0.0', dependencies: { missing: 'workspace:*' } }))
+    await expect(execFileAsync(process.execPath, [resolve('scripts/normalize-runtime-dependencies.mjs'), directory])).rejects.toThrow('Unable to normalize runtime workspace dependencies')
   })
 
   it('does not package the goal guard into the Runtime', () => {

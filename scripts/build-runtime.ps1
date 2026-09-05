@@ -51,6 +51,8 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'Upstream DSH workspace build failed.' }
   pnpm --filter '@deepseek-ai/dsh' deploy --prod --legacy $DshPackage
   if ($LASTEXITCODE -ne 0) { throw 'Upstream DSH runtime deployment failed.' }
+  node (Join-Path $PSScriptRoot 'normalize-runtime-dependencies.mjs') $DshPackage
+  if ($LASTEXITCODE -ne 0) { throw 'Upstream DSH runtime workspace dependency normalization failed.' }
 } finally {
   Pop-Location
 }
