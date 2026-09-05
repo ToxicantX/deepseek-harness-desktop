@@ -32,11 +32,20 @@ await visit(root)
 let changed = 0
 const unresolved = []
 for (const { path, packageJson } of manifests) {
+  const isRootManifest = path === join(root, 'package.json')
   for (const section of ['dependencies', 'optionalDependencies', 'devDependencies', 'peerDependencies']) {
     for (const [name, specifier] of Object.entries(packageJson[section] ?? {})) {
       if (typeof specifier !== 'string' || !specifier.startsWith('workspace:')) continue
       const version = packageVersions.get(name)
-      if (!version) { unresolved.push(name + ' (' + specifier + ') in ' + path); continue }
+      if (!version) {
+        if (isRootManifest && section === 'devDependencies') {
+          delete packageJson[section][name]
+          changed++
+          continue
+        }
+        unresolved.push(name + ' (' + specifier + ') in ' + path)
+        continue
+      }
       packageJson[section][name] = version
       changed++
     }

@@ -98,6 +98,24 @@ describe('Runtime release scripts', () => {
     await expect(execFileAsync(process.execPath, [resolve('scripts/normalize-runtime-dependencies.mjs'), directory])).rejects.toThrow('Unable to normalize runtime workspace dependencies')
   })
 
+  it('normalizes nested manifests and removes unresolved root workspace dev dependencies', async () => {
+    const directory = await fixtureDirectory()
+    const nested = join(directory, 'node_modules', 'a', 'node_modules', 'nested')
+    const packageB = join(directory, 'node_modules', 'b')
+    await mkdir(nested, { recursive: true })
+    await mkdir(packageB, { recursive: true })
+    await writeFile(join(directory, 'package.json'), JSON.stringify({ name: 'dsh-package', version: '1.0.0', dependencies: { a: '1.0.0' }, devDependencies: { 'workspace-only-test': 'workspace:*' } }))
+    await writeFile(join(nested, 'package.json'), JSON.stringify({ name: 'nested', version: '1.0.0', dependencies: { b: 'workspace:^' } }))
+    await writeFile(join(packageB, 'package.json'), JSON.stringify({ name: 'b', version: '2.0.0' }))
+    await execFileAsync(process.execPath, [resolve('scripts/normalize-runtime-dependencies.mjs'), directory])
+    const rootManifest = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8'))
+    const nestedManifest = JSON.parse(await readFile(join(nested, 'package.json'), 'utf8'))
+    expect(rootManifest.devDependencies).toEqual({})
+    expect(nestedManifest.dependencies.b).toBe('2.0.0')
+    expect(JSON.stringify(rootManifest)).not.toContain('workspace:')
+    expect(JSON.stringify(nestedManifest)).not.toContain('workspace:')
+  })
+
   it('does not package the goal guard into the Runtime', () => {
     expect(buildScript).not.toContain('GoalGuard')
     expect(buildScript).not.toContain('goal-no-progress-guard')
