@@ -72,6 +72,16 @@ describe('Runtime release scripts', () => {
     expect(upgraded.releases).toEqual([revisionTwo])
   })
 
+  it('builds and deploys the cloned DSH workspace without resolving the CLI from npm', () => {
+    expect(buildScript).toContain('pnpm install --frozen-lockfile')
+    expect(buildScript).toContain('pnpm run build')
+    expect(buildScript).toContain("pnpm --filter '@deepseek-ai/dsh' deploy --prod $DshPackage")
+    expect(buildScript).toContain('"@deepseek-ai/dsh": "file:$($DshPackage.Replace(')
+    expect(buildScript).not.toContain('"@deepseek-ai/dsh": "$DshVersion"')
+    expect(buildScript).toContain('node_modules/@deepseek-ai/dsh/package.json')
+    expect(buildScript).toContain('Installed DSH version $InstalledVersion does not match $DshVersion.')
+  })
+
   it('does not package the goal guard into the Runtime', () => {
     expect(buildScript).not.toContain('GoalGuard')
     expect(buildScript).not.toContain('goal-no-progress-guard')

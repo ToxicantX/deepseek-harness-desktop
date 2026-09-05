@@ -19,6 +19,7 @@ $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 $Work = Join-Path $OutputDirectory 'work'
 $Source = Join-Path $Work 'source'
 $Runtime = Join-Path $Work 'runtime'
+$DshPackage = Join-Path $Work 'dsh-package'
 $ArchiveRuntime = Join-Path $Work 'archive-runtime'
 $Tools = Join-Path $Runtime 'tools'
 $RepositoryRoot = Split-Path $PSScriptRoot -Parent
@@ -42,6 +43,17 @@ if ($DeclaredVersion -ne $DshVersion) {
 }
 
 $App = Join-Path $Runtime 'app'
+Push-Location $Source
+try {
+  pnpm install --frozen-lockfile
+  if ($LASTEXITCODE -ne 0) { throw 'Upstream DSH workspace installation failed.' }
+  pnpm run build
+  if ($LASTEXITCODE -ne 0) { throw 'Upstream DSH workspace build failed.' }
+  pnpm --filter '@deepseek-ai/dsh' deploy --prod $DshPackage
+  if ($LASTEXITCODE -ne 0) { throw 'Upstream DSH runtime deployment failed.' }
+} finally {
+  Pop-Location
+}
 $RepairPlugin = Join-Path $App 'plugins/session-repair'
 $PetBridgePlugin = Join-Path $App 'plugins/pet-bridge'
 New-Item $App -ItemType Directory -Force | Out-Null
@@ -57,7 +69,7 @@ Copy-Item $DesktopPatchSource (Join-Path $App 'desktop.patch.yml') -Force
   "private": true,
   "type": "module",
   "dependencies": {
-    "@deepseek-ai/dsh": "$DshVersion",
+    "@deepseek-ai/dsh": "file:$($DshPackage.Replace('\', '/'))",
     "@deepseek-ai/dsh-desktop-session-repair": "file:./plugins/session-repair",
     "@deepseek-ai/dsh-desktop-pet-bridge": "file:./plugins/pet-bridge"
   }
@@ -80,7 +92,7 @@ allowBuilds:
 Push-Location $App
 try {
   pnpm install --prod --no-frozen-lockfile
-  if ($LASTEXITCODE -ne 0) { throw 'Published DSH runtime installation failed.' }
+  if ($LASTEXITCODE -ne 0) { throw 'Desktop runtime plugin installation failed.' }
   $DshManifest = Join-Path $App 'node_modules/@deepseek-ai/dsh/package.json'
   $InstalledVersion = node -e "const p=require(process.argv[1]); process.stdout.write(p.version)" $DshManifest
   if ($InstalledVersion -ne $DshVersion) { throw "Installed DSH version $InstalledVersion does not match $DshVersion." }
