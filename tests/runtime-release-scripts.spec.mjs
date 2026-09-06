@@ -77,6 +77,8 @@ describe('Runtime release scripts', () => {
     expect(buildScript).toContain('pnpm run build')
     expect(buildScript).toContain("$DshPackage = Join-Path $App 'node_modules/@deepseek-ai/dsh'")
     expect(buildScript).toContain("pnpm --filter '@deepseek-ai/dsh' deploy --prod --legacy $DshPackage")
+    expect(buildScript.indexOf("prepare-runtime-deploy.mjs') $Source")).toBeGreaterThan(buildScript.indexOf('pnpm run build'))
+    expect(buildScript.indexOf("prepare-runtime-deploy.mjs') $Source")).toBeLessThan(buildScript.indexOf("pnpm --filter '@deepseek-ai/dsh' deploy"))
     expect(buildScript).toContain("normalize-runtime-dependencies.mjs') $DshPackage")
     expect(buildScript).not.toContain('Move-Item $DshPackage')
     expect(buildScript).toContain('"@deepseek-ai/dsh": "file:./node_modules/@deepseek-ai/dsh"')
@@ -109,6 +111,89 @@ describe('Runtime release scripts', () => {
       target: 'app/node_modules/.pnpm/package@1.0.0/node_modules/package',
       kind: 'junction',
     })
+  })
+
+  it('deploys link overrides as self-contained packages before archiving', async () => {
+    const directory = await fixtureDirectory()
+    const source = join(directory, 'source')
+    const runtime = join(directory, 'runtime')
+    const deployed = join(runtime, 'app', 'node_modules', '@deepseek-ai', 'dsh')
+    const archive = join(directory, 'archive')
+    const cli = join(source, 'apps', 'cli')
+    const vendor = join(source, 'vendor', 'schemastery')
+    const dependency = join(source, 'vendor', 'cosmokit')
+    await mkdir(cli, { recursive: true })
+    await mkdir(vendor, { recursive: true })
+    await mkdir(dependency, { recursive: true })
+    await writeFile(join(source, 'package.json'), JSON.stringify({ private: true }))
+    await writeFile(join(source, 'pnpm-workspace.yaml'), [
+      'packages: [apps/*, vendor/*]',
+      'linkWorkspacePackages: true',
+      'overrides:',
+      "  '@deepseek-ai/schemastery': link:vendor/schemastery",
+      "  '@deepseek-ai/cosmokit': link:vendor/cosmokit",
+      '',
+    ].join('\n'))
+    await writeFile(join(cli, 'package.json'), JSON.stringify({
+      name: '@deepseek-ai/dsh', version: '1.0.0',
+      dependencies: { '@deepseek-ai/schemastery': 'workspace:*' },
+    }))
+    await writeFile(join(vendor, 'package.json'), JSON.stringify({
+      name: '@deepseek-ai/schemastery', version: '1.0.0', main: 'index.js',
+      dependencies: { '@deepseek-ai/cosmokit': '^1.0.0' },
+    }))
+    await writeFile(join(vendor, 'index.js'), "module.exports = require('@deepseek-ai/cosmokit')\n")
+    await writeFile(join(dependency, 'package.json'), JSON.stringify({
+      name: '@deepseek-ai/cosmokit', version: '1.0.0', main: 'index.js',
+    }))
+    await writeFile(join(dependency, 'index.js'), 'module.exports = 42\n')
+    const pnpm = process.env.npm_execpath
+    expect(pnpm, 'run this integration test with pnpm test').toBeTruthy()
+    const command = pnpm.endsWith('.exe') ? pnpm : process.execPath
+    const prefix = pnpm.endsWith('.exe') ? [] : [pnpm]
+    const runPnpm = args => execFileAsync(command, [...prefix, ...args], {
+      cwd: source, env: { ...process.env, CI: 'true' }, timeout: 60000,
+    })
+    await runPnpm(['install', '--offline', '--ignore-scripts', '--no-frozen-lockfile'])
+    await mkdir(resolve(deployed, '..'), { recursive: true })
+    await runPnpm(['--filter', '@deepseek-ai/dsh', 'deploy', '--prod', '--legacy', deployed])
+    await expect(execFileAsync(process.execPath, [
+      resolve('scripts/prepare-runtime-archive.mjs'), runtime, archive,
+    ])).rejects.toThrow('runtime link escapes archive root:')
+    await rm(runtime, { recursive: true, force: true })
+    await execFileAsync(process.execPath, [resolve('scripts/prepare-runtime-deploy.mjs'), source])
+    await mkdir(resolve(deployed, '..'), { recursive: true })
+    await runPnpm(['--filter', '@deepseek-ai/dsh', 'deploy', '--prod', '--legacy', deployed])
+    await execFileAsync(process.execPath, [resolve('scripts/prepare-runtime-archive.mjs'), runtime, archive])
+    await rm(source, { recursive: true, force: true })
+    const { stdout } = await execFileAsync(process.execPath, ['-e',
+      "console.log(require(require.resolve('@deepseek-ai/schemastery', { paths: [process.argv[1]] })))", deployed,
+    ])
+    expect(stdout.trim()).toBe('42')
+    const map = JSON.parse(await readFile(join(archive, 'runtime-links.json'), 'utf8'))
+    expect(map.links.some(link => link.path.endsWith('/@deepseek-ai/schemastery'))).toBe(true)
+    await rm(runtime, { recursive: true, force: true })
+    for (const link of map.links) {
+      await mkdir(resolve(archive, link.path, '..'), { recursive: true })
+      await symlink(resolve(archive, link.target), resolve(archive, link.path), 'junction')
+    }
+    const installed = await execFileAsync(process.execPath, ['-e',
+      "console.log(require(require.resolve('@deepseek-ai/schemastery', { paths: [process.argv[1]] })))",
+      join(archive, 'app', 'node_modules', '@deepseek-ai', 'dsh'),
+    ])
+    expect(installed.stdout.trim()).toBe('42')
+  }, 120000)
+
+  it('rejects links to files outside the runtime instead of bundling them', async () => {
+    const directory = await fixtureDirectory()
+    const runtime = join(directory, 'runtime')
+    const outside = join(directory, 'outside')
+    await mkdir(runtime)
+    await mkdir(outside)
+    await symlink(outside, join(runtime, 'external'), 'junction')
+    await expect(execFileAsync(process.execPath, [
+      resolve('scripts/prepare-runtime-archive.mjs'), runtime, join(directory, 'archive'),
+    ])).rejects.toThrow('runtime link escapes archive root: external')
   })
 
   it('removes workspace dependencies from every manifest section and preserves ordinary specs', async () => {
