@@ -45,8 +45,10 @@ async function cleanupStale(directory: string): Promise<void> {
   cleanupRuns.set(key, run)
   try {
     await run
-  } finally {
+    // Keep the completed startup barrier so later preparations cannot delete active overlays.
+  } catch (error) {
     if (cleanupRuns.get(key) === run) cleanupRuns.delete(key)
+    throw error
   }
 }
 

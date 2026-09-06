@@ -107,4 +107,13 @@ describe('prepareGoalGuardOverlay', () => {
     await expect(access(second!.path)).resolves.toBeUndefined()
     await Promise.all([first!.dispose(), second!.dispose()])
   })
+
+  it('does not clean an active overlay when another preparation starts later', async () => {
+    const directory = join(await fixture(), 'overlays')
+    const first = await prepareGoalGuardOverlay({ runtime: runtime(), pluginFile, directory })
+    const second = await prepareGoalGuardOverlay({ runtime: runtime(), pluginFile, directory })
+    await expect(access(first!.path)).resolves.toBeUndefined()
+    await expect(access(second!.path)).resolves.toBeUndefined()
+    await Promise.all([first!.dispose(), second!.dispose()])
+  })
 })
