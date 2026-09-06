@@ -2,7 +2,7 @@ param(
   [Parameter(Mandatory = $true)][string]$DshTag,
   [Parameter(Mandatory = $true)][string]$OutputDirectory,
   [ValidateRange(1, 2147483647)][int]$RuntimeRevision = 1,
-  [string]$RequiredShellRange = '>=0.1.0 <1.0.0'
+  [string]$RequiredShellRange = '>=0.1.21 <1.0.0'
 )
 
 $ErrorActionPreference = 'Stop'

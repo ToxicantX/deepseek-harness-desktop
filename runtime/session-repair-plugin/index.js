@@ -3,12 +3,15 @@ import { lstat, open, readFile, rename, rm, stat } from 'node:fs/promises'
 import { dirname, isAbsolute, toNamespacedPath } from 'node:path'
 import { promisify } from 'node:util'
 import { constants, zstdCompress, zstdDecompress } from 'node:zlib'
-import { decodeStorageRecord, packChunkRuns, Session } from '@deepseek-ai/dsh-session'
-import { RpcId } from '@deepseek-ai/dsh-host-apiproxy'
+import * as sessionModule from '@deepseek-ai/dsh-session'
 import { createRepairPlan, decodeSessionLog, inspectSequence } from './core.mjs'
 
 export const name = 'desktop-session-repair'
-export const inject = ['apiProxy', 'sessions', 'sessionPersistence', 'settings', 'storageDomain', 'webServer']
+const { decodeStorageRecord, packChunkRuns, Session } = sessionModule
+const supportsLegacyRepair = typeof decodeStorageRecord === 'function' && typeof packChunkRuns === 'function'
+export const inject = supportsLegacyRepair
+  ? ['apiProxy', 'sessions', 'sessionPersistence', 'settings', 'storageDomain', 'webServer']
+  : ['settings', 'webServer']
 
 const ENDPOINTS = new Map([
   ['settings.openDocument', 'settings'],
@@ -64,6 +67,9 @@ function parsePayload(payload, needsRevision) {
 }
 
 function persistenceOf(ctx) {
+  if (!supportsLegacyRepair) {
+    throw new RepairError('UNSUPPORTED_BACKEND', '当前 Runtime 未提供安全重写会话日志的接口，暂不支持桌面会话修复或回滚；会话文件未修改')
+  }
   const persistence = ctx.sessionPersistence
   for (const method of ['locate', 'readRaw', 'readStoredRevision']) {
     if (typeof persistence?.[method] !== 'function') {
@@ -77,6 +83,7 @@ function persistenceOf(ctx) {
 }
 
 function assertInactive(ctx, sessionId) {
+  persistenceOf(ctx)
   if (ctx.sessions.get(sessionId) !== undefined) {
     throw new RepairError('ACTIVE_SESSION', '会话当前处于活动状态；请先关闭会话后再修复')
   }
@@ -300,7 +307,7 @@ async function invalidateProjectionCache(ctx, sessionId) {
 }
 
 async function verifyHistory(ctx, sessionId) {
-  const response = await ctx.apiProxy.sessions.history({ rpcId: RpcId(randomUUID()), payload: { sessionId, maxMessages: 1 } })
+  const response = await ctx.apiProxy.sessions.history({ rpcId: randomUUID(), payload: { sessionId, maxMessages: 1 } })
   if (!response.result.ok) throw new RepairError('HISTORY_VERIFICATION_FAILED', 'session.history verification failed: ' + response.result.error.message)
 }
 
@@ -453,7 +460,7 @@ export async function openSettingsDocument(ctx, payload, signal, openDocument = 
 
 function rpcFailure(error) {
   const message = error instanceof Error ? error.message : String(error)
-  return { ok: false, error: { code: 'internal', message, details: {} } }
+  return { ok: false, error: { code: 'internal', message, details: error instanceof RepairError ? { repairCode: error.code } : {} } }
 }
 
 function requestTrusted(ctx, req) {

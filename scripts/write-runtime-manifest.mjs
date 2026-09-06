@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { readFile, stat, writeFile } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
+import { gte, intersects, validRange } from 'semver'
 
 function argument(name) {
   const index = process.argv.indexOf(`--${name}`)
@@ -14,6 +15,10 @@ const version = argument('version')
 const tag = argument('tag')
 const commit = argument('commit')
 const shellRange = argument('shell-range')
+if (validRange(shellRange) === null) throw new Error('shell-range must be a valid semver range')
+if (gte(version, '0.1.3-alpha.1') && intersects(shellRange, '<0.1.21', { includePrerelease: true })) {
+  throw new Error('DSH 0.1.3-alpha.1 and newer require Shell >=0.1.21 for authenticated readiness URLs')
+}
 const runtimeRevision = Number(argument('runtime-revision'))
 if (!Number.isSafeInteger(runtimeRevision) || runtimeRevision < 1) throw new Error('runtime-revision must be a positive safe integer')
 const repository = process.env.GITHUB_REPOSITORY ?? 'ToxicantX/deepseek-harness-desktop'

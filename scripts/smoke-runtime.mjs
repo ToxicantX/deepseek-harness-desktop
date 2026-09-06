@@ -38,7 +38,17 @@ try {
     env: environment,
     async onOpenSettingsDocument(path) { openedSettingsPath = path },
   })
-  const response = await fetch(backend.url)
+  let response = await fetch(backend.url, { redirect: 'manual' })
+  let cookie
+  if (backend.url.searchParams.has('token')) {
+    if (response.status !== 303 || response.headers.get('location') !== '/') throw new Error('Runtime launch authentication did not redirect to the clean root')
+    cookie = response.headers.getSetCookie().map(value => value.split(';', 1)[0]).join('; ')
+    if (!cookie) throw new Error('Runtime launch authentication did not issue a session cookie')
+    const anonymous = await fetch(new URL('/', backend.url))
+    if (anonymous.status !== 401) throw new Error('Runtime did not reject an unauthenticated index request')
+    response = await fetch(new URL('/', backend.url), { headers: { cookie } })
+    console.log('Runtime browser authentication passed: anonymous 401, authenticated index 200')
+  }
   if (!response.ok) throw new Error(`DSH Web returned HTTP ${response.status}`)
   const html = await response.text()
   if (!html.includes('__DSH_BOOT__')) throw new Error('DSH Web response is missing __DSH_BOOT__')
@@ -58,6 +68,11 @@ try {
   if (repairBody?.type !== 'server-response' || repairBody.rpcId !== repairRpcId || repairBody.result?.ok !== false) {
     throw new Error('Session repair Host API is not active in the packaged Runtime')
   }
+  const repairCode = repairBody.result.error?.details?.repairCode
+  if (!['SESSION_NOT_FOUND', 'UNSUPPORTED_BACKEND'].includes(repairCode)) {
+    throw new Error(`Session repair Host API failed unexpectedly: ${JSON.stringify(repairBody.result.error)}`)
+  }
+  console.log(`Session repair capability: ${repairCode}`)
   const settingsRpcId = 'runtime-smoke-settings-document'
   const settingsResponse = await fetch(new URL('/api/settings.openDocument', backend.url), {
     method: 'POST',

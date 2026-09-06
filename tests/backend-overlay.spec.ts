@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events'
 import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
 import { describe, expect, it, vi } from 'vitest'
-import { backendArguments, startBackend } from '../src/backend.ts'
+import { backendArguments, parseBackendUrl, startBackend } from '../src/backend.ts'
 
 function runtime(version = '0.1.0-rc.8') {
   return {
@@ -40,6 +40,47 @@ function forkWith(child: FakeChild, args: string[][]) {
 }
 
 describe('backend overlay integration', () => {
+  it('accepts only loopback root readiness URLs with an optional single launch token', () => {
+    expect(parseBackendUrl('dsh web: http://127.0.0.1:43123/')).toBe('http://127.0.0.1:43123/')
+    expect(parseBackendUrl('dsh web: http://127.0.0.1:43123/?token=test_token-123')).toBe('http://127.0.0.1:43123/?token=test_token-123')
+    for (const url of [
+      'http://example.com/?token=test', 'http://127.0.0.1.evil/?token=test',
+      'https://127.0.0.1/', 'http://user:pass@127.0.0.1/', 'http://127.0.0.1/api',
+      'http://127.0.0.1/?token=', 'http://127.0.0.1/?token=a&token=b',
+      'http://127.0.0.1/?token=a&redirect=evil', 'http://127.0.0.1/?other=a',
+      'http://127.0.0.1/?token=a#fragment', 'http://127.0.0.1/?token=a%20b',
+    ]) expect(parseBackendUrl('dsh web: ' + url)).toBeUndefined()
+  })
+
+  it('preserves authentication for navigation but redacts it from exit diagnostics across chunks', async () => {
+    const child = new FakeChild()
+    const backend = await startBackend({
+      runtime: runtime('0.1.3-alpha.1'), shutdownHook: 'C:/shutdown-hook.js', cwd: 'C:/home', env: {},
+      forkProcess: (() => {
+        queueMicrotask(() => {
+          child.stdout.write('dsh web: http://127.0.0.1:43123/?tok')
+          child.stdout.write('en=private-test-token\n')
+        })
+        return child
+      }) as any,
+    })
+    expect(backend.url.searchParams.get('token')).toBe('private-test-token')
+    const exit = await backend.stop()
+    expect(exit.diagnostics).toContain('token=[redacted]')
+    expect(exit.diagnostics).not.toContain('private-test-token')
+  })
+
+  it('does not expose a credential when the diagnostic buffer truncates inside its value', async () => {
+    const child = new FakeChild()
+    const backend = await startBackend({
+      runtime: runtime(), shutdownHook: 'C:/shutdown-hook.js', cwd: 'C:/home', env: {},
+      forkProcess: forkWith(child, []),
+    })
+    child.stderr.write('http://127.0.0.1/?token=' + 'private'.repeat(5000) + '\nvisible error\n')
+    const exit = await backend.stop()
+    expect(exit.diagnostics).toBe('visible error')
+  })
+
   it('places Runtime and overlay patches before port and no-open', () => {
     const args = backendArguments(runtime(), ['C:/overlay/a.yml', 'C:/overlay/b.yml'], () => true)
     expect(args).toEqual([

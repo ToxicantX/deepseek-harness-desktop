@@ -47,14 +47,21 @@ export interface OpenSettingsRequest {
 
 class DiagnosticTail {
   private value = Buffer.alloc(0)
+  private truncated = false
 
   append(chunk: Buffer | string): void {
     this.value = Buffer.concat([this.value, Buffer.from(chunk)])
-    if (this.value.length > DIAGNOSTIC_LIMIT) this.value = this.value.subarray(this.value.length - DIAGNOSTIC_LIMIT)
+    if (this.value.length > DIAGNOSTIC_LIMIT) {
+      this.value = this.value.subarray(this.value.length - DIAGNOSTIC_LIMIT)
+      this.truncated = true
+    }
   }
 
   toString(): string {
-    return this.value.toString('utf8').trim()
+    let text = this.value.toString('utf8')
+    // A truncated first line may start inside a credential, before its marker.
+    if (this.truncated) text = text.includes('\n') ? text.slice(text.indexOf('\n') + 1) : ''
+    return text.replace(/([?&]token=)[^\s)]+/gu, '$1[redacted]').trim()
   }
 }
 
@@ -80,8 +87,12 @@ export function parseBackendUrl(line: string): string | undefined {
   const candidate = line.slice(READY_PREFIX.length).trim()
   try {
     const url = new URL(candidate)
-    if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || url.pathname !== '/' || url.search !== '' || url.hash !== '') {
+    if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || url.pathname !== '/' || url.hash !== '' || url.username !== '' || url.password !== '') {
       return undefined
+    }
+    if (url.search !== '') {
+      const entries = [...url.searchParams]
+      if (entries.length !== 1 || entries[0]?.[0] !== 'token' || !/^[A-Za-z0-9_-]{1,512}$/u.test(entries[0][1])) return undefined
     }
     return url.href
   } catch {

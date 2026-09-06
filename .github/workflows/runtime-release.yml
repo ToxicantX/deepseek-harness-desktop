@@ -15,7 +15,7 @@ on:
       required_shell_range:
         description: Shell semver range allowed to install this runtime
         required: true
-        default: '>=0.1.0 <1.0.0'
+        default: '>=0.1.21 <1.0.0'
         type: string
   schedule:
     - cron: '23 4 * * *'
@@ -60,7 +60,7 @@ jobs:
           release_tag="runtime-$tag-desktop.$revision"
           exists=false
           if gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then exists=true; fi
-          shell_range="${REQUESTED_RANGE:-">=0.1.0 <1.0.0"}"
+          shell_range="${REQUESTED_RANGE:-">=0.1.21 <1.0.0"}"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "revision=$revision" >> "$GITHUB_OUTPUT"
@@ -108,7 +108,7 @@ jobs:
           $version = '${{ needs.resolve.outputs.version }}'
           $revision = '${{ needs.resolve.outputs.revision }}'
           $artifact = "dsh-runtime-$version-desktop.$revision-win-x64"
-          gh release create $releaseTag "runtime-output/$artifact.zip" "runtime-output/$artifact.json" --repo $env:GITHUB_REPOSITORY --prerelease --title "DSH Runtime $version desktop revision $revision" --notes "Windows x64 runtime built from deepseek-ai/deepseek-harness tag ${{ needs.resolve.outputs.tag }}, desktop revision $revision. Runtime releases remain prereleases so they do not replace the Shell update channel."
+          gh release create $releaseTag "runtime-output/$artifact.zip" "runtime-output/$artifact.json" --repo $env:GITHUB_REPOSITORY --prerelease --title "DSH Runtime $version desktop revision $revision" --notes "Windows x64 runtime built from deepseek-ai/deepseek-harness tag ${{ needs.resolve.outputs.tag }}, desktop revision $revision. Requires Shell ${{ needs.resolve.outputs.shell_range }}. Runtime releases remain prereleases so they do not replace the Shell update channel. Desktop session repair and rollback require the legacy raw-artifact storage API; newer append-only backends explicitly refuse these operations without modifying session files."
       - name: Update compatible runtime catalog
         env:
           GH_TOKEN: ${{ github.token }}

@@ -25,6 +25,20 @@ async function fixtureDirectory() {
 }
 
 describe('Runtime release scripts', () => {
+  it('refuses catalogs that offer authenticated runtimes to old Shell versions', async () => {
+    const directory = await fixtureDirectory()
+    const archive = join(directory, 'runtime.zip')
+    const output = join(directory, 'manifest.json')
+    await writeFile(archive, 'runtime archive')
+    const args = [resolve('scripts/write-runtime-manifest.mjs'), '--archive', archive, '--output', output,
+      '--version', '0.1.3-alpha.1', '--tag', 'dsh-v0.1.3-alpha.1', '--commit', 'a'.repeat(40), '--runtime-revision', '1', '--shell-range']
+    for (const range of ['>=0.1.0 <1.0.0', '>=0.1.21 || 0.1.20']) {
+      await expect(execFileAsync(process.execPath, [...args, range])).rejects.toThrow('require Shell >=0.1.21')
+    }
+    await execFileAsync(process.execPath, [...args, '>=0.1.21 <1.0.0'])
+    expect(JSON.parse(await readFile(output, 'utf8')).requiredShellRange).toBe('>=0.1.21 <1.0.0')
+  })
+
   it('writes a revision-aware immutable manifest URL', async () => {
     const directory = await fixtureDirectory()
     const archive = join(directory, 'dsh-runtime-0.1.0-rc.7-desktop.1-win-x64.zip')
