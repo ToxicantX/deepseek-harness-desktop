@@ -403,7 +403,7 @@ describe('desktop shell conversation replay injector', () => {
     const moveIndex = build.indexOf('Move-Item $DshPackage')
     const recursiveDshCopyIndex = build.indexOf("Copy-Item (Join-Path $DshPackage '*') $App -Recurse -Force")
     const copiedManifestValidationIndex = build.indexOf("$CopiedDshManifest = Join-Path $DshPackage 'package.json'")
-    const pluginSetupIndex = build.indexOf("$RepairPlugin = Join-Path $App 'plugins/session-repair'")
+    const pluginSetupIndex = build.indexOf("$RepairPlugin = Join-Path $DshPackage 'node_modules/@deepseek-ai/dsh-desktop-session-repair'")
     expect(normalizationIndex).toBeGreaterThanOrEqual(0)
     expect(deployPathIndex).toBeGreaterThanOrEqual(0)
     expect(deployIndex).toBeGreaterThan(deployPathIndex)

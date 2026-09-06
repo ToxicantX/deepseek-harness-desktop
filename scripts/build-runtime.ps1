@@ -64,8 +64,8 @@ if (-not (Test-Path $CopiedDshManifest)) { throw 'Copied DSH package manifest is
 $CopiedDshVersion = node -e "const p=require(process.argv[1]); process.stdout.write(p.version)" $CopiedDshManifest
 if ($CopiedDshVersion -ne $DshVersion) { throw "Copied DSH version $CopiedDshVersion does not match $DshVersion." }
 
-$RepairPlugin = Join-Path $App 'plugins/session-repair'
-$PetBridgePlugin = Join-Path $App 'plugins/pet-bridge'
+$RepairPlugin = Join-Path $DshPackage 'node_modules/@deepseek-ai/dsh-desktop-session-repair'
+$PetBridgePlugin = Join-Path $DshPackage 'node_modules/@deepseek-ai/dsh-desktop-pet-bridge'
 if (-not (Test-Path (Join-Path $RepairPluginSource 'index.js'))) { throw 'Session repair runtime plugin is incomplete; index.js is missing.' }
 if (-not (Test-Path (Join-Path $PetBridgePluginSource 'client.js'))) { throw 'Desktop pet bridge plugin is incomplete; client.js is missing.' }
 New-Item $RepairPlugin -ItemType Directory -Force | Out-Null
@@ -79,8 +79,8 @@ Copy-Item $DesktopPatchSource (Join-Path $App 'desktop.patch.yml') -Force
   "type": "module",
   "dependencies": {
     "@deepseek-ai/dsh": "file:./node_modules/@deepseek-ai/dsh",
-    "@deepseek-ai/dsh-desktop-session-repair": "file:./plugins/session-repair",
-    "@deepseek-ai/dsh-desktop-pet-bridge": "file:./plugins/pet-bridge"
+    "@deepseek-ai/dsh-desktop-session-repair": "file:./node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-desktop-session-repair",
+    "@deepseek-ai/dsh-desktop-pet-bridge": "file:./node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-desktop-pet-bridge"
   }
 }
 "@ | Set-Content (Join-Path $App 'package.json') -Encoding utf8NoBOM

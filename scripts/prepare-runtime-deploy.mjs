@@ -23,12 +23,14 @@ for (const name of queue) {
   visited.add(name)
   const manifest = packages.get(name)
   if (!manifest) continue
+  // Profile discovery walks logical package paths, so expose the workspace closure at the CLI root.
+  if (name !== cli.name) cli.dependencies[name] ??= 'workspace:*'
   for (const peer of Object.keys(manifest.peerDependencies ?? {})) {
     if (!packages.has(peer) || manifest.peerDependenciesMeta?.[peer]?.optional) continue
     cli.dependencies[peer] ??= 'workspace:*'
     queue.push(peer)
   }
-  queue.push(...Object.keys({ ...manifest.dependencies, ...manifest.optionalDependencies }))
+  queue.push(...Object.keys(manifest.dependencies ?? {}))
 }
 await writeFile(cliFilename, `${JSON.stringify(cli, null, 2)}\n`, 'utf8')
 const filename = resolve(process.argv[2], 'pnpm-workspace.yaml')
