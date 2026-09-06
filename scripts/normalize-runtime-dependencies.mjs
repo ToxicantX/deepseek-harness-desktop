@@ -27,16 +27,31 @@ async function visit(directory) {
 }
 
 await visit(root)
+const versions = new Map()
+for (const { packageJson } of manifests) {
+  const values = versions.get(packageJson.name) ?? new Set()
+  values.add(packageJson.version)
+  versions.set(packageJson.name, values)
+}
 let changed = 0
 for (const { path, packageJson } of manifests) {
   for (const section of ['dependencies', 'optionalDependencies', 'devDependencies', 'peerDependencies']) {
     for (const [name, specifier] of Object.entries(packageJson[section] ?? {})) {
       if (typeof specifier === 'string' && specifier.startsWith('workspace:')) {
-        delete packageJson[section][name]
+        const installed = versions.get(name)
+        if (section === 'devDependencies') {
+          delete packageJson[section][name]
+        } else if (installed?.size === 1) {
+          packageJson[section][name] = [...installed][0]
+        } else if (!installed && (section === 'optionalDependencies' || packageJson.peerDependenciesMeta?.[name]?.optional)) {
+          delete packageJson[section][name]
+        } else {
+          throw new Error(`Unresolved runtime workspace dependency: ${packageJson.name} -> ${name}`)
+        }
         changed++
       }
     }
   }
   await writeFile(path, JSON.stringify(packageJson, null, 2) + String.fromCharCode(10), 'utf8')
 }
-console.log('removed ' + changed + ' workspace dependency entr' + (changed === 1 ? 'y' : 'ies'))
+console.log('normalized ' + changed + ' workspace dependency entr' + (changed === 1 ? 'y' : 'ies'))

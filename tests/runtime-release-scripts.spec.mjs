@@ -212,6 +212,10 @@ describe('Runtime release scripts', () => {
     expect(preparedCli.dependencies['test-nested-peer']).toBe('workspace:*')
     await mkdir(resolve(deployed, '..'), { recursive: true })
     await runPnpm(['--filter', '@deepseek-ai/dsh', 'deploy', '--prod', '--legacy', deployed])
+    await execFileAsync(process.execPath, [resolve('scripts/normalize-runtime-dependencies.mjs'), deployed])
+    const deployedCli = JSON.parse(await readFile(join(deployed, 'package.json'), 'utf8'))
+    expect(deployedCli.dependencies['@deepseek-ai/schemastery']).toBeTruthy()
+    expect(deployedCli.dependencies['test-nested-peer']).toBeTruthy()
     await execFileAsync(process.execPath, [resolve('scripts/prepare-runtime-archive.mjs'), runtime, archive])
     await rm(source, { recursive: true, force: true })
     const { stdout } = await execFileAsync(process.execPath, ['-e',
@@ -245,27 +249,41 @@ describe('Runtime release scripts', () => {
     ])).rejects.toThrow('runtime link escapes archive root: external')
   })
 
-  it('removes workspace dependencies from every manifest section and preserves ordinary specs', async () => {
+  it('preserves installed workspace dependency names with concrete versions for profile discovery', async () => {
     const directory = await fixtureDirectory()
     const packageA = join(directory, 'node_modules', 'a')
     await mkdir(packageA, { recursive: true })
     await writeFile(join(packageA, 'package.json'), JSON.stringify({
       name: 'a',
       version: '1.0.0',
-      dependencies: { removable: 'workspace:^', keep: '^1.2.3' },
-      optionalDependencies: { optional: 'workspace:*', keepOptional: '2.0.0' },
+      dependencies: { b: 'workspace:^', keep: '^1.2.3' },
+      optionalDependencies: { b: 'workspace:*', optional: 'workspace:*', keepOptional: '2.0.0' },
       devDependencies: { dev: 'workspace:~', keepDev: '3.0.0' },
-      peerDependencies: { peer: 'workspace:*', keepPeer: '>=4.0.0' },
+      peerDependencies: { b: 'workspace:*', optionalPeer: 'workspace:*', keepPeer: '>=4.0.0' },
+      peerDependenciesMeta: { optionalPeer: { optional: true } },
     }))
+    await mkdir(join(directory, 'node_modules', 'b'))
+    await writeFile(join(directory, 'node_modules', 'b', 'package.json'), JSON.stringify({ name: 'b', version: '2.3.4' }))
     await execFileAsync(process.execPath, [resolve('scripts/normalize-runtime-dependencies.mjs'), directory])
     expect(JSON.parse(await readFile(join(packageA, 'package.json'), 'utf8'))).toMatchObject({
-      dependencies: { keep: '^1.2.3' },
-      optionalDependencies: { keepOptional: '2.0.0' },
+      dependencies: { b: '2.3.4', keep: '^1.2.3' },
+      optionalDependencies: { b: '2.3.4', keepOptional: '2.0.0' },
       devDependencies: { keepDev: '3.0.0' },
-      peerDependencies: { keepPeer: '>=4.0.0' },
+      peerDependencies: { b: '2.3.4', keepPeer: '>=4.0.0' },
     })
+    const normalized = await readFile(join(packageA, 'package.json'), 'utf8')
+    expect(normalized).not.toContain('workspace:')
   })
 
+  it('rejects missing required workspace dependencies instead of erasing their records', async () => {
+    const directory = await fixtureDirectory()
+    await writeFile(join(directory, 'package.json'), JSON.stringify({
+      name: 'a', version: '1.0.0', dependencies: { missing: 'workspace:*' },
+    }))
+    await expect(execFileAsync(process.execPath, [
+      resolve('scripts/normalize-runtime-dependencies.mjs'), directory,
+    ])).rejects.toThrow('Unresolved runtime workspace dependency: a -> missing')
+  })
 
   it('does not package the goal guard into the Runtime', () => {
     expect(buildScript).not.toContain('GoalGuard')
