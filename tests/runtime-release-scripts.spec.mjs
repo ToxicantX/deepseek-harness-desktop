@@ -80,7 +80,10 @@ describe('Runtime release scripts', () => {
     expect(buildScript).toContain('"@deepseek-ai/dsh": "file:$($DshPackage.Replace(')
     expect(buildScript).not.toContain('"@deepseek-ai/dsh": "$DshVersion"')
     expect(buildScript).toContain('node_modules/@deepseek-ai/dsh/package.json')
+    expect(buildScript).toContain('Deployed DSH package manifest is missing from standalone node_modules.')
     expect(buildScript).toContain('Installed DSH version $InstalledVersion does not match $DshVersion.')
+    expect(buildScript).not.toContain('Push-Location $App')
+    expect(buildScript).not.toContain("Push-Location $App\ntry {\n  pnpm install --prod --no-frozen-lockfile")
   })
 
   it('removes workspace dependencies from every manifest section and preserves ordinary specs', async () => {
