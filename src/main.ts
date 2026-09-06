@@ -30,6 +30,7 @@ import type { PetSize } from './pet-size.ts'
 import { PluginManager, validatePackageName } from './plugin-manager.ts'
 import { PluginIsolation, thirdParty } from './plugin-isolation.ts'
 import { loadAndValidatePlugins } from './plugin-client-health.ts'
+import { shouldRecoverModelCatalog } from './model-catalog-recovery.ts'
 import { PluginRestartCoordinator } from './plugin-restart.ts'
 import { RuntimeController, type RuntimeView } from './runtime-controller.ts'
 import { SessionRepairClient } from './session-repair.ts'
@@ -91,6 +92,7 @@ let latestView: RuntimeView | undefined
 let cliDirectory: string | undefined
 let trustedOrigin: string | undefined
 let mainUiLoaded = false
+let modelCatalogRecoveryAttempts = 0
 let shellSkinStore: ShellSkinStore | undefined
 let quitting = false
 
@@ -334,6 +336,12 @@ function createWindow(options: { utility?: 'manager' | 'repair' | 'plugin' | 'mc
   window.webContents.on('did-finish-load', () => {
     sendView(window)
     if (window === mainWindow) { syncMainMenuVisibility(); injectSkinMarket(window) }
+  })
+  window.webContents.on('console-message', (_event, _level, message) => {
+    if (window !== mainWindow || quitting || latestView?.phase !== 'ready') return
+    if (!shouldRecoverModelCatalog(message, modelCatalogRecoveryAttempts)) return
+    modelCatalogRecoveryAttempts += 1
+    void window.webContents.reload()
   })
   return window
 }
@@ -830,6 +838,7 @@ async function startApplication(): Promise<void> {
     onView: broadcast,
     async onReady(url, _runtime, preparedCliDirectory) {
       mainUiLoaded = false
+      modelCatalogRecoveryAttempts = 0
       clearMainMenu()
       cliDirectory = preparedCliDirectory
       trustedOrigin = url.origin
