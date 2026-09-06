@@ -77,7 +77,7 @@ describe('Runtime release scripts', () => {
     expect(buildScript).toContain('pnpm run build')
     expect(buildScript).toContain("pnpm --filter '@deepseek-ai/dsh' deploy --prod --legacy $DshPackage")
     expect(buildScript).toContain("normalize-runtime-dependencies.mjs') $DshPackage")
-    expect(buildScript).toContain('"@deepseek-ai/dsh": "file:$($DshPackage.Replace(')
+    expect(buildScript).toContain('"@deepseek-ai/dsh": "file:./node_modules/@deepseek-ai/dsh"')
     expect(buildScript).not.toContain('"@deepseek-ai/dsh": "$DshVersion"')
     expect(buildScript).toContain('node_modules/@deepseek-ai/dsh/package.json')
     expect(buildScript).toContain('Deployed DSH package manifest is missing from standalone node_modules.')

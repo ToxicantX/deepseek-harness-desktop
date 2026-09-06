@@ -56,9 +56,11 @@ try {
 } finally {
   Pop-Location
 }
-New-Item $App -ItemType Directory -Force | Out-Null
-Copy-Item (Join-Path $DshPackage '*') $App -Recurse -Force
-$CopiedDshManifest = Join-Path $App 'package.json'
+New-Item $Runtime -ItemType Directory -Force | Out-Null
+New-Item (Join-Path $App 'node_modules/@deepseek-ai') -ItemType Directory -Force | Out-Null
+$DeployedDsh = Join-Path $App 'node_modules/@deepseek-ai/dsh'
+Move-Item $DshPackage $DeployedDsh -Force
+$CopiedDshManifest = Join-Path $DeployedDsh 'package.json'
 if (-not (Test-Path $CopiedDshManifest)) { throw 'Copied DSH package manifest is missing from the standalone app.' }
 $CopiedDshVersion = node -e "const p=require(process.argv[1]); process.stdout.write(p.version)" $CopiedDshManifest
 if ($CopiedDshVersion -ne $DshVersion) { throw "Copied DSH version $CopiedDshVersion does not match $DshVersion." }
@@ -77,7 +79,7 @@ Copy-Item $DesktopPatchSource (Join-Path $App 'desktop.patch.yml') -Force
   "private": true,
   "type": "module",
   "dependencies": {
-    "@deepseek-ai/dsh": "file:$($DshPackage.Replace('\', '/'))",
+    "@deepseek-ai/dsh": "file:./node_modules/@deepseek-ai/dsh",
     "@deepseek-ai/dsh-desktop-session-repair": "file:./plugins/session-repair",
     "@deepseek-ai/dsh-desktop-pet-bridge": "file:./plugins/pet-bridge"
   }
