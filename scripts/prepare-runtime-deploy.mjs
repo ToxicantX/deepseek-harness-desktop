@@ -1,8 +1,36 @@
 import { readFile, writeFile } from 'node:fs/promises'
+import { globSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { parseDocument } from 'yaml'
 
 if (!process.argv[2]) throw new Error('usage: node scripts/prepare-runtime-deploy.mjs <source-workspace>')
+const cliFilename = resolve(process.argv[2], 'apps/cli/package.json')
+const cli = JSON.parse(await readFile(cliFilename, 'utf8'))
+const runtime = JSON.parse(await readFile(resolve(process.argv[2], 'python/sdk-runtime/package.json'), 'utf8'))
+// Upstream's executable closure supplies required peers and shipped preset plugins.
+cli.dependencies = { ...runtime.dependencies, ...cli.dependencies }
+delete cli.dependencies[cli.name]
+const packages = new Map()
+for (const path of globSync(['packages/*/*/package.json', 'vendor/*/package.json', 'apps/*/package.json'], { cwd: process.argv[2] })) {
+  const manifest = JSON.parse(await readFile(resolve(process.argv[2], path), 'utf8'))
+  packages.set(manifest.name, manifest)
+}
+// The desktop Web graph has additional required peers beyond the Python runtime.
+const queue = Object.keys(cli.dependencies)
+const visited = new Set()
+for (const name of queue) {
+  if (visited.has(name)) continue
+  visited.add(name)
+  const manifest = packages.get(name)
+  if (!manifest) continue
+  for (const peer of Object.keys(manifest.peerDependencies ?? {})) {
+    if (!packages.has(peer) || manifest.peerDependenciesMeta?.[peer]?.optional) continue
+    cli.dependencies[peer] ??= 'workspace:*'
+    queue.push(peer)
+  }
+  queue.push(...Object.keys({ ...manifest.dependencies, ...manifest.optionalDependencies }))
+}
+await writeFile(cliFilename, `${JSON.stringify(cli, null, 2)}\n`, 'utf8')
 const filename = resolve(process.argv[2], 'pnpm-workspace.yaml')
 const document = parseDocument(await readFile(filename, 'utf8'))
 if (document.errors.length) throw document.errors[0]
