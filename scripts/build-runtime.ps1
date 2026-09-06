@@ -56,9 +56,15 @@ try {
 } finally {
   Pop-Location
 }
+New-Item $App -ItemType Directory -Force | Out-Null
+Copy-Item (Join-Path $DshPackage '*') $App -Recurse -Force
+$CopiedDshManifest = Join-Path $App 'package.json'
+if (-not (Test-Path $CopiedDshManifest)) { throw 'Copied DSH package manifest is missing from the standalone app.' }
+$CopiedDshVersion = node -e "const p=require(process.argv[1]); process.stdout.write(p.version)" $CopiedDshManifest
+if ($CopiedDshVersion -ne $DshVersion) { throw "Copied DSH version $CopiedDshVersion does not match $DshVersion." }
+
 $RepairPlugin = Join-Path $App 'plugins/session-repair'
 $PetBridgePlugin = Join-Path $App 'plugins/pet-bridge'
-New-Item $App -ItemType Directory -Force | Out-Null
 if (-not (Test-Path (Join-Path $RepairPluginSource 'index.js'))) { throw 'Session repair runtime plugin is incomplete; index.js is missing.' }
 if (-not (Test-Path (Join-Path $PetBridgePluginSource 'client.js'))) { throw 'Desktop pet bridge plugin is incomplete; client.js is missing.' }
 New-Item $RepairPlugin -ItemType Directory -Force | Out-Null
