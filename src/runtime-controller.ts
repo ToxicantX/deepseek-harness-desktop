@@ -13,6 +13,7 @@ import {
 import { desktopEnvironment, startBackend, type RunningBackend } from './backend.ts'
 import { prepareCliShim } from './cli-shell.ts'
 import { prepareGoalGuardOverlay } from './goal-guard-overlay.ts'
+import { PluginImportFailure, PluginIsolation } from './plugin-isolation.ts'
 import { inspectProfileBundleRecovery, type ProfileBundleRecoveryPlan } from './profile-bundle-recovery.ts'
 import { inspectPluginPresetRecovery, type PluginPresetRecoveryPlan } from './plugin-preset-recovery.ts'
 import { RuntimeStore, type InstalledRuntime, type RuntimeState } from './runtime-store.ts'
@@ -71,6 +72,7 @@ export interface RuntimeControllerOptions {
   inspectStaleLocalPlugins?: StaleLocalPluginRecoveryInspector
   inspectProfileBundles?: ProfileBundleRecoveryInspector
   inspectPluginPreset?: PluginPresetRecoveryInspector
+  pluginIsolation?: PluginIsolation
   onView(view: RuntimeView): void
   onReady(url: URL, runtime: InstalledRuntime, cliDirectory: string): Promise<void>
   onOpenSettingsDocument(path: string): Promise<void>
@@ -87,6 +89,7 @@ export class RuntimeController {
   private readonly inspectStaleLocalPlugins: StaleLocalPluginRecoveryInspector
   private readonly inspectProfileBundles: ProfileBundleRecoveryInspector
   private readonly inspectPluginPreset: PluginPresetRecoveryInspector
+  private readonly pluginIsolation: PluginIsolation | undefined
   private readonly onView: (view: RuntimeView) => void
   private readonly onReady: (url: URL, runtime: InstalledRuntime, cliDirectory: string) => Promise<void>
   private readonly onOpenSettingsDocument: (path: string) => Promise<void>
@@ -116,6 +119,7 @@ export class RuntimeController {
     this.inspectStaleLocalPlugins = options.inspectStaleLocalPlugins ?? inspectStaleLocalPluginRecovery
     this.inspectProfileBundles = options.inspectProfileBundles ?? inspectProfileBundleRecovery
     this.inspectPluginPreset = options.inspectPluginPreset ?? inspectPluginPresetRecovery
+    this.pluginIsolation = options.pluginIsolation
     this.onView = options.onView
     this.onReady = options.onReady
     this.onOpenSettingsDocument = options.onOpenSettingsDocument
@@ -175,6 +179,32 @@ export class RuntimeController {
     return this.enqueue(async () => {
       await this.stopBackend()
       this.update('starting', '正在应用插件变更')
+    })
+  }
+
+  setPluginEnabled(name: string, enabled: boolean): Promise<void> {
+    return this.enqueue(async () => {
+      const runtime = this.selectedRuntime
+      const isolation = this.pluginIsolation
+      if (runtime === undefined || isolation === undefined || !isolation.supported(runtime)) throw new Error('当前 Runtime 不支持插件隔离')
+      if (!(await isolation.packages()).includes(name)) throw new Error('仅支持已安装的第三方插件')
+      await this.stopBackend()
+      if (!enabled) {
+        try {
+          await isolation.disable(name, 'manual')
+          await this.launch(runtime)
+        }
+        catch (error) { this.fail(error instanceof Error ? error.message : String(error)); throw error }
+        return
+      }
+      try {
+        await isolation.validate(name, async () => { await this.launch(runtime, '正在重新启用并验证插件', name) })
+      } catch (error) {
+        // The persisted record stays disabled throughout a trial, including a Shell crash.
+        try { await this.launch(runtime) }
+        catch (recoveryError) { this.fail(recoveryError instanceof Error ? recoveryError.message : String(recoveryError)) }
+        throw error
+      }
     })
   }
 
@@ -315,7 +345,21 @@ export class RuntimeController {
     return installed
   }
 
-  private async launch(runtime: InstalledRuntime, message = `正在启动 DSH ${runtime.manifest.dshVersion}`): Promise<void> {
+  private async launch(runtime: InstalledRuntime, message = `正在启动 DSH ${runtime.manifest.dshVersion}`, trial?: string): Promise<void> {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        await this.launchOnce(runtime, message, trial)
+        return
+      } catch (error) {
+        const diagnostics = error instanceof Error ? error.message : String(error)
+        if (trial !== undefined || attempt >= 3 || this.pluginIsolation === undefined
+          || !await this.pluginIsolation.quarantine(runtime, this.environment, error instanceof PluginImportFailure ? error : diagnostics)) throw error
+        message = '已隔离不兼容插件，正在重新启动 DSH'
+      }
+    }
+  }
+
+  private async launchOnce(runtime: InstalledRuntime, message: string, trial?: string): Promise<void> {
     await this.stopBackend()
     this.selectedRuntime = runtime
     this.update('starting', message)
@@ -328,10 +372,13 @@ export class RuntimeController {
       pluginFile: this.goalGuardPlugin,
       directory: join(this.userData, 'runtime-overlays'),
     })
-    const cleanup = overlay === undefined ? undefined : async (): Promise<void> => {
+    let isolationOverlay
+    try { isolationOverlay = await this.pluginIsolation?.prepare(runtime, this.environment, trial) }
+    catch (error) { await overlay?.dispose(); throw error }
+    const cleanup = async (): Promise<void> => {
       if (overlayDisposed) return
       overlayDisposed = true
-      await overlay.dispose()
+      await Promise.all([overlay?.dispose(), isolationOverlay?.dispose()])
     }
     try {
       backend = await startBackend({
@@ -339,8 +386,8 @@ export class RuntimeController {
         shutdownHook: this.shutdownHook,
         cwd: home,
         env: desktopEnvironment(runtime, this.environment),
-        additionalPatches: overlay === undefined ? [] : [overlay.path],
-        ...(cleanup === undefined ? {} : { cleanup }),
+        additionalPatches: [overlay?.path, isolationOverlay?.path].filter((path): path is string => path !== undefined),
+        cleanup,
         onOpenSettingsDocument: this.onOpenSettingsDocument,
       })
     } catch (error: unknown) {
@@ -362,8 +409,8 @@ export class RuntimeController {
       this.state = await this.store.promote(runtime.manifest.dshVersion)
       this.currentRuntimeRevision = runtime.manifest.runtimeRevision
       const cliDirectory = await prepareCliShim(runtime, this.userData)
-      this.update('ready', `DSH ${runtime.manifest.dshVersion} 已启动`)
       await this.onReady(backend.url, runtime, cliDirectory)
+      this.update('ready', `DSH ${runtime.manifest.dshVersion} 已启动`)
     } catch (error) {
       this.expectedStop = true
       if (this.backend === backend) this.backend = undefined

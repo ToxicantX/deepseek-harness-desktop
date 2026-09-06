@@ -27,7 +27,9 @@ import { mutateMcpWithRuntime } from './mcp-restart.ts'
 import { PersonalizationManager } from './personalization-manager.ts'
 import { parsePetWindowShape, PetWindowController, type PetRendererState as PetWindowState } from './pet-window.ts'
 import type { PetSize } from './pet-size.ts'
-import { PluginManager } from './plugin-manager.ts'
+import { PluginManager, validatePackageName } from './plugin-manager.ts'
+import { PluginIsolation, thirdParty } from './plugin-isolation.ts'
+import { loadAndValidatePlugins } from './plugin-client-health.ts'
 import { PluginRestartCoordinator } from './plugin-restart.ts'
 import { RuntimeController, type RuntimeView } from './runtime-controller.ts'
 import { SessionRepairClient } from './session-repair.ts'
@@ -71,6 +73,8 @@ let updateWindow: BrowserWindow | undefined
 let latestUpdateProgress: ShellUpdateProgress | undefined
 let controller: RuntimeController | undefined
 let pluginManager: PluginManager | undefined
+let pluginIsolation: PluginIsolation | undefined
+let pluginIsolationActive = false
 let mcpManager: McpManager | undefined
 let personalizationManager: PersonalizationManager | undefined
 let personalizationDirty = false
@@ -363,6 +367,7 @@ function sendView(window: BrowserWindow): void {
 }
 
 async function retryRuntimeFromMenu(): Promise<void> {
+  if (pluginIsolationActive) throw new Error('插件隔离验证正在进行')
   const runtimeController = controller
   if (runtimeController === undefined) return
   if (mainWindow !== undefined) await showSetup(mainWindow)
@@ -645,7 +650,7 @@ async function setMcpEnabled(event: IpcMainInvokeEvent, value: unknown): Promise
   const service = mcpService(event)
   const runtimeController = controller
   if (runtimeController === undefined) throw new Error('DSH Runtime 控制器尚未初始化')
-  if (mcpMutationActive) throw new Error('另一个 MCP 操作正在进行')
+  if (mcpMutationActive || pluginIsolationActive) throw new Error('另一个 MCP 或插件隔离操作正在进行')
   if (pluginManager?.current() !== undefined) throw new Error('插件操作正在进行，请完成后再切换 MCP')
   mcpMutationActive = true
   try {
@@ -813,12 +818,14 @@ async function startApplication(): Promise<void> {
   })
   const home = process.env.DSH_HOME ?? join(homedir(), '.dsh')
   await mkdir(home, { recursive: true })
+  pluginIsolation = new PluginIsolation({ home, directory: join(app.getPath('userData'), 'plugin-isolation') })
   controller = new RuntimeController({
     shellVersion: app.getVersion(),
     store,
     shutdownHook,
     userData: app.getPath('userData'),
     goalGuardPlugin,
+    pluginIsolation,
     ...(process.env.DSH_DESKTOP_CATALOG_URL === undefined ? {} : { catalogUrl: process.env.DSH_DESKTOP_CATALOG_URL }),
     onView: broadcast,
     async onReady(url, _runtime, preparedCliDirectory) {
@@ -833,7 +840,9 @@ async function startApplication(): Promise<void> {
       installTrayMenu()
       const window = mainWindow
       if (window === undefined) return
-      await window.loadURL(url.href)
+      if (pluginIsolation?.supported(_runtime) && (await pluginIsolation.packages()).length > 0) {
+        await loadAndValidatePlugins(window.webContents, url, async () => { await window.loadURL(url.href) })
+      } else await window.loadURL(url.href)
       if (mainWindow !== window || window.isDestroyed()) return
       mainUiLoaded = true
       installMenu()
@@ -970,11 +979,13 @@ ipcMain.handle('runtime:get-view', async (event) => {
 })
 ipcMain.handle('runtime:retry', async (event) => {
   const runtimeController = runtimeClient(event)
+  if (pluginIsolationActive) throw new Error('插件隔离验证正在进行')
   if (mainWindow !== undefined) await showSetup(mainWindow)
   await runtimeController.retry()
 })
 ipcMain.handle('runtime:set-preference', async (event, value: unknown) => {
   const runtimeController = runtimeClient(event)
+  if (pluginIsolationActive) throw new Error('插件隔离验证正在进行')
   if (mainWindow !== undefined) await showSetup(mainWindow)
   await runtimeController.setPreference(parsePreference(value))
 })
@@ -1009,13 +1020,33 @@ ipcMain.handle('mcp-manager:set-enabled', async (event, value: unknown) => {
   return setMcpEnabled(event, value)
 })
 ipcMain.handle('plugin-manager:list', async (event) => {
-  return pluginService(event).list()
+  const list = await pluginService(event).list()
+  const records = new Map((await pluginIsolation?.list() ?? []).map(record => [record.name, record.reason]))
+  const runtime = controller?.installedRuntime()
+  return { entries: list.entries.map(entry => ({
+    ...entry,
+    ...(thirdParty(entry.name) && runtime !== undefined && pluginIsolation?.supported(runtime) ? { canIsolate: true } : {}),
+    ...(records.has(entry.name) ? { isolation: records.get(entry.name)! } : {}),
+  })) }
+})
+ipcMain.handle('plugin-manager:set-enabled', async (event, name: unknown, enabled: unknown) => {
+  const service = pluginService(event)
+  if (event.senderFrame !== event.sender.mainFrame) throw new Error('插件管理请求来源无效')
+  const packageName = validatePackageName(name)
+  if (typeof enabled !== 'boolean' || controller === undefined || pluginIsolation === undefined) throw new Error('无效的插件状态操作')
+  if (pluginIsolationActive || mcpMutationActive || service.current() !== undefined) throw new Error('有插件或 MCP 操作尚未完成')
+  pluginIsolationActive = true
+  try {
+    if (mainWindow !== undefined) await showSetup(mainWindow)
+    await controller.setPluginEnabled(packageName, enabled)
+  } finally { pluginIsolationActive = false }
 })
 ipcMain.handle('plugin-manager:updates', async (event) => {
   return pluginService(event).updates()
 })
 ipcMain.handle('plugin-manager:start', async (event, value: unknown) => {
   const service = pluginService(event)
+  if (pluginIsolationActive) throw new Error('插件隔离验证正在进行')
   if (mcpMutationActive) throw new Error('MCP 操作正在进行，请完成后再管理插件')
   const runtimeController = controller
   if (runtimeController === undefined) throw new Error('DSH Runtime 控制器尚未初始化')

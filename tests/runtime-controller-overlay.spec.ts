@@ -25,13 +25,14 @@ function runtime() {
   } as any
 }
 
-function controller(onReady = vi.fn(async () => {})) {
+function controller(onReady = vi.fn(async () => {}), pluginIsolation?: any) {
   return new RuntimeController({
     shellVersion: '0.1.16',
     store: { promote: vi.fn(async () => ({ schemaVersion: 1, preference: { mode: 'latest-compatible' } })) } as any,
     shutdownHook: 'C:/shutdown-hook.js',
     userData: 'C:/user-data',
     goalGuardPlugin: 'C:/resources/goal-no-progress-guard/index.js',
+    ...(pluginIsolation === undefined ? {} : { pluginIsolation }),
     environment: { DSH_HOME: 'C:/dsh-home' },
     onView: vi.fn(),
     onReady,
@@ -45,6 +46,41 @@ beforeEach(() => {
 })
 
 describe('RuntimeController goal guard overlay', () => {
+  it('bounds automatic quarantine retries after both backend and frontend failures', async () => {
+    const isolation = { prepare: vi.fn(), quarantine: vi.fn(async () => true) }
+    mocks.startBackend.mockRejectedValue(new Error('backend import failure'))
+    await expect((controller(undefined, isolation) as any).launch(runtime())).rejects.toThrow('backend import failure')
+    expect(mocks.startBackend).toHaveBeenCalledTimes(4)
+    expect(isolation.quarantine).toHaveBeenCalledTimes(3)
+
+    mocks.startBackend.mockReset()
+    isolation.quarantine.mockClear()
+    const stop = vi.fn(async () => {})
+    mocks.startBackend.mockResolvedValue({ url: new URL('http://127.0.0.1:43123/'), done: new Promise(() => {}), stop })
+    await expect((controller(vi.fn(async () => { throw new Error('client import failure') }), isolation) as any).launch(runtime())).rejects.toThrow('client import failure')
+    expect(stop).toHaveBeenCalledTimes(4)
+    expect(isolation.quarantine).toHaveBeenCalledTimes(3)
+  })
+
+  it('does not automatically retry a validation trial and restores the disabled launch', async () => {
+    const isolation = {
+      supported: () => true,
+      packages: async () => ['third-party'],
+      prepare: vi.fn(async (_runtime, _environment, trial) => {
+        if (trial) throw new Error('still incompatible')
+      }),
+      quarantine: vi.fn(),
+      validate: vi.fn(async (_name, attempt) => { await attempt() }),
+    }
+    const value = controller(undefined, isolation)
+    ;(value as any).selectedRuntime = runtime()
+    mocks.startBackend.mockResolvedValue({ url: new URL('http://127.0.0.1:43123/'), done: new Promise(() => {}), stop: vi.fn() })
+    await expect(value.setPluginEnabled('third-party', true)).rejects.toThrow('still incompatible')
+    expect(isolation.prepare.mock.calls.map(call => call[2])).toEqual(['third-party', undefined])
+    expect(isolation.quarantine).not.toHaveBeenCalled()
+    expect(value.snapshot().phase).toBe('ready')
+  })
+
   it('prepares the overlay and forwards its patch and cleanup', async () => {
     const dispose = vi.fn(async () => {})
     mocks.prepareOverlay.mockResolvedValue({ path: 'C:/user-data/runtime-overlays/goal.yml', dispose })

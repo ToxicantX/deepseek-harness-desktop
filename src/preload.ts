@@ -372,7 +372,7 @@ function initializePluginManagerPage(): void {
     installButton.disabled = value
     refreshButton.disabled = value
     progress.hidden = !value
-    for (const button of listElement.querySelectorAll<HTMLButtonElement>('button')) button.disabled = value
+    for (const button of listElement.querySelectorAll<HTMLButtonElement | HTMLInputElement>('button, input')) button.disabled = value
   }
   const showLog = (value: string): void => {
     logElement.textContent = value
@@ -398,8 +398,28 @@ function initializePluginManagerPage(): void {
         + (latestVersion === undefined ? '' : ' · 可更新至 ' + latestVersion)
         + (entry.spec === undefined ? '' : ' · ' + entry.spec)
       main.append(name, meta)
+      if (entry.isolation !== undefined) {
+        const reason = document.createElement('div')
+        reason.className = 'plugin-isolation'
+        reason.textContent = entry.isolation === 'manual' ? '已禁用' : entry.isolation === 'removed-client-runtime'
+          ? '已隔离：插件依赖已移除的客户端模块' : '已隔离：插件导入不兼容'
+        main.append(reason)
+      }
       const actions = document.createElement('div')
       actions.className = 'plugin-actions'
+      if (entry.canIsolate) {
+        const label = document.createElement('label')
+        label.className = 'plugin-toggle'
+        const toggle = document.createElement('input')
+        toggle.type = 'checkbox'
+        toggle.setAttribute('role', 'switch')
+        toggle.setAttribute('aria-label', entry.name + ' 启用状态')
+        toggle.checked = entry.isolation === undefined
+        toggle.disabled = busy
+        label.append(toggle, entry.isolation === undefined ? '已启用' : '重新启用并验证')
+        toggle.addEventListener('change', () => { void setEnabled(entry.name, toggle.checked) })
+        actions.append(label)
+      }
       if (!completedUpdates.has(entry.name) && (latestVersion !== undefined || entry.manualUpdate === true)) {
         const updateButton = document.createElement('button')
         updateButton.type = 'button'
@@ -434,6 +454,19 @@ function initializePluginManagerPage(): void {
         .map(update => [update.name, update.latestVersion]))
       renderEntries(currentEntries)
     }).catch(() => undefined)
+  }
+  async function setEnabled(name: string, enabled: boolean): Promise<void> {
+    if (busy) return
+    setBusy(true)
+    setStatus(enabled ? '正在重新启用并验证插件...' : '正在禁用插件并重启 Runtime...')
+    try {
+      await ipcRenderer.invoke('plugin-manager:set-enabled', name, enabled)
+      setStatus(enabled ? '插件已通过启动验证并启用' : '插件已禁用', 'success')
+    } catch (error) { setStatus(errorMessage(error), 'error') }
+    finally {
+      try { await loadEntries() } catch (error) { setStatus(errorMessage(error), 'error') }
+      setBusy(false)
+    }
   }
   const waitForOperation = async (operationId: string): Promise<PluginOperationStatus> => {
     for (;;) {

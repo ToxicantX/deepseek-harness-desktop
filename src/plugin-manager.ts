@@ -22,6 +22,8 @@ export interface PluginEntry {
   spec?: string
   version?: string
   manualUpdate?: true
+  canIsolate?: true
+  isolation?: 'manual' | 'removed-client-runtime' | 'import-incompatible'
 }
 
 export interface PluginList {
