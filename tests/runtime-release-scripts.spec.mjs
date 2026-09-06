@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { readFileSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
@@ -75,8 +75,10 @@ describe('Runtime release scripts', () => {
   it('builds and deploys the cloned DSH workspace without resolving the CLI from npm', () => {
     expect(buildScript).toContain('pnpm install --frozen-lockfile')
     expect(buildScript).toContain('pnpm run build')
+    expect(buildScript).toContain("$DshPackage = Join-Path $App 'node_modules/@deepseek-ai/dsh'")
     expect(buildScript).toContain("pnpm --filter '@deepseek-ai/dsh' deploy --prod --legacy $DshPackage")
     expect(buildScript).toContain("normalize-runtime-dependencies.mjs') $DshPackage")
+    expect(buildScript).not.toContain('Move-Item $DshPackage')
     expect(buildScript).toContain('"@deepseek-ai/dsh": "file:./node_modules/@deepseek-ai/dsh"')
     expect(buildScript).not.toContain('"@deepseek-ai/dsh": "$DshVersion"')
     expect(buildScript).toContain('node_modules/@deepseek-ai/dsh/package.json')
@@ -84,6 +86,29 @@ describe('Runtime release scripts', () => {
     expect(buildScript).toContain('Installed DSH version $InstalledVersion does not match $DshVersion.')
     expect(buildScript).not.toContain('Push-Location $App')
     expect(buildScript).not.toContain("Push-Location $App\ntry {\n  pnpm install --prod --no-frozen-lockfile")
+  })
+
+  it('canonicalizes chained pnpm directory links to physical archive targets', async () => {
+    const directory = await fixtureDirectory()
+    const runtime = join(directory, 'runtime')
+    const archive = join(directory, 'archive')
+    const physical = join(runtime, 'app', 'node_modules', '.pnpm', 'package@1.0.0', 'node_modules', 'package')
+    const intermediate = join(runtime, 'app', 'node_modules', '.pnpm', 'node_modules', 'package')
+    const linked = join(runtime, 'app', 'node_modules', 'package')
+    await mkdir(physical, { recursive: true })
+    await writeFile(join(physical, 'package.json'), JSON.stringify({ name: 'package', version: '1.0.0' }))
+    await mkdir(join(runtime, 'app', 'node_modules', '.pnpm', 'node_modules'), { recursive: true })
+    await symlink(physical, intermediate, 'junction')
+    await symlink(intermediate, linked, 'junction')
+
+    await execFileAsync(process.execPath, [resolve('scripts/prepare-runtime-archive.mjs'), runtime, archive])
+
+    const map = JSON.parse(await readFile(join(archive, 'runtime-links.json'), 'utf8'))
+    expect(map.links).toContainEqual({
+      path: 'app/node_modules/package',
+      target: 'app/node_modules/.pnpm/package@1.0.0/node_modules/package',
+      kind: 'junction',
+    })
   })
 
   it('removes workspace dependencies from every manifest section and preserves ordinary specs', async () => {

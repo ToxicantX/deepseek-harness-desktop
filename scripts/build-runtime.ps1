@@ -19,7 +19,6 @@ $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 $Work = Join-Path $OutputDirectory 'work'
 $Source = Join-Path $Work 'source'
 $Runtime = Join-Path $Work 'runtime'
-$DshPackage = Join-Path $Work 'dsh-package'
 $ArchiveRuntime = Join-Path $Work 'archive-runtime'
 $Tools = Join-Path $Runtime 'tools'
 $RepositoryRoot = Split-Path $PSScriptRoot -Parent
@@ -43,6 +42,8 @@ if ($DeclaredVersion -ne $DshVersion) {
 }
 
 $App = Join-Path $Runtime 'app'
+$DshPackage = Join-Path $App 'node_modules/@deepseek-ai/dsh'
+New-Item (Split-Path $DshPackage -Parent) -ItemType Directory -Force | Out-Null
 Push-Location $Source
 try {
   pnpm install --frozen-lockfile
@@ -56,11 +57,7 @@ try {
 } finally {
   Pop-Location
 }
-New-Item $Runtime -ItemType Directory -Force | Out-Null
-New-Item (Join-Path $App 'node_modules/@deepseek-ai') -ItemType Directory -Force | Out-Null
-$DeployedDsh = Join-Path $App 'node_modules/@deepseek-ai/dsh'
-Move-Item $DshPackage $DeployedDsh -Force
-$CopiedDshManifest = Join-Path $DeployedDsh 'package.json'
+$CopiedDshManifest = Join-Path $DshPackage 'package.json'
 if (-not (Test-Path $CopiedDshManifest)) { throw 'Copied DSH package manifest is missing from the standalone app.' }
 $CopiedDshVersion = node -e "const p=require(process.argv[1]); process.stdout.write(p.version)" $CopiedDshManifest
 if ($CopiedDshVersion -ne $DshVersion) { throw "Copied DSH version $CopiedDshVersion does not match $DshVersion." }

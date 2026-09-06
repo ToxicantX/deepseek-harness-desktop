@@ -1,5 +1,5 @@
-import { copyFile, lstat, mkdir, readdir, readlink, rm, writeFile } from 'node:fs/promises'
-import { dirname, relative, resolve, sep } from 'node:path'
+import { copyFile, lstat, mkdir, readdir, readlink, realpath, rm, writeFile } from 'node:fs/promises'
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 
 const sourceRoot = resolve(process.argv[2] ?? '')
 const destinationRoot = resolve(process.argv[3] ?? '')
@@ -7,20 +7,34 @@ if (sourceRoot.length === 0 || destinationRoot.length === 0 || sourceRoot === de
   throw new Error('usage: node scripts/prepare-runtime-archive.mjs <runtime> <archive-staging>')
 }
 
+const physicalSourceRoot = await realpath(sourceRoot)
 const links = []
 const tasks = [{ source: sourceRoot, destination: destinationRoot }]
-const insideSource = filename => filename === sourceRoot || filename.startsWith(`${sourceRoot}${sep}`)
+const relativeToPhysicalRoot = filename => relative(physicalSourceRoot, filename)
+const insideSource = filename => {
+  const path = relativeToPhysicalRoot(filename)
+  return path === '' || (!isAbsolute(path) && path !== '..' && !path.startsWith(`..${sep}`))
+}
 const archivePath = filename => relative(sourceRoot, filename).split(sep).join('/')
+const physicalArchivePath = filename => relativeToPhysicalRoot(filename).split(sep).join('/')
 
 async function processEntry(source, destination) {
   const entry = await lstat(source)
   if (entry.isSymbolicLink()) {
     const rawTarget = await readlink(source)
-    const target = resolve(dirname(source), rawTarget)
+    let target
+    try {
+      target = await realpath(source)
+    } catch (error) {
+      if (error?.code === 'ENOENT') {
+        throw new Error(`runtime link target is missing: ${archivePath(source)} -> ${rawTarget}`, { cause: error })
+      }
+      throw error
+    }
     if (!insideSource(target)) throw new Error(`runtime link escapes archive root: ${archivePath(source)}`)
     const targetEntry = await lstat(target)
     if (targetEntry.isDirectory()) {
-      links.push({ path: archivePath(source), target: archivePath(target), kind: 'junction' })
+      links.push({ path: archivePath(source), target: physicalArchivePath(target), kind: 'junction' })
       return
     }
     await mkdir(dirname(destination), { recursive: true })
