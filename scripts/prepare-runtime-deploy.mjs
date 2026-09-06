@@ -16,5 +16,9 @@ for (const [name, specifier] of Object.entries(document.toJS().overrides ?? {}))
 }
 // Hoisting otherwise adds links back to unrelated original workspace projects.
 document.set('hoistWorkspacePackages', false)
+// This archive targets Windows; pnpm retains source links for skipped Linux workspace packages.
+for (const arch of ['arm64', 'x64']) {
+  document.setIn(['overrides', `@deepseek-ai/node-addon-landlock-run>@deepseek-ai/node-addon-landlock-run-linux-${arch}`], '-')
+}
 await writeFile(filename, document.toString(), 'utf8')
 console.log(`runtime deploy: ${changed} link override(s) converted to file dependencies`)

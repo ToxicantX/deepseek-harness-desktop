@@ -122,9 +122,13 @@ describe('Runtime release scripts', () => {
     const cli = join(source, 'apps', 'cli')
     const vendor = join(source, 'vendor', 'schemastery')
     const dependency = join(source, 'vendor', 'cosmokit')
+    const addon = join(source, 'vendor', 'addon')
+    const nativeAddon = join(source, 'vendor', 'native-addon')
     await mkdir(cli, { recursive: true })
     await mkdir(vendor, { recursive: true })
     await mkdir(dependency, { recursive: true })
+    await mkdir(addon, { recursive: true })
+    await mkdir(nativeAddon, { recursive: true })
     await writeFile(join(source, 'package.json'), JSON.stringify({ private: true }))
     await writeFile(join(source, 'pnpm-workspace.yaml'), [
       'packages: [apps/*, vendor/*]',
@@ -136,7 +140,7 @@ describe('Runtime release scripts', () => {
     ].join('\n'))
     await writeFile(join(cli, 'package.json'), JSON.stringify({
       name: '@deepseek-ai/dsh', version: '1.0.0',
-      dependencies: { '@deepseek-ai/schemastery': 'workspace:*' },
+      dependencies: { '@deepseek-ai/schemastery': 'workspace:*', '@deepseek-ai/node-addon-landlock-run': 'workspace:*' },
     }))
     await writeFile(join(vendor, 'package.json'), JSON.stringify({
       name: '@deepseek-ai/schemastery', version: '1.0.0', main: 'index.js',
@@ -147,6 +151,27 @@ describe('Runtime release scripts', () => {
       name: '@deepseek-ai/cosmokit', version: '1.0.0', main: 'index.js',
     }))
     await writeFile(join(dependency, 'index.js'), 'module.exports = 42\n')
+    await writeFile(join(addon, 'package.json'), JSON.stringify({
+      name: '@deepseek-ai/node-addon-landlock-run', version: '1.0.0',
+      main: 'index.js',
+      optionalDependencies: {
+        '@deepseek-ai/node-addon-landlock-run-linux-arm64': 'workspace:*',
+        '@deepseek-ai/node-addon-landlock-run-linux-x64': 'workspace:*',
+        'test-native-addon': 'workspace:*',
+      },
+    }))
+    await writeFile(join(addon, 'index.js'), "module.exports = require('test-native-addon')\n")
+    await writeFile(join(nativeAddon, 'package.json'), JSON.stringify({
+      name: 'test-native-addon', version: '1.0.0', main: 'index.js', os: [process.platform], cpu: [process.arch],
+    }))
+    await writeFile(join(nativeAddon, 'index.js'), 'module.exports = 43\n')
+    for (const arch of ['arm64', 'x64']) {
+      const linuxAddon = join(source, 'vendor', `linux-${arch}`)
+      await mkdir(linuxAddon)
+      await writeFile(join(linuxAddon, 'package.json'), JSON.stringify({
+        name: `@deepseek-ai/node-addon-landlock-run-linux-${arch}`, version: '1.0.0', os: ['linux'], cpu: [arch],
+      }))
+    }
     const pnpm = process.env.npm_execpath
     expect(pnpm, 'run this integration test with pnpm test').toBeTruthy()
     const command = pnpm.endsWith('.exe') ? pnpm : process.execPath
@@ -167,21 +192,22 @@ describe('Runtime release scripts', () => {
     await execFileAsync(process.execPath, [resolve('scripts/prepare-runtime-archive.mjs'), runtime, archive])
     await rm(source, { recursive: true, force: true })
     const { stdout } = await execFileAsync(process.execPath, ['-e',
-      "console.log(require(require.resolve('@deepseek-ai/schemastery', { paths: [process.argv[1]] })))", deployed,
+      "for (const name of ['@deepseek-ai/schemastery', '@deepseek-ai/node-addon-landlock-run']) console.log(require(require.resolve(name, { paths: [process.argv[1]] })))", deployed,
     ])
-    expect(stdout.trim()).toBe('42')
+    expect(stdout.trim()).toBe('42\n43')
     const map = JSON.parse(await readFile(join(archive, 'runtime-links.json'), 'utf8'))
     expect(map.links.some(link => link.path.endsWith('/@deepseek-ai/schemastery'))).toBe(true)
+    expect(map.links.some(link => link.path.includes('node-addon-landlock-run-linux-'))).toBe(false)
     await rm(runtime, { recursive: true, force: true })
     for (const link of map.links) {
       await mkdir(resolve(archive, link.path, '..'), { recursive: true })
       await symlink(resolve(archive, link.target), resolve(archive, link.path), 'junction')
     }
     const installed = await execFileAsync(process.execPath, ['-e',
-      "console.log(require(require.resolve('@deepseek-ai/schemastery', { paths: [process.argv[1]] })))",
+      "for (const name of ['@deepseek-ai/schemastery', '@deepseek-ai/node-addon-landlock-run']) console.log(require(require.resolve(name, { paths: [process.argv[1]] })))",
       join(archive, 'app', 'node_modules', '@deepseek-ai', 'dsh'),
     ])
-    expect(installed.stdout.trim()).toBe('42')
+    expect(installed.stdout.trim()).toBe('42\n43')
   }, 120000)
 
   it('rejects links to files outside the runtime instead of bundling them', async () => {
