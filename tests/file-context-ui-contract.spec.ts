@@ -67,6 +67,12 @@ describe('desktop text and file context contract', () => {
   it('is reinjection-safe and expands pending clips before keyboard, form, or send-button submit', () => {
     const script = createFileContextInjectorScript()
     expect(script).toContain("if (previous && typeof previous.dispose === 'function') previous.dispose()")
+    expect(script).toContain(String.raw`const DRAFT_MARKER = '\u2063'`)
+    expect(script).toContain("document.addEventListener('input', onInput, true)")
+    expect(script).toContain('if (value.includes(DRAFT_MARKER)) return')
+    expect(script).toContain("typeof node.__lexicalTextContent === 'string'")
+    expect(script).toContain('const editor = node.__lexicalEditor')
+    expect(script).toContain("children.push({ type: 'linebreak', version: 1 })")
     expect(script).toContain("document.addEventListener('keydown', onSubmit, true)")
     expect(script).toContain("document.addEventListener('click', onSubmit, true)")
     expect(script).toContain("document.addEventListener('submit', onSubmit, true)")
@@ -77,9 +83,9 @@ describe('desktop text and file context contract', () => {
     expect(script).toContain('for (const entry of clips.values()) value = appendEntry(value, entry)')
   })
 
-  it('expands a pending clip before replaying the DSH send-button click', async () => {
+  it('writes pending clips through the DSH Lexical editor before replaying the send-button click', async () => {
     const listeners = new Map<string, (event: any) => void>()
-    let editor: FakeTextAreaElement
+    let editor: FakeContentEditableElement
     let sent: string | undefined
     class FakeElement {
       closest(_selector: string): FakeElement | null { return null }
@@ -88,15 +94,27 @@ describe('desktop text and file context contract', () => {
       matches(_selector: string): boolean { return false }
     }
     const composer = new class extends FakeHTMLElement {
-      querySelector(selector: string): FakeTextAreaElement | null {
-        return selector.includes('textarea') ? editor : null
+      querySelector(selector: string): FakeContentEditableElement | null {
+        return selector.includes('[contenteditable="true"]') ? editor : null
       }
     }()
-    class FakeTextAreaElement extends FakeHTMLElement {
-      private current = ''
-      get value(): string { return this.current }
-      set value(value: string) { this.current = value }
-      override matches(selector: string): boolean { return selector.includes('textarea') }
+    class FakeTextAreaElement extends FakeHTMLElement {}
+    class FakeContentEditableElement extends FakeHTMLElement {
+      __lexicalTextContent = ''
+      innerText = ''
+      readonly __lexicalEditor = {
+        parseEditorState: (serialized: string) => JSON.parse(serialized),
+        setEditorState: (state: any) => {
+          const children = state.root.children[0]?.children ?? []
+          this.setText(children.map((child: any) => child.type === 'linebreak' ? '\n' : child.text ?? '').join(''))
+        },
+        focus: () => undefined,
+      }
+      setText(value: string): void {
+        this.__lexicalTextContent = value
+        this.innerText = value
+      }
+      override matches(selector: string): boolean { return selector.includes('[contenteditable="true"]') }
       override closest(selector: string): FakeElement | null {
         if (selector === 'textarea,[contenteditable="true"]') return this
         if (selector === '[data-composer-card="true"]') return composer
@@ -109,7 +127,7 @@ describe('desktop text and file context contract', () => {
     class FakeInputElement extends FakeHTMLElement {}
     class FakeFormElement extends FakeHTMLElement {}
     class FakeButtonElement extends FakeHTMLElement {
-      disabled = false
+      get disabled(): boolean { return editor.__lexicalTextContent.trim() === '' }
       getAttribute(name: string): string | null { return name === 'aria-label' ? '发送消息' : null }
       override closest(selector: string): FakeElement | null {
         if (selector === 'button[aria-label]') return this
@@ -125,7 +143,7 @@ describe('desktop text and file context contract', () => {
           stopImmediatePropagation() { this.stopped = true },
         }
         listeners.get('click')?.(event)
-        if (!event.stopped) sent = editor.value
+        if (!event.stopped) sent = editor.__lexicalTextContent
       }
     }
     const button = new FakeButtonElement()
@@ -135,9 +153,17 @@ describe('desktop text and file context contract', () => {
     class PendingClipMap extends Map<string, any> {
       constructor() {
         super()
-        this.set('clip-1', { name: 'long.textclip', text: '长文本'.repeat(200), isFile: false, element: null })
+        this.set('clip-1', { name: 'long.textclip', text: '长文本'.repeat(200), isFile: false, element: null, editor })
       }
     }
+    class PendingEditorSet<T> extends Set<T> {
+      constructor(values?: readonly T[]) {
+        super(values)
+        if (values === undefined) this.add(editor as T)
+      }
+    }
+    editor = new FakeContentEditableElement()
+    editor.setText('\u2063')
     const windowFixture = { addEventListener() {}, removeEventListener() {} } as any
     const documentFixture = {
       addEventListener: (type: string, listener: (event: any) => void) => listeners.set(type, listener),
@@ -146,15 +172,16 @@ describe('desktop text and file context contract', () => {
     }
     const execute = new Function(
       'window', 'document', 'Element', 'HTMLElement', 'HTMLTextAreaElement', 'HTMLInputElement',
-      'InputEvent', 'Node', 'HTMLFormElement', 'HTMLButtonElement', 'KeyboardEvent', 'Map',
+      'InputEvent', 'Node', 'HTMLFormElement', 'HTMLButtonElement', 'KeyboardEvent', 'Map', 'Set',
       'return ' + createFileContextInjectorScript(),
     )
     execute(
       windowFixture, documentFixture, FakeElement, FakeHTMLElement, FakeTextAreaElement, FakeInputElement,
-      class {}, FakeElement, FakeFormElement, FakeButtonElement, class {}, PendingClipMap,
+      class {}, FakeElement, FakeFormElement, FakeButtonElement, class {}, PendingClipMap, PendingEditorSet,
     )
-    editor = new FakeTextAreaElement()
-    editor.value = '修复这个问题'
+    editor.setText('')
+    listeners.get('input')?.({ target: editor })
+    expect(editor.__lexicalTextContent).toBe('\u2063')
     const event = {
       type: 'click',
       target: new FakeIconElement(),
@@ -168,7 +195,8 @@ describe('desktop text and file context contract', () => {
     await new Promise(resolve => setTimeout(resolve, 5))
 
     expect(event).toMatchObject({ prevented: true, stopped: true })
-    expect(sent).toBe('修复这个问题\n\n' + '长文本'.repeat(200))
+    expect(sent).toBe('长文本'.repeat(200))
+    expect(sent).not.toContain('\u2063')
   })
 
   it('exposes only Electron file-path resolution and injects on the trusted main page', () => {

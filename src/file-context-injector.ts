@@ -11,8 +11,10 @@ export function createFileContextInjectorScript(): string {
   const BINARY_EXTENSIONS = /\.(?:7z|avi|bin|bmp|class|db|dll|dmg|doc|docx|eot|exe|gif|ico|iso|jar|jpeg|jpg|lib|m4a|mov|mp3|mp4|msi|otf|pdf|png|ppt|pptx|rar|so|sqlite|sys|tar|tif|tiff|ttf|wav|webm|webp|woff|woff2|xls|xlsx|zip)$/i;
   const CLIP_ATTR = 'data-dsh-clip';
   const TRAY_ATTR = 'data-dsh-clip-tray';
+  const DRAFT_MARKER = '\u2063';
   const disposers = [];
   const clips = new Map();
+  const markedEditors = new Set();
   let clipSequence = 0;
   let busy = false;
   let replayingSubmit = false;
@@ -31,13 +33,56 @@ export function createFileContextInjectorScript(): string {
     if (!(button instanceof HTMLButtonElement) || button.disabled || !button.closest('[data-composer-card="true"]')) return null;
     return SEND_BUTTON_LABELS.has((button.getAttribute('aria-label') || '').trim().toLowerCase()) ? button : null;
   };
-  const readValue = node => node instanceof HTMLTextAreaElement || node instanceof HTMLInputElement ? node.value : node.innerText;
+  const readValue = node => node instanceof HTMLTextAreaElement || node instanceof HTMLInputElement
+    ? node.value
+    : typeof node.__lexicalTextContent === 'string' ? node.__lexicalTextContent : node.innerText;
+  const writeLexicalValue = (node, value) => {
+    const editor = node.__lexicalEditor;
+    if (!editor || typeof editor.parseEditorState !== 'function' || typeof editor.setEditorState !== 'function') return false;
+    const children = [];
+    const lines = value.split(/\r\n|\r|\n/);
+    for (let index = 0; index < lines.length; index += 1) {
+      if (lines[index] !== '') children.push({ detail: 0, format: 0, mode: 'normal', style: '', text: lines[index], type: 'text', version: 1 });
+      if (index < lines.length - 1) children.push({ type: 'linebreak', version: 1 });
+    }
+    const paragraph = {
+      children,
+      direction: null, format: '', indent: 0, type: 'paragraph', version: 1, textFormat: 0, textStyle: '',
+    };
+    const state = { root: { children: [paragraph], direction: null, format: '', indent: 0, type: 'root', version: 1 } };
+    editor.setEditorState(editor.parseEditorState(JSON.stringify(state)));
+    if (typeof editor.focus === 'function') editor.focus();
+    return true;
+  };
   const writeValue = (node, value) => {
     if (node instanceof HTMLTextAreaElement || node instanceof HTMLInputElement) {
       const descriptor = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(node), 'value');
       if (descriptor && descriptor.set) descriptor.set.call(node, value); else node.value = value;
-    } else node.innerText = value;
+    } else {
+      if (writeLexicalValue(node, value)) return;
+      node.innerText = value;
+    }
     node.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: null }));
+  };
+  const takeDraftValue = editor => {
+    const value = readValue(editor);
+    if (!markedEditors.delete(editor)) return value;
+    const marker = value.indexOf(DRAFT_MARKER);
+    return marker < 0 ? value : value.slice(0, marker) + value.slice(marker + DRAFT_MARKER.length);
+  };
+  const ensureDraftMarker = editor => {
+    const value = readValue(editor);
+    if (markedEditors.has(editor)) {
+      if (value.includes(DRAFT_MARKER)) return;
+      markedEditors.delete(editor);
+    }
+    if (value.trim() !== '') return;
+    markedEditors.add(editor);
+    writeValue(editor, value + DRAFT_MARKER);
+  };
+  const clearDraftMarker = editor => {
+    if (!markedEditors.has(editor)) return;
+    writeValue(editor, takeDraftValue(editor));
   };
   const truncateLabel = (label, max = 24) => {
     const clean = String(label || '');
@@ -92,6 +137,7 @@ export function createFileContextInjectorScript(): string {
     if (entry.element) entry.element.remove();
     clips.delete(id);
     cleanupTray(tray);
+    if (![...clips.values()].some(candidate => candidate.editor === entry.editor)) clearDraftMarker(entry.editor);
   };
   const formatBytes = bytes => bytes >= 1024 * 1024
     ? (bytes / (1024 * 1024)).toLocaleString(undefined, { maximumFractionDigits: 1 }) + ' MB'
@@ -112,9 +158,9 @@ export function createFileContextInjectorScript(): string {
   const expandClipElement = element => {
     const id = element.getAttribute(CLIP_ATTR);
     const entry = clips.get(id);
-    const editor = findEditor();
+    const editor = entry && isChatEditor(entry.editor) ? entry.editor : findEditor();
     if (!entry || !editor) return;
-    writeValue(editor, appendEntry(readValue(editor), entry));
+    writeValue(editor, appendEntry(takeDraftValue(editor), entry));
     removeClip(id);
     editor.focus();
   };
@@ -206,7 +252,8 @@ export function createFileContextInjectorScript(): string {
     if ([...clips.values()].some(entry => entry.name === name)) return;
     const id = 'clip-' + (++clipSequence);
     const element = clipHtml(id, name, text, isFile, largeFile);
-    clips.set(id, { name, text, isFile, element, ...(largeFile || {}) });
+    clips.set(id, { name, text, isFile, element, editor, ...(largeFile || {}) });
+    ensureDraftMarker(editor);
     ensureTray(editor).appendChild(element);
   };
   const appendText = (editor, text) => {
@@ -223,7 +270,7 @@ export function createFileContextInjectorScript(): string {
   };
   const expandClips = editor => {
     if (clips.size === 0) return false;
-    let value = readValue(editor);
+    let value = takeDraftValue(editor);
     for (const entry of clips.values()) value = appendEntry(value, entry);
     for (const tray of document.querySelectorAll('[' + TRAY_ATTR + ']')) tray.remove();
     clips.clear();
@@ -329,13 +376,19 @@ export function createFileContextInjectorScript(): string {
     else if (button) replayButtonClick(button);
     else replayFormSubmit(event);
   };
+  const onInput = event => {
+    const editor = editorFromTarget(event.target);
+    if (!isChatEditor(editor) || ![...clips.values()].some(entry => entry.editor === editor)) return;
+    ensureDraftMarker(editor);
+  };
   window.addEventListener('paste', onPaste, true);
   document.addEventListener('paste', onPaste, true);
+  document.addEventListener('input', onInput, true);
   document.addEventListener('keydown', onSubmit, true);
   document.addEventListener('click', onSubmit, true);
   document.addEventListener('submit', onSubmit, true);
-  disposers.push(() => window.removeEventListener('paste', onPaste, true), () => document.removeEventListener('paste', onPaste, true), () => document.removeEventListener('keydown', onSubmit, true), () => document.removeEventListener('click', onSubmit, true), () => document.removeEventListener('submit', onSubmit, true));
-  window[key] = { dispose() { for (const dispose of disposers.splice(0)) dispose(); for (const tray of document.querySelectorAll('[' + TRAY_ATTR + ']')) tray.remove(); clips.clear(); delete window[key]; } };
+  disposers.push(() => window.removeEventListener('paste', onPaste, true), () => document.removeEventListener('paste', onPaste, true), () => document.removeEventListener('input', onInput, true), () => document.removeEventListener('keydown', onSubmit, true), () => document.removeEventListener('click', onSubmit, true), () => document.removeEventListener('submit', onSubmit, true));
+  window[key] = { dispose() { for (const dispose of disposers.splice(0)) dispose(); for (const tray of document.querySelectorAll('[' + TRAY_ATTR + ']')) tray.remove(); clips.clear(); for (const editor of [...markedEditors]) clearDraftMarker(editor); delete window[key]; } };
   return { ok: true };
   })();`;
 }

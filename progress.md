@@ -531,3 +531,66 @@
 - `docs/conversation-edit-retry.md`：记录回车、表单和发送按钮三种提交路径的长文本展开规则。
 - `progress.md`：追加本轮施工、验证和回滚记录。
 - 回滚点：`56a587004fca9d48b7a36a84249ce04c91e986a3`。执行 `git restore --source=56a587004fca9d48b7a36a84249ce04c91e986a3 -- src/file-context-injector.ts tests/file-context-ui-contract.spec.ts docs/conversation-edit-retry.md` 可回滚本轮代码、测试和文档；`progress.md` 按追加式历史记录保留。
+
+## 2026-09-07 - Task: 修复仅有长文本折叠项时发送按钮仍不可用
+### What was done
+- 根据复验截图补齐第一轮遗漏：新版 DSH 的发送按钮由受控草稿是否为空决定，壳侧折叠标签不属于 DSH 原生附件，因此仅有 `.textclip` 时按钮仍会被判定为空。
+- 待发送折叠项进入空输入框时写入不可见草稿占位，使 DSH 保持发送入口可用；发送前先移除占位并写入完整长文本，再重放原始发送动作。
+- 用户清空输入、移除最后一个折叠项、手工展开或注入器卸载时同步恢复或清理占位，避免占位残留或进入最终消息。
+- 增加仅有折叠项、草稿被清空后恢复占位、最终发送值包含完整长文本且不含占位字符的执行级回归覆盖。
+### Testing
+- `pnpm exec vitest run tests/file-context-ui-contract.spec.ts --maxWorkers=1 --testTimeout=20000`：通过，1 个测试文件、6 个测试。
+- `pnpm run typecheck`：通过；当前 Node.js 22.22.0 低于仓库声明的 Node.js 24，pnpm 输出 engine 警告。
+- `pnpm test -- --maxWorkers=1 --testTimeout=20000`：通过，23 个测试文件、139 个测试。
+- `pnpm run build`：通过；空草稿占位、发送前展开和占位清理逻辑已进入 `lib/main.js`。
+- `git diff --check`：通过。未替换当前正在运行的桌面壳进程，真实 DSH 会话发送需在重启桌面壳后复验。
+### Notes
+- `src/file-context-injector.ts`：增加仅有折叠项时的草稿占位生命周期，并在发送前还原完整内容。
+- `tests/file-context-ui-contract.spec.ts`：覆盖空草稿按钮判定、占位恢复和最终发送内容。
+- `docs/conversation-edit-retry.md`：记录仅有折叠项时的发送启用和占位清理规则。
+- `progress.md`：追加本轮复验问题、修正、验证和回滚记录。
+- 回滚点：`f06cdc3736cf16cfe6f05e3dee7c243406f709ff`。执行 `git restore --source=f06cdc3736cf16cfe6f05e3dee7c243406f709ff -- src/file-context-injector.ts tests/file-context-ui-contract.spec.ts docs/conversation-edit-retry.md` 可回滚本轮代码、测试和文档；`progress.md` 按追加式历史记录保留，通过后续追加更正记录处理。
+
+## 2026-09-07 - Task: 核对复验版本并部署长文本发送修复
+### What was done
+- 核对截图对应的实际安装目录，确认桌面快捷方式仍指向 `C:\Users\karma617\AppData\Local\Programs\DeepSeek Harness`，复验时该目录中的 `app.asar` 仍是 `0.1.29`，不包含本轮草稿占位、发送按钮接管和点击重放代码。
+- 使用真实 Electron 43 与 React 18 受控输入框执行一次临时烟测，验证当前注入脚本在“折叠长文本 + 额外输入 1”场景提交值为 `1` 加完整长文本，折叠项在提交后清除；临时烟测文件随后删除。
+- 重新生成 `0.1.30` 安装包和便携包，安装到桌面快捷方式指向的实际目录，并核对安装后的 `app.asar` 已包含 `DRAFT_MARKER`、`SEND_BUTTON_LABELS` 和 `replayButtonClick`。
+- 启动更新后的桌面壳，供当前窗口直接执行真实会话复验。
+### Testing
+- Electron + React 受控输入烟测：通过；仅折叠项时发送按钮可用，额外输入后最终提交值包含完整长文本且不含不可见占位。
+- `pnpm run dist`：通过；生成 `DeepSeek-Harness-Shell-0.1.30-x64.exe` 和 `DeepSeek-Harness-Shell-Portable-0.1.30-x64.exe`。当前 Node.js 22.22.0 低于仓库声明的 Node.js 24，pnpm 输出 engine 警告。
+- 安装后静态核对：通过；实际安装版本为 `0.1.30`，安装目录 `app.asar` 包含草稿占位、发送按钮识别和点击重放实现。
+- 安装包 SHA-256：`A80B008BAEAF04AAE88D0A79B7E73F7F482CC382B53E17E1BCE6863163266BB2`；便携包 SHA-256：`6E860CDF1CF5848CE41037255E11002F101303A553CD63B4D736267755193837`。
+- 更新后的桌面壳已成功启动；真实智能体消息发送结果仍由当前窗口复验。
+### Notes
+- `dist/DeepSeek-Harness-Shell-0.1.30-x64.exe`：生成包含长文本发送修复的安装包。
+- `dist/DeepSeek-Harness-Shell-Portable-0.1.30-x64.exe`：生成对应便携包。
+- `C:\Users\karma617\AppData\Local\Programs\DeepSeek Harness`：从旧 `0.1.29` 更新为包含本轮修复的 `0.1.30`。
+- `progress.md`：追加旧安装版本诊断、打包、部署和验证记录。
+- 回滚点：`f06cdc3736cf16cfe6f05e3dee7c243406f709ff`。执行 `git restore --source=f06cdc3736cf16cfe6f05e3dee7c243406f709ff -- src/file-context-injector.ts tests/file-context-ui-contract.spec.ts docs/conversation-edit-retry.md`，再执行 `pnpm run dist` 并安装重新生成的安装包，可回退到部署前的长文本处理实现；`progress.md` 按追加式历史记录保留。
+
+## 2026-09-07 - Task: 适配 DSH 0.1.3 Lexical 输入框并修复长文本草稿未同步
+### What was done
+- 根据 `0.1.30` 真实复验继续追踪已安装 DSH `0.1.3-alpha.1` 客户端代码，确认新版输入区已从受控 `textarea` 切换为 Lexical `contenteditable`；此前通过 `innerText` 和合成 `input` 事件写回，只改变 DOM，没有改变 Lexical 内部草稿，因此最终仍只提交用户额外输入的 `1`。
+- 长文本注入现在优先读取输入根节点的 Lexical 文本缓存，并通过实际 Lexical 编辑器的 `parseEditorState`/`setEditorState` 写入草稿；换行转换为 Lexical `linebreak` 节点，确保多行长文本保持完整。
+- 保留旧版 `textarea` 和普通 `contenteditable` 路径；仅在检测到实际 Lexical 编辑器时使用新版状态写入，不扩大其他输入控件的接管范围。
+- 将发送执行级回归改为 Lexical 编辑器模型，覆盖不可见占位恢复、发送前完整长文本写入、换行保留和发送重放。
+- 重新打包并安装修正版 `0.1.30`，安装目录中的 `app.asar` 已核对包含 Lexical 编辑器识别、文本缓存读取、换行节点和发送重放代码。
+### Testing
+- 实际 Electron 43 + DSH 同版 Lexical 0.49 临时烟测：通过；仅有 `.textclip` 时提交完整长文本，“`.textclip` + 输入 1”时提交 `1`、两个换行及完整长文本。临时烟测文件已删除。
+- `pnpm exec vitest run tests/file-context-ui-contract.spec.ts --maxWorkers=1 --testTimeout=20000`：通过，1 个测试文件、6 个测试。
+- `pnpm run typecheck`：通过；当前 Node.js 22.22.0 低于仓库声明的 Node.js 24，pnpm 输出 engine 警告。
+- `pnpm test -- --maxWorkers=1 --testTimeout=20000`：通过，23 个测试文件、139 个测试。
+- `pnpm run build`：通过；Lexical 草稿同步逻辑已进入 `lib/main.js`。
+- `pnpm run dist`：通过；安装包 SHA-256 为 `FA5FF2F21B139D20795A49DB47F26EF68606250EB0CCFA731547AEE999AFAFE8`，便携包 SHA-256 为 `352C68982895BE658F5B277FB1DFD26589BD4FE8197CA3119B57EDE3A43DFBC7`。
+- 安装后静态核对：通过；`C:\Users\karma617\AppData\Local\Programs\DeepSeek Harness\resources\app.asar` 更新时间为 2026-09-07 17:40:50，包含 `__lexicalEditor`、`__lexicalTextContent`、`linebreak` 和 `replayButtonClick`。
+- `git diff --check`：通过。真实多模型会话发送由更新后窗口执行最终复验。
+### Notes
+- `src/file-context-injector.ts`：增加 Lexical 草稿读取、状态序列化写入及多行文本处理。
+- `tests/file-context-ui-contract.spec.ts`：将发送执行级测试升级为 Lexical 输入模型。
+- `docs/conversation-edit-retry.md`：记录 DSH `0.1.3` Lexical 输入兼容路径。
+- `dist/DeepSeek-Harness-Shell-0.1.30-x64.exe`：重新生成包含 Lexical 修复的安装包。
+- `dist/DeepSeek-Harness-Shell-Portable-0.1.30-x64.exe`：重新生成对应便携包。
+- `progress.md`：追加真实根因、实现、验证、部署和回滚记录。
+- 回滚点：`f06cdc3736cf16cfe6f05e3dee7c243406f709ff`。执行 `git restore --source=f06cdc3736cf16cfe6f05e3dee7c243406f709ff -- src/file-context-injector.ts tests/file-context-ui-contract.spec.ts docs/conversation-edit-retry.md`，再执行 `pnpm run dist` 并重新安装，可回退本轮及关联的未提交长文本兼容修改；`progress.md` 按追加式历史记录保留。
