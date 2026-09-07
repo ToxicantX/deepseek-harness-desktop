@@ -611,3 +611,18 @@
 - `README.md`：更新 Windows 构建工具发现规则。
 - `progress.md`：追加本轮施工、验证和回滚记录。
 - 回滚点：`56298ebfff8f1d6789e874abef00cefd339ef8da`。执行 `git restore --source=56298ebfff8f1d6789e874abef00cefd339ef8da -- build-windows.bat tests/runtime-release-scripts.spec.mjs README.md` 可回滚本轮代码、测试和文档；`progress.md` 按追加式历史记录保留。
+
+## 2026-09-07 - Task: 修复已发现 Runtime pnpm 后仍被重复查找判定缺失
+### What was done
+- Runtime pnpm 已存在时直接以带引号的绝对路径执行版本检查和后续命令，跳过第二次 PATH 发现；保留子进程 PATH 和版本一致性检查。
+- 添加实际 CMD 执行回归，覆盖带空格的 Manifest 工具路径、PATH 工具缺失和模拟安装调用。
+### Testing
+- 在 HEAD 旧脚本上执行新增回归：按预期失败；恢复修复脚本后相关测试全部通过，13 个测试。
+- 命令：`pnpm test -- tests/runtime-release-scripts.spec.mjs --maxWorkers=1 --testTimeout=20000`。终端 Node.js 22.22.0 有 engine 警告；未执行完整打包或另一台电脑现场验证。
+- `git diff --check` 通过；批处理保持纯 CRLF。
+### Notes
+- `build-windows.bat`：直接调用已解析的 Runtime pnpm，版本读取加入 call 并清空继承值。
+- `tests/runtime-release-scripts.spec.mjs`：增加 Windows CMD 执行级回归，测试不安装依赖或打包。
+- `docs/windows-build.md`：记录直接调用规则、故障解释和验证边界。
+- `progress.md`：追加本轮实施与测试记录。
+- 回滚：`git restore --source=85e2b160b89fab486a08a734fb3bd68a13e53143 -- build-windows.bat tests/runtime-release-scripts.spec.mjs`；删除本轮新增文档 `docs/windows-build.md`，进度日志保留。

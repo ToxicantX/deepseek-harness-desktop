@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 const execFileAsync = promisify(execFile)
 const root = resolve(import.meta.dirname, '..')
-const windowsBuildScript = readFileSync(join(root, 'build-windows.bat'), 'utf8')
+const windowsBuildScript = readFileSync(join(root, 'build-windows.bat'), 'utf8').replace(/\r\n/g, '\n')
 const buildScript = readFileSync(join(root, 'scripts', 'build-runtime.ps1'), 'utf8')
 const smokeScript = readFileSync(join(root, 'scripts', 'smoke-runtime.mjs'), 'utf8')
 const patch = parseYaml(readFileSync(join(root, 'runtime', 'desktop.patch.yml'), 'utf8'))
@@ -31,6 +31,34 @@ describe('Runtime release scripts', () => {
     expect(windowsBuildScript).toContain("manifest.paths?.pnpm")
     expect(windowsBuildScript).toContain('tools\\node_modules\\@pnpm\\exe\\pnpm.exe')
     expect(windowsBuildScript.indexOf('call :add_runtime_pnpm_to_path')).toBeLessThan(windowsBuildScript.indexOf('where corepack'))
+  })
+
+  it.skipIf(process.platform !== 'win32')('executes manifest pnpm by absolute path when command discovery fails', async () => {
+    const directory = await fixtureDirectory()
+    const runtime = join(directory, 'Runtime with spaces')
+    const tools = join(runtime, 'custom tools')
+    await mkdir(tools, { recursive: true })
+    await writeFile(join(runtime, 'runtime-manifest.json'), JSON.stringify({ paths: { pnpm: 'custom tools/pnpm.cmd' } }))
+    await writeFile(join(tools, 'pnpm.cmd'), '@echo off\r\nif "%~1"=="--version" (echo 11.7.0& exit /b 0)\r\necho INVOKED:%*\r\n')
+    await writeFile(join(directory, 'package.json'), JSON.stringify({ packageManager: 'pnpm@11.7.0', version: '0.0.0' }))
+    // Execute the actual discovery/version/subroutine blocks without installing or packaging.
+    const discovery = windowsBuildScript.slice(windowsBuildScript.indexOf('where pnpm'), windowsBuildScript.indexOf('where powershell'))
+    const subroutine = windowsBuildScript.slice(windowsBuildScript.indexOf('\n:add_runtime_pnpm_to_path\n'), windowsBuildScript.indexOf('\n:done'))
+    const harness = [
+      '@echo off', 'setlocal', 'set "PNPM_CMD=pnpm"', 'set "RUNTIME_PNPM="',
+      `set "NODE_EXE=${process.execPath}"`, `set "RUNTIME_ROOT=${runtime}"`,
+      discovery, 'call %PNPM_CMD% install --frozen-lockfile', 'exit /b %ERRORLEVEL%',
+      ':pnpm_missing', 'echo DISCOVERY_FAILED', 'exit /b 1',
+      ':pnpm_version_invalid', 'echo VERSION_FAILED', 'exit /b 1', subroutine,
+    ].join('\n').replace(/\r?\n/g, '\r\n')
+    await writeFile(join(directory, 'check.cmd'), harness)
+    const { stdout } = await execFileAsync(process.env.ComSpec || 'cmd.exe', ['/d', '/c', 'check.cmd'], {
+      cwd: directory,
+      env: { ...process.env, PATH: directory },
+    })
+    expect(stdout).toContain('using DSH Runtime pnpm')
+    expect(stdout).toContain('INVOKED:install --frozen-lockfile')
+    expect(stdout).not.toContain('Corepack')
   })
 
   it('refuses catalogs that offer authenticated runtimes to old Shell versions', async () => {

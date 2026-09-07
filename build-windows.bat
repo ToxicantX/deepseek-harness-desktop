@@ -50,6 +50,7 @@ echo Using Node.js %NODE_VERSION% x64 from %NODE_EXE%
 
 where pnpm >nul 2>&1
 if errorlevel 1 if defined RUNTIME_ROOT call :add_runtime_pnpm_to_path
+if defined RUNTIME_PNPM goto :pnpm_ready
 where pnpm >nul 2>&1
 if errorlevel 1 (
     where corepack >nul 2>&1
@@ -58,8 +59,10 @@ if errorlevel 1 (
     set "PNPM_CMD=corepack pnpm"
 )
 
+:pnpm_ready
+set "PNPM_VERSION="
 for /f "delims=" %%V in ('call "%NODE_EXE%" -p "require('./package.json').packageManager.split('@').pop()"') do set "EXPECTED_PNPM=%%V"
-for /f "delims=" %%V in ('%PNPM_CMD% --version 2^>nul') do set "PNPM_VERSION=%%V"
+for /f "delims=" %%V in ('call %PNPM_CMD% --version 2^>nul') do set "PNPM_VERSION=%%V"
 if not "%PNPM_VERSION%"=="%EXPECTED_PNPM%" goto :pnpm_version_invalid
 for /f "delims=" %%V in ('call "%NODE_EXE%" -p "require('./package.json').version"') do set "APP_VERSION=%%V"
 
@@ -165,6 +168,7 @@ if not defined RUNTIME_PNPM if exist "%RUNTIME_ROOT%\tools\node_modules\@pnpm\ex
 if not defined RUNTIME_PNPM if exist "%RUNTIME_ROOT%\tools\pnpm.exe" set "RUNTIME_PNPM=%RUNTIME_ROOT%\tools\pnpm.exe"
 if not defined RUNTIME_PNPM exit /b 0
 for %%D in ("%RUNTIME_PNPM%") do set "PATH=%%~dpD;%PATH%"
+set PNPM_CMD="%RUNTIME_PNPM%"
 echo pnpm was not found on PATH; using DSH Runtime pnpm from %RUNTIME_PNPM%.
 exit /b 0
 
