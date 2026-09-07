@@ -653,3 +653,18 @@
 - `docs/windows-build.md`：说明调整范围及诊断边界。
 - `progress.md`：追加验证和回滚记录。
 - 回滚：`git restore --source=2031c8b8ab991d2c0c3f766fb0751b5cc01191ad -- tests/source-runtime-installer.spec.ts docs/windows-build.md`；保留进度日志。
+
+## 2026-09-07 - Task: 修复打包子进程按名称启动 PowerShell 时 ENOENT
+### What was done
+- 将已确认可运行的 PowerShell 目录加入批处理局部 PATH，供 electron-builder 等子进程继承；保留脚本自身的绝对路径调用，不修改系统环境变量。
+- 扩展原有空 PATH 回归，通过 Node 子进程按名称启动 powershell.exe，覆盖上一轮遗漏的子进程查找。
+### Testing
+- 修改前新增执行检查复现 `spawnSync powershell.exe ENOENT`，与用户日志的子进程查找失败一致。
+- 修改后以 Runtime Node.js 24.19.0 执行 `pnpm test`：23 个文件、142 个测试通过，包含子进程真实启动 PowerShell。
+- `git diff --check` 和批处理 CRLF 检查通过。未重新执行完整 electron-builder 打包，目标电脑仍需复验。
+### Notes
+- `build-windows.bat`：将已发现的 PowerShell 目录注入本次构建的 PATH。
+- `tests/runtime-release-scripts.spec.mjs`：补充 Node 子进程按名称启动 PowerShell 的实际验证。
+- `docs/windows-build.md`：记录对子进程的 PATH 继承规则与验证范围。
+- `progress.md`：追加本轮记录。
+- 回滚：`git restore --source=85db8e5fa0eb77ada5580fa48bcbcbc9e4808d3d -- build-windows.bat tests/runtime-release-scripts.spec.mjs docs/windows-build.md`；保留进度历史。

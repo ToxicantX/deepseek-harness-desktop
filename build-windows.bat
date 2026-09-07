@@ -74,6 +74,7 @@ if not exist "%POWERSHELL_EXE%" (
 if not defined POWERSHELL_EXE goto :powershell_missing
 "%POWERSHELL_EXE%" -NoLogo -NoProfile -NonInteractive -Command "exit 0" >nul 2>&1
 if errorlevel 1 goto :powershell_missing
+for %%D in ("%POWERSHELL_EXE%") do set "PATH=%%~dpD;%PATH%"
 echo Using Windows PowerShell from %POWERSHELL_EXE%
 
 echo [1/4] Installing dependencies...

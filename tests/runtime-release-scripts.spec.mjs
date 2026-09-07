@@ -66,9 +66,20 @@ describe('Runtime release scripts', () => {
     const start = windowsBuildScript.indexOf('set "POWERSHELL_EXE=')
     expect(start).toBeGreaterThan(0)
     const discovery = windowsBuildScript.slice(start, windowsBuildScript.indexOf('echo [1/4]'))
+    await writeFile(join(directory, 'spawn-powershell.cjs'), `
+      const { spawnSync } = require('node:child_process')
+      const result = spawnSync('powershell.exe', [
+        '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', "Write-Output 'CHILD_POWERSHELL_OK'",
+      ], { encoding: 'utf8' })
+      if (result.error) throw result.error
+      process.stdout.write(result.stdout)
+      process.stderr.write(result.stderr)
+      process.exit(result.status ?? 1)
+    `)
     await writeFile(join(directory, 'check.cmd'), [
       '@echo off', 'setlocal', discovery,
       '"%POWERSHELL_EXE%" -NoLogo -NoProfile -NonInteractive -Command "Write-Output \'POWERSHELL_OK\'"',
+      `"${process.execPath}" spawn-powershell.cjs`,
       'exit /b %ERRORLEVEL%', ':powershell_missing', 'exit /b 1',
     ].join('\n').replace(/\r?\n/g, '\r\n'))
     const { stdout } = await execFileAsync(process.env.ComSpec || 'cmd.exe', ['/d', '/c', 'check.cmd'], {
@@ -76,6 +87,7 @@ describe('Runtime release scripts', () => {
       env: { ...process.env, PATH: directory },
     })
     expect(stdout).toContain('POWERSHELL_OK')
+    expect(stdout).toContain('CHILD_POWERSHELL_OK')
     expect(windowsBuildScript.match(/"%POWERSHELL_EXE%" .* -File /g)).toHaveLength(2)
   })
 
