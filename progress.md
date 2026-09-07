@@ -640,3 +640,16 @@
 - `docs/windows-build.md`：补充 PowerShell 发现顺序及验证说明。
 - `progress.md`：追加本轮记录。
 - 回滚：`git restore --source=a837363009c1da49f29c8c9e02b8508b72b39f2f -- build-windows.bat tests/runtime-release-scripts.spec.mjs docs/windows-build.md`；保留进度历史。
+
+## 2026-09-07 - Task: 调整 Windows 源码回退集成测试的时间预算
+### What was done
+- 仅将已在另一台电脑触及默认 5 秒限制的 404 源码回退用例设置为 20 秒；保留真实文件系统操作及全部断言，不调整生产逻辑或全局超时。
+### Testing
+- 修改前本机定向测试 4 个通过，未复现目标电脑的超时；检查确认下载与构建已模拟，临时目录操作为真实文件系统操作，具体耗时原因尚未确认。
+- 修改后使用 Runtime Node.js 24.19.0 执行 `pnpm test`：23 个文件、142 个测试全部通过，未额外传递全局超时参数。
+- `git diff --check`：通过。未执行完整打包，目标电脑仍需重跑确认。
+### Notes
+- `tests/source-runtime-installer.spec.ts`：只为 404 源码回退集成用例增加有限时间预算。
+- `docs/windows-build.md`：说明调整范围及诊断边界。
+- `progress.md`：追加验证和回滚记录。
+- 回滚：`git restore --source=2031c8b8ab991d2c0c3f766fb0751b5cc01191ad -- tests/source-runtime-installer.spec.ts docs/windows-build.md`；保留进度日志。

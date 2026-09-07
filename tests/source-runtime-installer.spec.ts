@@ -160,6 +160,7 @@ describe('source runtime installer', () => {
 })
 
 describe('RuntimeStore source fallback', () => {
+  // Allow extra time for real filesystem work on Windows build machines.
   it('uses the source installer only when the prebuilt archive returns 404', async () => {
     const root = await temporaryRoot()
     const selected = manifest()
@@ -183,7 +184,7 @@ describe('RuntimeStore source fallback', () => {
     expect(installed.manifest).toEqual(selected)
     await access(installed.dshBin)
     expect((await readdir(store.downloadsDirectory)).filter(name => name.includes('.source-') || name.endsWith('.part'))).toEqual([])
-  })
+  }, 20_000)
 
   it('does not build from source for a non-404 download failure', async () => {
     const root = await temporaryRoot()
