@@ -382,6 +382,8 @@ export class RuntimeController {
     this.update('starting', message)
     const home = this.environment.DSH_HOME ?? join(homedir(), '.dsh')
     await mkdir(home, { recursive: true })
+    const schemaMigration = await this.inspectAgentPresetSchema({ home, runtime }).catch(() => undefined)
+    if (schemaMigration !== undefined) await schemaMigration.apply()
     let backend: RunningBackend
     let overlayDisposed = false
     const overlay = await prepareGoalGuardOverlay({

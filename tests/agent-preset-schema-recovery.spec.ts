@@ -38,6 +38,13 @@ describe('agent preset schema recovery', () => {
     expect(await readFile(file, 'utf8')).toContain(`mode: ${mode}`)
   })
 
+  it('offers a proactive migration only for DSH 0.1.3 or newer', async () => {
+    const { root, file } = await fixture(`- id: tool-presentation\n  name: '@deepseek-ai/dsh-agent-tool-presentation'\n  config:\n    mode: code\n`)
+    await expect(inspectAgentPresetSchemaRecovery({ home: root, runtime })).resolves.toBeDefined()
+    await expect(inspectAgentPresetSchemaRecovery({ home: root, runtime: { manifest: { dshVersion: '0.1.2' } } as any })).resolves.toBeUndefined()
+    expect(await readFile(file, 'utf8')).toContain('mode: code')
+  })
+
   it('refuses to apply after the file changes', async () => {
     const { root, file } = await fixture(`- id: tool-presentation\n  name: '@deepseek-ai/dsh-agent-tool-presentation'\n  config:\n    mode: code\n`)
     const plan = await inspectAgentPresetSchemaRecovery({ home: root, runtime, diagnostics: diagnostic(file, 'code') })

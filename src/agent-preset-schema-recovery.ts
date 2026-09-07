@@ -2,6 +2,7 @@ import { constants } from 'node:fs'
 import { copyFile, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { dirname, isAbsolute, join, resolve, win32 } from 'node:path'
+import { coerce, gte } from 'semver'
 import { isMap, isSeq, parseDocument } from 'yaml'
 import type { InstalledRuntime } from './runtime-store.ts'
 
@@ -14,7 +15,7 @@ const DIAGNOSTIC_PATTERN = /failed to apply loader entry tool-presentation \(@de
 export interface AgentPresetSchemaRecoveryInput {
   home: string
   runtime: InstalledRuntime
-  diagnostics: string
+  diagnostics?: string
 }
 
 export interface AgentPresetSchemaRecoveryResult {
@@ -58,8 +59,13 @@ export async function inspectAgentPresetSchemaRecovery(
 ): Promise<AgentPresetSchemaRecoveryPlan | undefined> {
   if (!isAbsoluteHome(input.home)) return undefined
   const target = join(input.home, '.agent-presets', PRESET_ID, 'agent.cordis.yml')
-  const reported = diagnosticTarget(input.diagnostics)
-  if (reported === undefined || canonicalPath(reported) !== canonicalPath(target)) return undefined
+  if (input.diagnostics === undefined) {
+    const version = coerce(input.runtime.manifest.dshVersion)
+    if (version === null || !gte(version, '0.1.3')) return undefined
+  } else {
+    const reported = diagnosticTarget(input.diagnostics)
+    if (reported === undefined || canonicalPath(reported) !== canonicalPath(target)) return undefined
+  }
   const original = await readFile(target, 'utf8').catch(() => undefined)
   if (original === undefined) return undefined
   const range = legacyModeRange(original)

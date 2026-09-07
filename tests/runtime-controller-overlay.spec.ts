@@ -49,14 +49,16 @@ beforeEach(() => {
 describe('RuntimeController goal guard overlay', () => {
   it('automatically migrates the exact DSH 0.1.3 preset schema error before retrying', async () => {
     const apply = vi.fn(async () => {})
-    const inspect = vi.fn(async () => ({ presetId: 'multi-model-orchestrator', mode: 'ptc', apply }))
+    const inspect = vi.fn(async (input: { diagnostics?: string }) => input.diagnostics === undefined
+      ? undefined
+      : ({ presetId: 'multi-model-orchestrator', mode: 'ptc', apply }))
     mocks.startBackend
       .mockRejectedValueOnce(new Error('failed to apply loader entry tool-presentation (@deepseek-ai/dsh-agent-tool-presentation): invalid config: $.mode expected "native" | "ptc" | "both", but got "code" at C:/dsh/.agent-presets/multi-model-orchestrator/agent.cordis.yml'))
       .mockResolvedValue({ url: new URL('http://127.0.0.1:43123/'), done: new Promise(() => {}), stop: vi.fn() })
 
     await (controller(undefined, undefined, inspect) as any).launch(runtime())
 
-    expect(inspect).toHaveBeenCalledOnce()
+    expect(inspect).toHaveBeenCalledTimes(3)
     expect(apply).toHaveBeenCalledOnce()
     expect(mocks.startBackend).toHaveBeenCalledTimes(2)
   })
