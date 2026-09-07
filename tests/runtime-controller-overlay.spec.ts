@@ -72,13 +72,33 @@ describe('RuntimeController goal guard overlay', () => {
     ;(value as any).selectedRuntime = runtime()
     ;(value as any).recoveryPlan = {
       kind: 'plugin-preset-conflict',
-      plan: { pluginName: 'dsh-multi-model-orchestrator', presetId: 'multi-model-orchestrator', apply: vi.fn(async () => { throw new Error('旧安装器仍不兼容') }) },
+      plan: { pluginName: 'dsh-multi-model-orchestrator', presetId: 'multi-model-orchestrator', apply: vi.fn(async () => { throw new Error('preset reset failed') }) },
     }
 
     await value.recoverPluginPreset()
 
     expect(disable).toHaveBeenCalledWith('dsh-multi-model-orchestrator', 'preset-conflict')
     expect(boot).toHaveBeenCalledOnce()
+  })
+
+  it('isolates the plugin when reset succeeds but the restarted Runtime rewrites the old schema', async () => {
+    const disable = vi.fn(async () => {})
+    const isolation = { supported: () => true, packages: vi.fn(async () => ['dsh-multi-model-orchestrator']), disable }
+    const value = controller(undefined, isolation)
+    ;(value as any).selectedRuntime = runtime()
+    const boot = vi.fn()
+      .mockRejectedValueOnce(new Error('invalid config: $.mode expected "native" | "ptc" | "both", but got "code"'))
+      .mockResolvedValueOnce(undefined)
+    ;(value as any).boot = boot
+    ;(value as any).recoveryPlan = {
+      kind: 'plugin-preset-conflict',
+      plan: { pluginName: 'dsh-multi-model-orchestrator', presetId: 'multi-model-orchestrator', apply: vi.fn(async () => {}) },
+    }
+
+    await value.recoverPluginPreset()
+
+    expect(disable).toHaveBeenCalledWith('dsh-multi-model-orchestrator', 'preset-conflict')
+    expect(boot).toHaveBeenCalledTimes(2)
   })
 
   it('bounds automatic quarantine retries after both backend and frontend failures', async () => {
