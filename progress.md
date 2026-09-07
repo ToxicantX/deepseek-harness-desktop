@@ -386,3 +386,45 @@
 - `docs/shell-skin-marketplace.md`：记录客户端会话兼容范围及空闲回退行为。
 - `progress.md`：追加本轮施工、验证和回滚记录。
 - 回滚方式：执行 `git restore --source=HEAD -- src/skin-market-injector.ts tests/skin-market-injector.spec.ts docs/shell-skin-marketplace.md` 可回滚本轮代码、测试和文档改动；`progress.md` 按追加式历史记录保留。
+
+## 2026-09-07 - Task: 修复 DSH 核心升级后的对话编辑与重试注入兼容性
+### What was done
+- 修复新版 Cordis 严格服务访问校验下直接使用根上下文读取 `slots` 的注入失败，改由依赖注入子上下文取得对话功能所需服务。
+- 将附件展示模块调整为可选依赖，并兼容模块默认导出；上游 UI 组件删除、改名或返回无效值时使用最小内置组件，避免向 React 传入无效组件类型。
+- 对同一上下文只安排一次功能安装，避免加载器轮询和重复 apply 在失败时持续刷屏；目标对话模块优先复用已捕获的长期根上下文。
+- 增加严格上下文、重复 apply、默认导出、可选附件模块缺失和无效 React 组件类型回归覆盖，并同步更新功能兼容说明。
+### Testing
+- `pnpm exec vitest run tests/conversation-replay-shell-injector.spec.ts tests/custom-provider-user-agent-injector.spec.ts tests/custom-provider-image-injector.spec.ts --maxWorkers=1 --testTimeout=20000`：通过，3 个测试文件、16 个测试。
+- `pnpm test -- --maxWorkers=1 --testTimeout=20000`：通过，20 个测试文件、113 个测试。
+- `pnpm run typecheck`：通过；当前系统 Node.js 22.22.0 低于仓库声明的 Node.js 24，pnpm 输出 engine 警告。
+- `pnpm run build`：通过；更新后的兼容逻辑已进入 `lib/preload.cjs`，同样存在上述 Node.js engine 警告。
+- `git diff --check`：通过。
+- 已对本机 DSH `0.1.0-rc.8` 安装内容做静态核对：Cordis 会对未声明依赖的 `ctx.slots` 访问抛错，且新版附件客户端模块仅导出 `apply`/`inject`；本轮回归测试覆盖这两种变化。未启动真实 Electron 会话执行编辑或重试请求。
+### Notes
+- `src/conversation-replay-injector.ts`：增加服务依赖子上下文、可选模块与组件降级，并抑制同一上下文的重复安装。
+- `tests/conversation-replay-shell-injector.spec.ts`：增加新版严格上下文及 UI 导出变化的回归测试。
+- `docs/conversation-edit-retry.md`：记录严格服务注入、附件渲染优先级和组件降级策略。
+- `progress.md`：追加本轮施工、验证和回滚记录。
+- 回滚点：`0ef90de204cfce82303c7150b51c7f78ceddf3bb`。执行 `git restore --source=0ef90de204cfce82303c7150b51c7f78ceddf3bb -- src/conversation-replay-injector.ts tests/conversation-replay-shell-injector.spec.ts docs/conversation-edit-retry.md` 可回滚本轮代码、测试和文档；`progress.md` 按追加式历史记录保留，通过后续追加更正记录处理。
+
+## 2026-09-07 - Task: 隔离桌面壳注入异常，保障 DSH 核心基础功能
+### What was done
+- 将 preload 中两个主世界注入入口分别置于独立故障边界内，同步抛错或异步拒绝只记录对应增强失败，后续桌面桥接继续注册。
+- 调整共享 ModuleLoader 包装顺序，始终先执行 DSH 原始模块 `apply` 和模块系统创建逻辑，再执行壳侧增强，并保留原始返回值。
+- 模块描述检查、队列预处理、导出改写和加载器接管异常时回退原始对象；通过共享 Loader 注册的转换工厂运行失败时重新执行 DSH 原始工厂。
+- 增加边界故障诊断计数，补充启动隔离、序列化、自定义转换失败、不可改写导出和异常模块描述的回归覆盖，并同步更新兼容文档。
+### Testing
+- `pnpm exec vitest run tests/conversation-replay-shell-injector.spec.ts tests/custom-provider-user-agent-injector.spec.ts tests/custom-provider-image-injector.spec.ts tests/file-context-ui-contract.spec.ts --maxWorkers=1 --testTimeout=20000`：通过，4 个测试文件、27 个测试。
+- `pnpm test -- --maxWorkers=1 --testTimeout=20000`：通过，20 个测试文件、119 个测试。
+- `pnpm run build`：通过；包含 `tsc --noEmit`，更新后的启动隔离和 ModuleLoader 回退逻辑已进入 `lib/preload.cjs`。当前系统 Node.js 22.22.0 低于仓库声明的 Node.js 24，pnpm 输出 engine 警告。
+- `git diff --check`：通过。
+- 故障注入测试已证明：壳增强抛错时 DSH 原始 `apply`、原始 `load/create`、原始不可改写导出及原始转换工厂仍正常返回。未启动真实 Electron 多窗口烟测。
+### Notes
+- `src/conversation-replay-injector.ts`：增加主世界调用保护、核心优先执行顺序、Loader/工厂回退和边界故障诊断。
+- `src/preload.ts`：分别隔离对话重试与自定义 User-Agent 的主世界注入启动。
+- `tests/conversation-replay-shell-injector.spec.ts`：增加各层故障注入与 DSH 原路径继续执行的回归测试。
+- `tests/custom-provider-user-agent-injector.spec.ts`：适配共享 Loader 的故障回退包装验证。
+- `docs/conversation-edit-retry.md`：新增共享注入故障隔离规则和诊断入口。
+- `docs/custom-provider-user-agent.md`：记录转换工厂失败时回退 DSH 原始工厂。
+- `progress.md`：追加本轮施工、验证和回滚记录。
+- 回滚点：`0ef90de204cfce82303c7150b51c7f78ceddf3bb`。执行 `git restore --source=0ef90de204cfce82303c7150b51c7f78ceddf3bb -- src/conversation-replay-injector.ts src/preload.ts tests/conversation-replay-shell-injector.spec.ts tests/custom-provider-user-agent-injector.spec.ts docs/conversation-edit-retry.md docs/custom-provider-user-agent.md` 可回滚本轮及紧邻的上一轮注入兼容改动；`progress.md` 按追加式历史记录保留，通过后续追加更正记录处理。

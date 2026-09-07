@@ -40,7 +40,17 @@
 4. 样式、消息分支、附件重传和长文本折叠代码随桌面壳的 `preload.cjs` 一起打包；`runtime/desktop.patch.yml` 和 Runtime 构建不再包含 conversation-replay 插件。
 5. 如果用户本机仍保留旧 Runtime 产物中的 conversation-replay 插件，桌面壳会在模块注册阶段将旧客户端入口替换为空实现，避免旧插件与壳侧实现重复注册。
 
-注入器会复用同一个 `ModuleLoader` 代理，主题适配器临时接管并恢复加载器时不会叠加代理；页面启动阶段若加载器属性被重新定义，桌面壳会在微任务、`DOMContentLoaded` 和 `pageshow` 时机自动恢复接管，避免按钮因加载时序丢失。注入器同时捕获 `dsh-client-modules` 创建出的真实模块系统和根 `Context`；即使对话模块已经进入 live/materialized 状态，仍可通过捕获的模块导入能力补齐 React/UI 依赖，并在同一根上下文中注册壳侧渲染覆盖。
+注入器会复用同一个 `ModuleLoader` 代理，主题适配器临时接管并恢复加载器时不会叠加代理；页面启动阶段若加载器属性被重新定义，桌面壳会在微任务、`DOMContentLoaded` 和 `pageshow` 时机自动恢复接管，避免按钮因加载时序丢失。注入器同时捕获 `dsh-client-modules` 创建出的真实模块系统和根 `Context`；即使对话模块已经进入 live/materialized 状态，仍可通过捕获的模块导入能力补齐 React/UI 依赖，并通过 Cordis 的依赖注入子上下文取得 `slots`、`sessions` 和 `workspaces`，兼容核心启用严格服务访问校验后的运行方式。
+
+附件渲染优先使用 `conversation.chat.node` 提供的 `renderMessageImages`。旧版核心仍可使用附件模块导出的 `ImageGallery`；新版核心移除该导出或其他非关键 UI 组件改名时，桌面壳会使用内置的最小展示组件，不再把 `undefined` 组件交给 React。可选模块缺失只降级对应展示，不阻断编辑和重试功能整体注入；同一上下文的失败安装也不会被轮询任务重复执行并持续刷屏。
+
+## 故障隔离
+
+- preload 分别保护每一个主世界注入入口；某项注入在启动阶段抛错时，后续桌面桥接仍继续注册。
+- 对话模块始终先执行 DSH 原始 `apply`，随后再尝试安装壳增强；增强异常只记录日志，不改变原始返回值。
+- `ModuleLoader.load/create` 的模块预处理异常时直接传递原始模块描述并继续调用原加载器；模块导出不可改写时保留原导出。
+- 通过共享 Loader 注册的模块转换在执行失败时重新调用原始工厂，因此设置页等 DSH 基础模块仍按上游实现加载。
+- 故障计数记录在 `window.__dshDesktopConversationReplayHook.diagnostics.boundaryFailures`，用于区分“增强失效”和“DSH 核心自身报错”。
 
 发布时必须重新构建并发布桌面壳安装包。只更新 Runtime 压缩包不会带上本功能。
 

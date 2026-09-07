@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import { installConversationReplayModuleHook } from './conversation-replay-injector.ts'
+import { installConversationReplayModuleHook, runIsolatedShellInjection } from './conversation-replay-injector.ts'
 import { injectCustomProviderUserAgentFactorySource, installCustomProviderUserAgentHook } from './custom-provider-user-agent-injector.ts'
 import type { RuntimePreference } from './catalog.ts'
 import type { McpEndpointView, McpEntryView, McpList } from './mcp-manager.ts'
@@ -8,10 +8,14 @@ import type { RuntimeView } from './runtime-controller.ts'
 import type { SessionRepairAnomalyKind, SessionRepairInspection, SessionRepairResult, SessionRepairRollbackResult } from './session-repair.ts'
 import type { ShellUpdateProgress } from './shell-updater.ts'
 
-contextBridge.executeInMainWorld({ func: installConversationReplayModuleHook })
-contextBridge.executeInMainWorld({
-  func: installCustomProviderUserAgentHook,
-  args: [injectCustomProviderUserAgentFactorySource.toString()],
+runIsolatedShellInjection('桌面壳对话编辑与重试注入启动失败', () => {
+  contextBridge.executeInMainWorld({ func: installConversationReplayModuleHook })
+})
+runIsolatedShellInjection('桌面壳自定义提供方 User-Agent 注入启动失败', () => {
+  contextBridge.executeInMainWorld({
+    func: installCustomProviderUserAgentHook,
+    args: [injectCustomProviderUserAgentFactorySource.toString()],
+  })
 })
 
 contextBridge.exposeInMainWorld('dshDesktopFiles', {

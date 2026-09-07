@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { installConversationReplayModuleHook } from '../src/conversation-replay-injector.ts'
+import { installConversationReplayModuleHook, runIsolatedShellInjection } from '../src/conversation-replay-injector.ts'
 
 const originalLoaderDescriptor = Object.getOwnPropertyDescriptor(globalThis, '__ModuleLoader__')
 const originalHookDescriptor = Object.getOwnPropertyDescriptor(globalThis, '__dshDesktopConversationReplayHook')
@@ -75,6 +75,25 @@ function tail(key: string, seq: number) {
 }
 
 describe('desktop shell conversation replay injector', () => {
+  it('keeps the main-world installer self-contained after serialization', () => {
+    const serialized = Function(`return (${installConversationReplayModuleHook.toString()})`)()
+    expect(serialized()).toBe('installed')
+  })
+
+  it('contains preload injection failures and continues startup', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const after = vi.fn()
+
+    expect(runIsolatedShellInjection('测试注入', () => { throw new Error('broken injection') })).toBe(false)
+    expect(runIsolatedShellInjection('异步测试注入', () => Promise.reject(new Error('broken async injection')))).toBe(true)
+    after()
+    await Promise.resolve()
+
+    expect(after).toHaveBeenCalledOnce()
+    expect(error).toHaveBeenCalledWith('测试注入', expect.any(Error))
+    expect(error).toHaveBeenCalledWith('异步测试注入', expect.any(Error))
+  })
+
   it('installs before ModuleLoader assignment and wraps only the conversation module', () => {
     expect(installConversationReplayModuleHook()).toBe('installed')
     expect(installConversationReplayModuleHook()).toBe('already-installed')
@@ -152,6 +171,99 @@ describe('desktop shell conversation replay injector', () => {
     expect(style.remove).toHaveBeenCalledOnce()
   })
 
+  it('runs the upstream apply before a failing shell enhancement', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    installConversationReplayModuleHook()
+    const rawLoad = vi.fn()
+    ;(globalThis as any).__ModuleLoader__ = { load: rawLoad }
+    const exposedLoader = (globalThis as any).__ModuleLoader__
+    const order: string[] = []
+    const originalApply = vi.fn(() => {
+      order.push('core')
+      return 'core-result'
+    })
+    exposedLoader.load({
+      id: '@deepseek-ai/dsh-client-ui-conversation',
+      factory: () => ({ inject: ['slots'], apply: originalApply }),
+    })
+    const wrapped = rawLoad.mock.calls[0]?.[0].factory(clientRequire().require)
+    globalThis.document = {
+      getElementById: vi.fn(() => {
+        order.push('shell')
+        throw new Error('shell style failure')
+      }),
+    } as any
+
+    expect(wrapped.apply({ slots: {}, effect: vi.fn(), sessions: {}, workspaces: {} })).toBe('core-result')
+    expect(order).toEqual(['core', 'shell'])
+    expect(originalApply).toHaveBeenCalledOnce()
+  })
+
+  it('keeps immutable upstream exports usable when wrapping is rejected', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    installConversationReplayModuleHook()
+    const rawLoad = vi.fn()
+    ;(globalThis as any).__ModuleLoader__ = { load: rawLoad }
+    const exposedLoader = (globalThis as any).__ModuleLoader__
+    const originalApply = vi.fn(() => 'core-result')
+    const immutableExports: Record<string, unknown> = { inject: ['slots'] }
+    Object.defineProperty(immutableExports, 'apply', {
+      configurable: false,
+      enumerable: true,
+      writable: false,
+      value: originalApply,
+    })
+    exposedLoader.load({
+      id: '@deepseek-ai/dsh-client-ui-conversation',
+      factory: () => immutableExports,
+    })
+
+    const loaded = rawLoad.mock.calls[0]?.[0].factory(clientRequire().require)
+    expect(loaded).toBe(immutableExports)
+    expect(loaded.apply({})).toBe('core-result')
+  })
+
+  it('passes through loader handoffs when shell inspection throws', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    installConversationReplayModuleHook()
+    const rawLoad = vi.fn((_handoff: unknown) => 'core-loaded')
+    const poisonedHandoff = { factory: vi.fn() }
+    Object.defineProperty(poisonedHandoff, 'id', {
+      get() { throw new Error('unsupported handoff shape') },
+    })
+    const rawLoader = {
+      pendingQueue: [poisonedHandoff],
+      load: rawLoad,
+      create: vi.fn(() => 'core-created'),
+    }
+    ;(globalThis as any).__ModuleLoader__ = rawLoader
+    const exposedLoader = (globalThis as any).__ModuleLoader__
+
+    expect(exposedLoader.load(poisonedHandoff)).toBe('core-loaded')
+    expect(rawLoad.mock.calls[0]?.[0]).toBe(poisonedHandoff)
+    expect(exposedLoader.create()).toBe('core-created')
+    expect(rawLoader.create).toHaveBeenCalledOnce()
+  })
+
+  it('falls back to the upstream factory when a registered transform crashes', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    installConversationReplayModuleHook()
+    const hook = (globalThis as any).__dshDesktopConversationReplayHook
+    const originalExports = { apply: vi.fn() }
+    const originalFactory = vi.fn(() => originalExports)
+    hook.registerModuleFactoryTransform('shell-transform-target', () => () => {
+      throw new Error('transformed factory failure')
+    })
+    const rawLoad = vi.fn()
+    ;(globalThis as any).__ModuleLoader__ = { load: rawLoad }
+
+    ;(globalThis as any).__ModuleLoader__.load({ id: 'shell-transform-target', factory: originalFactory })
+    const transformedHandoff = rawLoad.mock.calls[0]?.[0]
+    expect(transformedHandoff.factory(vi.fn())).toBe(originalExports)
+    expect(originalFactory).toHaveBeenCalledOnce()
+    expect(hook.diagnostics.boundaryFailures).toBe(1)
+  })
+
   it('keeps one loader proxy across temporary takeover and repairs a replaced accessor', () => {
     expect(installConversationReplayModuleHook()).toBe('installed')
     const rawLoad = vi.fn()
@@ -218,7 +330,16 @@ describe('desktop shell conversation replay injector', () => {
     const register = vi.fn(() => vi.fn())
     const inject = vi.fn((_name, factory) => factory())
     const effect = vi.fn(factory => factory())
-    const ctx = { slots: { inject, register }, effect, sessions: {}, workspaces: {} }
+    const injectedCtx = { slots: { inject, register }, effect, sessions: {}, workspaces: {} }
+    const injectServices = vi.fn((_dependencies, callback) => callback(injectedCtx))
+    const ctx = new Proxy({ inject: injectServices }, {
+      get(target, property, receiver) {
+        if (property === 'slots' || property === 'sessions' || property === 'workspaces') {
+          throw new Error(`cannot get property "${String(property)}" without inject`)
+        }
+        return Reflect.get(target, property, receiver)
+      },
+    })
     const dependencies = clientRequire()
     const modules = {
       import: vi.fn(async (id: string) => {
@@ -259,11 +380,14 @@ describe('desktop shell conversation replay injector', () => {
     const hookedLoader = (globalThis as any).__ModuleLoader__
     hookedLoader.create()
     rawLoader.bootstrapExports.apply(ctx)
+    rawLoader.bootstrapExports.apply(ctx)
     await Promise.resolve()
     await Promise.resolve()
     await new Promise(resolve => setTimeout(resolve, 0))
 
     expect(modules.import).toHaveBeenCalledWith('react')
+    expect(injectServices).toHaveBeenCalledWith(['slots', 'sessions', 'workspaces'], expect.any(Function))
+    expect(injectServices).toHaveBeenCalledTimes(1)
     expect(register).toHaveBeenCalledWith(expect.objectContaining({
       name: 'conversation.chat.node',
       key: 'user',
@@ -273,6 +397,47 @@ describe('desktop shell conversation replay injector', () => {
       featureApplications: 1,
       featureFailures: 0,
     })
+  })
+
+  it('falls back when optional UI exports are removed', () => {
+    installConversationReplayModuleHook()
+    const React = reactRuntime()
+    const require = vi.fn((id: string) => {
+      if (id === 'react') return { default: React }
+      if (id === '@deepseek-ai/dsh-client-ui-primitives') return { default: {} }
+      throw new Error('module is unavailable: ' + id)
+    })
+    const hook = (globalThis as any).__dshDesktopConversationReplayHook
+    const replay = hook.createFeature(require)
+    const register = vi.fn()
+    const ctx = {
+      slots: {
+        inject: vi.fn((_name, callback) => callback()),
+        register,
+      },
+      effect: vi.fn(factory => factory()),
+      sessions: {},
+      workspaces: {},
+    }
+    globalThis.document = {
+      getElementById: vi.fn(() => ({ remove: vi.fn() })),
+      createElement: vi.fn(),
+      head: { appendChild: vi.fn() },
+    } as any
+
+    replay.apply(ctx)
+    const UserMessageNodeView = register.mock.calls[0]?.[1]
+    const fallbackNode = user('user-fallback', 1, 'hello')
+    fallbackNode.data.content.push({ type: 'image', attachment: { attachmentId: 'image-fallback' } } as any)
+    const tree = UserMessageNodeView({
+      node: fallbackNode,
+      sessionId: 'session-fallback',
+      loadImage: vi.fn(),
+      useSession: (selector: (snapshot: { removed: boolean }) => unknown) => selector({ removed: false }),
+    })
+
+    expect(tree).toBeDefined()
+    expect(React.createElement.mock.calls.some(([type]) => type === undefined || type === null)).toBe(false)
   })
 
   it('finds the completed turn immediately before a user message', () => {
@@ -389,11 +554,13 @@ describe('desktop shell conversation replay injector', () => {
     const preload = readFileSync(join(root, 'src', 'preload.ts'), 'utf8')
     const patch = readFileSync(join(root, 'runtime', 'desktop.patch.yml'), 'utf8')
     const build = readFileSync(join(root, 'scripts', 'build-runtime.ps1'), 'utf8')
-    const executeIndex = preload.indexOf('contextBridge.executeInMainWorld({ func: installConversationReplayModuleHook })')
+    const executeIndex = preload.indexOf('func: installConversationReplayModuleHook')
     const exposeIndex = preload.indexOf("contextBridge.exposeInMainWorld('dshDesktopFiles'")
 
     expect(executeIndex).toBeGreaterThanOrEqual(0)
     expect(executeIndex).toBeLessThan(exposeIndex)
+    expect(preload.slice(0, exposeIndex)).toContain("runIsolatedShellInjection('桌面壳对话编辑与重试注入启动失败'")
+    expect(preload.slice(0, exposeIndex)).toContain("runIsolatedShellInjection('桌面壳自定义提供方 User-Agent 注入启动失败'")
     expect(patch).not.toContain('desktop-conversation-replay')
     expect(build).not.toContain('ConversationReplayPlugin')
     expect(build).not.toContain('dsh-desktop-conversation-replay')

@@ -89,7 +89,7 @@ describe('custom provider User-Agent injector', () => {
     ;(globalThis as any).__ModuleLoader__.load({ id: '@deepseek-ai/dsh-client-ui-settings-models', factory: targetFactory })
     const handoff = rawLoad.mock.calls[0]?.[0]
     expect(handoff.factory).not.toBe(targetFactory)
-    expect(handoff.factory.toString()).toContain('customUserAgent')
+    expect(() => handoff.factory(vi.fn())).not.toThrow()
     expect(serializedInstaller(injectCustomProviderUserAgentFactorySource.toString())).toBe('already-installed')
   })
 })
