@@ -25,7 +25,7 @@ function runtime() {
   } as any
 }
 
-function controller(onReady = vi.fn(async () => {}), pluginIsolation?: any) {
+function controller(onReady = vi.fn(async () => {}), pluginIsolation?: any, inspectAgentPresetSchema?: any) {
   return new RuntimeController({
     shellVersion: '0.1.16',
     store: { promote: vi.fn(async () => ({ schemaVersion: 1, preference: { mode: 'latest-compatible' } })) } as any,
@@ -33,6 +33,7 @@ function controller(onReady = vi.fn(async () => {}), pluginIsolation?: any) {
     userData: 'C:/user-data',
     goalGuardPlugin: 'C:/resources/goal-no-progress-guard/index.js',
     ...(pluginIsolation === undefined ? {} : { pluginIsolation }),
+    ...(inspectAgentPresetSchema === undefined ? {} : { inspectAgentPresetSchema }),
     environment: { DSH_HOME: 'C:/dsh-home' },
     onView: vi.fn(),
     onReady,
@@ -46,6 +47,20 @@ beforeEach(() => {
 })
 
 describe('RuntimeController goal guard overlay', () => {
+  it('automatically migrates the exact DSH 0.1.3 preset schema error before retrying', async () => {
+    const apply = vi.fn(async () => {})
+    const inspect = vi.fn(async () => ({ presetId: 'multi-model-orchestrator', mode: 'ptc', apply }))
+    mocks.startBackend
+      .mockRejectedValueOnce(new Error('failed to apply loader entry tool-presentation (@deepseek-ai/dsh-agent-tool-presentation): invalid config: $.mode expected "native" | "ptc" | "both", but got "code" at C:/dsh/.agent-presets/multi-model-orchestrator/agent.cordis.yml'))
+      .mockResolvedValue({ url: new URL('http://127.0.0.1:43123/'), done: new Promise(() => {}), stop: vi.fn() })
+
+    await (controller(undefined, undefined, inspect) as any).launch(runtime())
+
+    expect(inspect).toHaveBeenCalledOnce()
+    expect(apply).toHaveBeenCalledOnce()
+    expect(mocks.startBackend).toHaveBeenCalledTimes(2)
+  })
+
   it('bounds automatic quarantine retries after both backend and frontend failures', async () => {
     const isolation = { prepare: vi.fn(), quarantine: vi.fn(async () => true) }
     mocks.startBackend.mockRejectedValue(new Error('backend import failure'))

@@ -16,6 +16,7 @@ import { prepareGoalGuardOverlay } from './goal-guard-overlay.ts'
 import { PluginImportFailure, PluginIsolation } from './plugin-isolation.ts'
 import { inspectProfileBundleRecovery, type ProfileBundleRecoveryPlan } from './profile-bundle-recovery.ts'
 import { inspectPluginPresetRecovery, type PluginPresetRecoveryPlan } from './plugin-preset-recovery.ts'
+import { inspectAgentPresetSchemaRecovery } from './agent-preset-schema-recovery.ts'
 import { RuntimeStore, type InstalledRuntime, type RuntimeState } from './runtime-store.ts'
 import {
   inspectStaleLocalPluginRecovery,
@@ -56,6 +57,7 @@ export interface RuntimeView {
 type StaleLocalPluginRecoveryInspector = typeof inspectStaleLocalPluginRecovery
 type ProfileBundleRecoveryInspector = typeof inspectProfileBundleRecovery
 type PluginPresetRecoveryInspector = typeof inspectPluginPresetRecovery
+type AgentPresetSchemaRecoveryInspector = typeof inspectAgentPresetSchemaRecovery
 type RuntimeRecoveryPlan =
   | { kind: 'stale-local-plugins'; plan: StaleLocalPluginRecoveryPlan }
   | { kind: 'profile-bundle-mismatch'; plan: ProfileBundleRecoveryPlan }
@@ -72,6 +74,7 @@ export interface RuntimeControllerOptions {
   inspectStaleLocalPlugins?: StaleLocalPluginRecoveryInspector
   inspectProfileBundles?: ProfileBundleRecoveryInspector
   inspectPluginPreset?: PluginPresetRecoveryInspector
+  inspectAgentPresetSchema?: AgentPresetSchemaRecoveryInspector
   pluginIsolation?: PluginIsolation
   onView(view: RuntimeView): void
   onReady(url: URL, runtime: InstalledRuntime, cliDirectory: string): Promise<void>
@@ -89,6 +92,7 @@ export class RuntimeController {
   private readonly inspectStaleLocalPlugins: StaleLocalPluginRecoveryInspector
   private readonly inspectProfileBundles: ProfileBundleRecoveryInspector
   private readonly inspectPluginPreset: PluginPresetRecoveryInspector
+  private readonly inspectAgentPresetSchema: AgentPresetSchemaRecoveryInspector
   private readonly pluginIsolation: PluginIsolation | undefined
   private readonly onView: (view: RuntimeView) => void
   private readonly onReady: (url: URL, runtime: InstalledRuntime, cliDirectory: string) => Promise<void>
@@ -119,6 +123,7 @@ export class RuntimeController {
     this.inspectStaleLocalPlugins = options.inspectStaleLocalPlugins ?? inspectStaleLocalPluginRecovery
     this.inspectProfileBundles = options.inspectProfileBundles ?? inspectProfileBundleRecovery
     this.inspectPluginPreset = options.inspectPluginPreset ?? inspectPluginPresetRecovery
+    this.inspectAgentPresetSchema = options.inspectAgentPresetSchema ?? inspectAgentPresetSchemaRecovery
     this.pluginIsolation = options.pluginIsolation
     this.onView = options.onView
     this.onReady = options.onReady
@@ -352,6 +357,18 @@ export class RuntimeController {
         return
       } catch (error) {
         const diagnostics = error instanceof Error ? error.message : String(error)
+        if (trial === undefined && attempt === 0) {
+          const plan = await this.inspectAgentPresetSchema({
+            home: this.environment.DSH_HOME ?? join(homedir(), '.dsh'),
+            runtime,
+            diagnostics,
+          }).catch(() => undefined)
+          if (plan !== undefined) {
+            await plan.apply()
+            message = '已迁移 DSH 0.1.3 不兼容的 Agent preset，正在重新启动 DSH'
+            continue
+          }
+        }
         if (trial !== undefined || attempt >= 3 || this.pluginIsolation === undefined
           || !await this.pluginIsolation.quarantine(runtime, this.environment, error instanceof PluginImportFailure ? error : diagnostics)) throw error
         message = '已隔离不兼容插件，正在重新启动 DSH'
