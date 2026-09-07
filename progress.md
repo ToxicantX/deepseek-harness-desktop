@@ -594,3 +594,20 @@
 - `dist/DeepSeek-Harness-Shell-Portable-0.1.30-x64.exe`：重新生成对应便携包。
 - `progress.md`：追加真实根因、实现、验证、部署和回滚记录。
 - 回滚点：`f06cdc3736cf16cfe6f05e3dee7c243406f709ff`。执行 `git restore --source=f06cdc3736cf16cfe6f05e3dee7c243406f709ff -- src/file-context-injector.ts tests/file-context-ui-contract.spec.ts docs/conversation-edit-retry.md`，再执行 `pnpm run dist` 并重新安装，可回退本轮及关联的未提交长文本兼容修改；`progress.md` 按追加式历史记录保留。
+
+## 2026-09-07 - Task: 修复 Windows 构建脚本无法复用 DSH Runtime pnpm
+### What was done
+- Windows 构建脚本在选中 DSH Runtime Node.js 时同步保留 Runtime 根目录；PATH 中没有 pnpm 后，读取 `runtime-manifest.json` 的 `paths.pnpm` 并复用 Runtime 自带的独立 pnpm。
+- 为已有 Runtime 布局保留 `tools\node_modules\@pnpm\exe\pnpm.exe` 和 `tools\pnpm.exe` 两个明确兼容路径；仅在 Runtime 也没有 pnpm 时继续尝试 Corepack。
+- 补充构建脚本回归契约和开发者文档，明确 Node.js、Runtime pnpm、Corepack 的实际选择顺序。
+### Testing
+- `pnpm test -- tests/runtime-release-scripts.spec.mjs --maxWorkers=1 --testTimeout=20000`：通过，1 个测试文件、12 个测试；当前终端 Node.js 22.22.0 低于仓库声明的 Node.js 24，pnpm 输出 engine 警告。
+- 隔离工具发现验证：将 PATH 限制为 `C:\Windows\System32`，指定本机 DSH Runtime 后运行 `build-windows.bat --no-pause`；脚本使用 Runtime Node.js 24.19.0，并从 Manifest 指向的 `tools\node_modules\@pnpm\exe\pnpm.exe` 成功取得 pnpm 11.7.0，随后按预期停在被隔离的 PowerShell 检查处。
+- `build-windows.bat` 行尾检查：通过，174 个换行全部为 CRLF。
+- `git diff --check`：通过。
+### Notes
+- `build-windows.bat`：增加所选 Runtime 的独立 pnpm 发现、Manifest 解析和兼容路径回退。
+- `tests/runtime-release-scripts.spec.mjs`：增加 Runtime pnpm 优先于 Corepack 的构建脚本回归契约。
+- `README.md`：更新 Windows 构建工具发现规则。
+- `progress.md`：追加本轮施工、验证和回滚记录。
+- 回滚点：`56298ebfff8f1d6789e874abef00cefd339ef8da`。执行 `git restore --source=56298ebfff8f1d6789e874abef00cefd339ef8da -- build-windows.bat tests/runtime-release-scripts.spec.mjs README.md` 可回滚本轮代码、测试和文档；`progress.md` 按追加式历史记录保留。

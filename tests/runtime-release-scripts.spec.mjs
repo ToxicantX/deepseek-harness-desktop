@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 const execFileAsync = promisify(execFile)
 const root = resolve(import.meta.dirname, '..')
+const windowsBuildScript = readFileSync(join(root, 'build-windows.bat'), 'utf8')
 const buildScript = readFileSync(join(root, 'scripts', 'build-runtime.ps1'), 'utf8')
 const smokeScript = readFileSync(join(root, 'scripts', 'smoke-runtime.mjs'), 'utf8')
 const patch = parseYaml(readFileSync(join(root, 'runtime', 'desktop.patch.yml'), 'utf8'))
@@ -25,6 +26,13 @@ async function fixtureDirectory() {
 }
 
 describe('Runtime release scripts', () => {
+  it('reuses the selected DSH Runtime pnpm before falling back to Corepack', () => {
+    expect(windowsBuildScript).toContain('set "RUNTIME_ROOT=%DSH_DESKTOP_RUNTIME_ROOT%"')
+    expect(windowsBuildScript).toContain("manifest.paths?.pnpm")
+    expect(windowsBuildScript).toContain('tools\\node_modules\\@pnpm\\exe\\pnpm.exe')
+    expect(windowsBuildScript.indexOf('call :add_runtime_pnpm_to_path')).toBeLessThan(windowsBuildScript.indexOf('where corepack'))
+  })
+
   it('refuses catalogs that offer authenticated runtimes to old Shell versions', async () => {
     const directory = await fixtureDirectory()
     const archive = join(directory, 'runtime.zip')

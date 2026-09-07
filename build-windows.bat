@@ -6,6 +6,8 @@ set "PNPM_CMD=pnpm"
 set "NODE_EXE="
 set "NODE_VERSION="
 set "NODE_DIR="
+set "RUNTIME_ROOT="
+set "RUNTIME_PNPM="
 
 if /i "%~1"=="--no-pause" set "NO_PAUSE=1"
 if defined CI set "NO_PAUSE=1"
@@ -14,9 +16,15 @@ cd /d "%~dp0"
 if errorlevel 1 goto :cd_failed
 
 echo Checking required tools...
-if defined DSH_DESKTOP_RUNTIME_ROOT if exist "%DSH_DESKTOP_RUNTIME_ROOT%\node\node.exe" set "NODE_EXE=%DSH_DESKTOP_RUNTIME_ROOT%\node\node.exe"
+if defined DSH_DESKTOP_RUNTIME_ROOT if exist "%DSH_DESKTOP_RUNTIME_ROOT%\node\node.exe" (
+    set "NODE_EXE=%DSH_DESKTOP_RUNTIME_ROOT%\node\node.exe"
+    set "RUNTIME_ROOT=%DSH_DESKTOP_RUNTIME_ROOT%"
+)
 if not defined NODE_EXE if defined LOCALAPPDATA (
-    for /d %%R in ("%LOCALAPPDATA%\DeepSeek Harness\runtime-manager\runtimes\*") do if exist "%%~fR\node\node.exe" if not defined NODE_EXE set "NODE_EXE=%%~fR\node\node.exe"
+    for /d %%R in ("%LOCALAPPDATA%\DeepSeek Harness\runtime-manager\runtimes\*") do if exist "%%~fR\node\node.exe" if not defined NODE_EXE (
+        set "NODE_EXE=%%~fR\node\node.exe"
+        set "RUNTIME_ROOT=%%~fR"
+    )
 )
 if not defined NODE_EXE if defined NVM_HOME (
     for /d %%R in ("%NVM_HOME%\v24*") do if exist "%%~fR\node.exe" if not defined NODE_EXE set "NODE_EXE=%%~fR\node.exe"
@@ -40,6 +48,8 @@ for %%D in ("%NODE_EXE%") do set "NODE_DIR=%%~dpD"
 set "PATH=%NODE_DIR%;%PATH%"
 echo Using Node.js %NODE_VERSION% x64 from %NODE_EXE%
 
+where pnpm >nul 2>&1
+if errorlevel 1 if defined RUNTIME_ROOT call :add_runtime_pnpm_to_path
 where pnpm >nul 2>&1
 if errorlevel 1 (
     where corepack >nul 2>&1
@@ -108,7 +118,8 @@ echo ERROR: Found %NODE_VERSION% %NODE_ARCH% at %NODE_EXE%.
 goto :done
 
 :pnpm_missing
-echo ERROR: Neither pnpm nor Corepack was found on PATH. Install Node.js with Corepack and try again.
+echo ERROR: pnpm was not found on PATH, in the selected DSH Runtime, or through Corepack.
+echo ERROR: Install the pnpm version declared in package.json, enable Corepack, or install a complete DSH Runtime.
 goto :done
 
 :pnpm_version_invalid
@@ -144,6 +155,18 @@ goto :done
 echo ERROR: Packaging finished without both expected Windows executables.
 set "EXIT_CODE=1"
 goto :done
+
+:add_runtime_pnpm_to_path
+if exist "%RUNTIME_ROOT%\runtime-manifest.json" (
+    for /f "usebackq delims=" %%P in (`call "%NODE_EXE%" -e "const fs=require('node:fs');const path=require('node:path');const manifest=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));if(typeof manifest.paths?.pnpm==='string')process.stdout.write(path.resolve(process.argv[2],manifest.paths.pnpm));" "%RUNTIME_ROOT%\runtime-manifest.json" "%RUNTIME_ROOT%" 2^>nul`) do if not defined RUNTIME_PNPM set "RUNTIME_PNPM=%%P"
+)
+if defined RUNTIME_PNPM if not exist "%RUNTIME_PNPM%" set "RUNTIME_PNPM="
+if not defined RUNTIME_PNPM if exist "%RUNTIME_ROOT%\tools\node_modules\@pnpm\exe\pnpm.exe" set "RUNTIME_PNPM=%RUNTIME_ROOT%\tools\node_modules\@pnpm\exe\pnpm.exe"
+if not defined RUNTIME_PNPM if exist "%RUNTIME_ROOT%\tools\pnpm.exe" set "RUNTIME_PNPM=%RUNTIME_ROOT%\tools\pnpm.exe"
+if not defined RUNTIME_PNPM exit /b 0
+for %%D in ("%RUNTIME_PNPM%") do set "PATH=%%~dpD;%PATH%"
+echo pnpm was not found on PATH; using DSH Runtime pnpm from %RUNTIME_PNPM%.
+exit /b 0
 
 :done
 echo.
