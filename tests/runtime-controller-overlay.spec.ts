@@ -25,7 +25,7 @@ function runtime() {
   } as any
 }
 
-function controller(onReady = vi.fn(async () => {}), pluginIsolation?: any, inspectAgentPresetSchema?: any) {
+function controller(onReady = vi.fn(async () => {}), pluginIsolation?: any, inspectAgentPresetSchema?: any, inspectPluginPreset?: any) {
   return new RuntimeController({
     shellVersion: '0.1.16',
     store: { promote: vi.fn(async () => ({ schemaVersion: 1, preference: { mode: 'latest-compatible' } })) } as any,
@@ -34,6 +34,7 @@ function controller(onReady = vi.fn(async () => {}), pluginIsolation?: any, insp
     goalGuardPlugin: 'C:/resources/goal-no-progress-guard/index.js',
     ...(pluginIsolation === undefined ? {} : { pluginIsolation }),
     ...(inspectAgentPresetSchema === undefined ? {} : { inspectAgentPresetSchema }),
+    ...(inspectPluginPreset === undefined ? {} : { inspectPluginPreset }),
     environment: { DSH_HOME: 'C:/dsh-home' },
     onView: vi.fn(),
     onReady,
@@ -61,6 +62,23 @@ describe('RuntimeController goal guard overlay', () => {
     expect(inspect).toHaveBeenCalledTimes(3)
     expect(apply).toHaveBeenCalledOnce()
     expect(mocks.startBackend).toHaveBeenCalledTimes(2)
+  })
+
+  it('automatically isolates a preset conflict when Runtime only reports an early exit', async () => {
+    const disable = vi.fn(async () => {})
+    const isolation = { supported: () => true, packages: vi.fn(async () => ['dsh-multi-model-orchestrator']), disable, prepare: vi.fn(async () => undefined), quarantine: vi.fn(async () => false) }
+    const inspectPluginPreset = vi.fn(async (input: { diagnostics?: string }) => input.diagnostics === undefined
+      ? undefined
+      : ({ pluginName: 'dsh-multi-model-orchestrator', presetId: 'multi-model-orchestrator', apply: vi.fn(async () => {}) }))
+    mocks.startBackend
+      .mockRejectedValueOnce(new Error('DSH runtime exited before readiness: exit code 1'))
+      .mockResolvedValue({ url: new URL('http://127.0.0.1:43123/'), done: new Promise(() => {}), stop: vi.fn() })
+
+    await (controller(undefined, isolation, undefined, inspectPluginPreset) as any).launch(runtime())
+
+    expect(disable).toHaveBeenCalledWith('dsh-multi-model-orchestrator', 'preset-conflict')
+    expect(mocks.startBackend).toHaveBeenCalledTimes(2)
+    expect(isolation.quarantine).not.toHaveBeenCalled()
   })
 
   it('isolates the third-party plugin when its preset reset fails, then restarts DSH', async () => {

@@ -379,6 +379,17 @@ export class RuntimeController {
         return
       } catch (error) {
         const diagnostics = error instanceof Error ? error.message : String(error)
+        if (trial === undefined && attempt === 0 && this.recoveryPlan?.kind === 'plugin-preset-conflict') {
+          const recovery = this.recoveryPlan
+          const isolation = this.pluginIsolation
+          if (isolation !== undefined && isolation.supported(runtime)
+            && (await isolation.packages()).includes(recovery.plan.pluginName)) {
+            await isolation.disable(recovery.plan.pluginName, 'preset-conflict')
+            this.recoveryPlan = undefined
+            message = '已隔离冲突插件，正在重新启动 DSH'
+            continue
+          }
+        }
         if (trial === undefined && attempt === 0) {
           const plan = await this.inspectAgentPresetSchema({
             home: this.environment.DSH_HOME ?? join(homedir(), '.dsh'),
