@@ -45,6 +45,21 @@ describe('plugin isolation', () => {
     await expect(service.disable('not-installed', 'manual')).rejects.toThrow()
   })
 
+  it('releases only isolation caused by the removed client runtime', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-isolation-release-'))
+    const home = join(root, 'home')
+    await mkdir(join(home, 'profiles', 'web'), { recursive: true })
+    await writeFile(join(home, 'profiles', 'web', 'package.json'), JSON.stringify({ dependencies: { 'third-party': '1.0.0' } }))
+    const service = new PluginIsolation({ home, directory: join(root, 'shell') })
+
+    await service.disable('third-party', 'removed-client-runtime')
+    await expect(service.releaseRemovedClientRuntime('third-party')).resolves.toBe(true)
+    expect(await service.list()).toEqual([])
+    await service.disable('third-party', 'manual')
+    await expect(service.releaseRemovedClientRuntime('third-party')).resolves.toBe(false)
+    expect(await service.list()).toEqual([{ name: 'third-party', reason: 'manual' }])
+  })
+
   it('generates only exact disabled patches and does not clear isolation when a plugin becomes compatible', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-isolation-overlay-'))
     const service = new PluginIsolation({ home: join(root, 'home'), directory: root })

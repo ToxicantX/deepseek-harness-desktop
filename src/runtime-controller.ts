@@ -15,6 +15,7 @@ import { prepareCliShim } from './cli-shell.ts'
 import { prepareGoalGuardOverlay } from './goal-guard-overlay.ts'
 import { PluginImportFailure, PluginIsolation } from './plugin-isolation.ts'
 import { inspectProfileBundleRecovery, type ProfileBundleRecoveryPlan } from './profile-bundle-recovery.ts'
+import { preparePluginPresetCompatibility, type PluginPresetCompatibilityInput } from './plugin-preset-compatibility.ts'
 import { inspectPluginPresetRecovery, type PluginPresetRecoveryPlan } from './plugin-preset-recovery.ts'
 import { RuntimeStore, type InstalledRuntime, type RuntimeState } from './runtime-store.ts'
 import {
@@ -56,6 +57,7 @@ export interface RuntimeView {
 type StaleLocalPluginRecoveryInspector = typeof inspectStaleLocalPluginRecovery
 type ProfileBundleRecoveryInspector = typeof inspectProfileBundleRecovery
 type PluginPresetRecoveryInspector = typeof inspectPluginPresetRecovery
+type PluginPresetCompatibilityPreparer = (input: PluginPresetCompatibilityInput) => Promise<string | undefined>
 type RuntimeRecoveryPlan =
   | { kind: 'stale-local-plugins'; plan: StaleLocalPluginRecoveryPlan }
   | { kind: 'profile-bundle-mismatch'; plan: ProfileBundleRecoveryPlan }
@@ -72,6 +74,7 @@ export interface RuntimeControllerOptions {
   inspectStaleLocalPlugins?: StaleLocalPluginRecoveryInspector
   inspectProfileBundles?: ProfileBundleRecoveryInspector
   inspectPluginPreset?: PluginPresetRecoveryInspector
+  preparePluginPresetCompatibility?: PluginPresetCompatibilityPreparer
   pluginIsolation?: PluginIsolation
   onView(view: RuntimeView): void
   onReady(url: URL, runtime: InstalledRuntime, cliDirectory: string): Promise<void>
@@ -89,6 +92,7 @@ export class RuntimeController {
   private readonly inspectStaleLocalPlugins: StaleLocalPluginRecoveryInspector
   private readonly inspectProfileBundles: ProfileBundleRecoveryInspector
   private readonly inspectPluginPreset: PluginPresetRecoveryInspector
+  private readonly preparePluginPresetCompatibility: PluginPresetCompatibilityPreparer
   private readonly pluginIsolation: PluginIsolation | undefined
   private readonly onView: (view: RuntimeView) => void
   private readonly onReady: (url: URL, runtime: InstalledRuntime, cliDirectory: string) => Promise<void>
@@ -119,6 +123,7 @@ export class RuntimeController {
     this.inspectStaleLocalPlugins = options.inspectStaleLocalPlugins ?? inspectStaleLocalPluginRecovery
     this.inspectProfileBundles = options.inspectProfileBundles ?? inspectProfileBundleRecovery
     this.inspectPluginPreset = options.inspectPluginPreset ?? inspectPluginPresetRecovery
+    this.preparePluginPresetCompatibility = options.preparePluginPresetCompatibility ?? preparePluginPresetCompatibility
     this.pluginIsolation = options.pluginIsolation
     this.onView = options.onView
     this.onReady = options.onReady
@@ -365,6 +370,12 @@ export class RuntimeController {
     this.update('starting', message)
     const home = this.environment.DSH_HOME ?? join(homedir(), '.dsh')
     await mkdir(home, { recursive: true })
+    try {
+      const compatiblePlugin = await this.preparePluginPresetCompatibility({ home, runtime })
+      if (compatiblePlugin !== undefined) await this.pluginIsolation?.releaseRemovedClientRuntime(compatiblePlugin)
+    } catch {
+      // A third-party preset compatibility repair must never block the DSH Runtime.
+    }
     let backend: RunningBackend
     let overlayDisposed = false
     const overlay = await prepareGoalGuardOverlay({

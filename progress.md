@@ -428,3 +428,72 @@
 - `docs/custom-provider-user-agent.md`：记录转换工厂失败时回退 DSH 原始工厂。
 - `progress.md`：追加本轮施工、验证和回滚记录。
 - 回滚点：`0ef90de204cfce82303c7150b51c7f78ceddf3bb`。执行 `git restore --source=0ef90de204cfce82303c7150b51c7f78ceddf3bb -- src/conversation-replay-injector.ts src/preload.ts tests/conversation-replay-shell-injector.spec.ts tests/custom-provider-user-agent-injector.spec.ts docs/conversation-edit-retry.md docs/custom-provider-user-agent.md` 可回滚本轮及紧邻的上一轮注入兼容改动；`progress.md` 按追加式历史记录保留，通过后续追加更正记录处理。
+
+## 2026-09-07 - Task: 修复 DSH 新版 PTC 命名导致多模型预设无法创建会话
+### What was done
+- 修复新版 DSH 将工具呈现配置从 `code` 更名为 `ptc` 后，旧版多模型编排预设因 schema 校验失败而无法创建会话的问题。
+- Runtime 启动前读取当前 DSH 自带的 `ptc` 或旧 `code` 预设，仅在确认当前 Runtime 使用 `ptc` 时迁移插件的主预设和旧 ID 兼容预设源。
+- 迁移只替换 `tool-presentation.mode` 标量，保留 YAML 其他配置、注释和换行，并跳过 Profile 外部的 link 安装及用户已改成其他模式的预设源。
+- 将预设兼容准备置于独立故障边界；迁移文件缺失、格式变化或写入失败时仍继续启动 DSH Runtime，避免第三方预设问题影响基础窗口和普通会话。
+### Testing
+- `pnpm exec vitest run tests/plugin-preset-compatibility.spec.ts tests/runtime-controller-overlay.spec.ts --maxWorkers=1 --testTimeout=20000`：通过，2 个测试文件、9 个测试。
+- `pnpm test -- --maxWorkers=1 --testTimeout=20000`：通过，21 个测试文件、123 个测试。
+- `pnpm run typecheck`：通过；当前系统 Node.js 22.22.0 低于仓库声明的 Node.js 24，pnpm 输出 engine 警告。
+- `pnpm run build`：通过；兼容迁移及故障隔离逻辑已进入 `lib/main.js`，同样存在上述 Node.js engine 警告。
+- `git diff --check`：通过。
+- 未启动真实 Electron，并且本机现有 DSH Runtime 仍使用 `mode: code`，因此新版 `mode: ptc` 的真实会话创建仍需在用户更新后的 Runtime 环境手工烟测。
+### Notes
+- `src/plugin-preset-compatibility.ts`：新增基于当前 Runtime 自带预设的 `code -> ptc` 精准迁移，并保护外部 link 安装。
+- `src/runtime-controller.ts`：在 Runtime 启动前调用预设兼容准备，并隔离其全部异常。
+- `tests/plugin-preset-compatibility.spec.ts`：新增 PTC 迁移、格式保留、幂等、旧 Runtime 和自定义配置保护测试。
+- `tests/runtime-controller-overlay.spec.ts`：新增预设迁移失败后 Runtime 仍继续启动的回归测试。
+- `docs/plugin-preset-compatibility.md`：记录迁移触发条件、边界和验证入口。
+- `progress.md`：追加本轮施工、验证和回滚记录。
+- 回滚点：`40d7258b6a4de14b78127feb0936a2641258ef3b`。执行 `git restore --source=40d7258b6a4de14b78127feb0936a2641258ef3b -- src/runtime-controller.ts tests/runtime-controller-overlay.spec.ts`，再执行 `Remove-Item -LiteralPath 'src\plugin-preset-compatibility.ts','tests\plugin-preset-compatibility.spec.ts','docs\plugin-preset-compatibility.md' -Force` 可回滚本轮代码、测试和文档；`progress.md` 按追加式历史记录保留。
+
+## 2026-09-07 - Task: 补齐 DSH 0.1.3 预设包布局并完成当前环境迁移
+### What was done
+- 修正首次兼容实现只读取旧版 CLI 内置预设目录的问题，新增识别 DSH `0.1.3-alpha.1` 将预设迁移到 `@deepseek-ai/dsh-agent-presets/presets` 后的实际安装布局。
+- 将插件模板写入改为同目录临时文件替换，先断开 pnpm Store 硬链接，避免迁移插件模板时修改共享包缓存。
+- 增加新版嵌套预设包布局和 pnpm 硬链接回归覆盖。
+- 在不终止当前运行进程的情况下，通过插件自身安装器迁移当前用户环境的主预设和旧 ID 兼容预设；四个模板/目标文件均已为 `mode: ptc`，两个管理 marker 的文件哈希均与实际内容一致，共享 pnpm Store 原始副本仍保持 `mode: code`。
+### Testing
+- `pnpm exec vitest run tests/plugin-preset-compatibility.spec.ts tests/runtime-controller-overlay.spec.ts --maxWorkers=1 --testTimeout=20000`：通过，2 个测试文件、10 个测试。
+- `pnpm test -- --maxWorkers=1 --testTimeout=20000`：通过，21 个测试文件、124 个测试。
+- `pnpm run typecheck`：通过；当前系统 Node.js 22.22.0 低于仓库声明的 Node.js 24，pnpm 输出 engine 警告。
+- `pnpm run build`：通过；新版预设包布局识别和硬链接安全替换逻辑已进入 `lib/main.js`，同样存在上述 Node.js engine 警告。
+- 当前环境静态验证：通过；`multi-model-orchestrator`、`orchestrator` 的插件模板和已安装预设均为 `mode: ptc`，marker 校验全部通过，pnpm Store 副本未改变。
+- `git diff --check`：通过。
+- 未通过 UI 实际提交新建会话请求；该项由当前运行窗口直接复验。
+### Notes
+- `src/plugin-preset-compatibility.ts`：补充新版 `dsh-agent-presets` 安装布局，并使用临时文件替换断开包缓存硬链接。
+- `tests/plugin-preset-compatibility.spec.ts`：增加新版目录布局和共享 Store 不受迁移影响的测试。
+- `docs/plugin-preset-compatibility.md`：补充新版预设包位置和硬链接保护规则。
+- `progress.md`：追加首次实现漏判的原因、修正和当前环境迁移证据。
+- 仓库回滚点：`40d7258b6a4de14b78127feb0936a2641258ef3b`。执行 `git restore --source=40d7258b6a4de14b78127feb0936a2641258ef3b -- src/runtime-controller.ts tests/runtime-controller-overlay.spec.ts`，再执行 `Remove-Item -LiteralPath 'src\plugin-preset-compatibility.ts','tests\plugin-preset-compatibility.spec.ts','docs\plugin-preset-compatibility.md' -Force` 可回滚代码、测试和文档；`progress.md` 保留追加历史。
+- 当前用户预设回滚副本：`C:\Users\karma617\.dsh\.desktop-preset-compat-backup-1788756339664`；其中包含迁移前的两个插件模板以及 `multi-model-orchestrator`、`orchestrator` 两个完整受管预设目录。
+## 2026-09-07 - Task: 修复多模型插件被旧客户端模块隔离后预设等待服务
+### What was done
+- 补齐多模型插件对 DSH `0.1.3-alpha.1` 的客户端清单迁移：仅在 Runtime 已移除 `@deepseek-ai/dsh-client-runtime` 时，从该插件的 `dsh.client.inject` 中删除旧模块，并通过同目录临时文件替换断开 pnpm Store 硬链接。
+- 兼容准备完成后只解除 `dsh-multi-model-orchestrator` 因 `removed-client-runtime` 产生的隔离；手工隔离和导入故障隔离保持不变。兼容迁移或解除隔离异常仍由 Runtime 启动边界吞吐，不阻断基础功能。
+- 当前用户环境重新安装 GitHub `v0.7.6` 固定版本，将主模板、旧 ID 模板和两个受管预设迁移为 `mode: ptc`，并清除该插件的旧客户端模块隔离记录；全过程未终止当前 DSH 或桌面壳进程。
+### Testing
+- `pnpm run typecheck`：通过；当前系统 Node.js 22.22.0 低于仓库声明的 Node.js 24，pnpm 输出 engine 警告。
+- `pnpm exec vitest run tests/plugin-preset-compatibility.spec.ts tests/plugin-isolation.spec.ts tests/runtime-controller-overlay.spec.ts --maxWorkers=1 --testTimeout=20000`：通过，3 个测试文件、17 个测试。
+- `pnpm test -- --maxWorkers=1 --testTimeout=20000`：通过，21 个测试文件、126 个测试。
+- `pnpm run build`：通过；客户端清单迁移、精准解除隔离和启动故障边界已进入 `lib/main.js`。
+- 当前环境静态验证：通过；插件版本为 `0.7.6`，客户端清单不再含旧 Runtime，两个插件模板和两个已安装预设均为 `mode: ptc`，两个 marker 哈希匹配，隔离列表为空，共享 pnpm Store 模板仍为 `mode: code`。
+- DSH `web --dump-config`：通过；退出码为 0，组合中包含 `dsh-multi-model-orchestrator` 和 `multi-model-orchestrator-settings`。
+- 当前运行中的 Backend 在插件重新安装前已启动，其设置端点仍返回 404；本轮遵守不终止现有进程的边界，真实 Host 服务激活与新建多模型会话需在用户重启一次桌面壳后复验。
+- `git diff --check`：通过。
+### Notes
+- `src/plugin-preset-compatibility.ts`：增加旧客户端预加载清单迁移，并保持 pnpm Store 原始内容不变。
+- `src/plugin-isolation.ts`：增加只解除 `removed-client-runtime` 原因的隔离入口。
+- `src/runtime-controller.ts`：在隔离 overlay 生成前解除已完成兼容迁移的插件隔离，且保持独立异常边界。
+- `tests/plugin-preset-compatibility.spec.ts`：增加插件清单迁移和 package.json 硬链接保护覆盖。
+- `tests/plugin-isolation.spec.ts`：增加精准解除隔离回归测试。
+- `tests/runtime-controller-overlay.spec.ts`：增加迁移失败继续启动和解除隔离顺序测试。
+- `docs/plugin-preset-compatibility.md`：记录旧客户端模块迁移、隔离释放规则和验证入口。
+- `progress.md`：追加本轮施工、验证、当前环境迁移和回滚记录。
+- 仓库回滚点：`40d7258b6a4de14b78127feb0936a2641258ef3b`。执行 `git restore --source=40d7258b6a4de14b78127feb0936a2641258ef3b -- src/plugin-isolation.ts src/runtime-controller.ts tests/plugin-isolation.spec.ts tests/runtime-controller-overlay.spec.ts`，再执行 `Remove-Item -LiteralPath 'src\plugin-preset-compatibility.ts','tests\plugin-preset-compatibility.spec.ts','docs\plugin-preset-compatibility.md' -Force` 可回滚本轮及关联的未提交兼容改动；`progress.md` 保留追加历史。
+- 当前用户环境回滚副本：`C:\Users\karma617\.dsh\.desktop-plugin-runtime-compat-backup-20260907-142235`。使用 DSH `plugin --profile web remove dsh-multi-model-orchestrator` 移除本轮安装，删除本轮生成的 `multi-model-orchestrator`、`orchestrator` 两个预设目录，再将备份中的隔离 JSON 复制回原位置，可恢复迁移前状态。

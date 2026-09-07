@@ -25,7 +25,11 @@ function runtime() {
   } as any
 }
 
-function controller(onReady = vi.fn(async () => {}), pluginIsolation?: any) {
+function controller(
+  onReady = vi.fn(async () => {}),
+  pluginIsolation?: any,
+  preparePluginPresetCompatibility: (input: any) => Promise<string | undefined> = vi.fn(async () => undefined),
+) {
   return new RuntimeController({
     shellVersion: '0.1.16',
     store: { promote: vi.fn(async () => ({ schemaVersion: 1, preference: { mode: 'latest-compatible' } })) } as any,
@@ -33,6 +37,7 @@ function controller(onReady = vi.fn(async () => {}), pluginIsolation?: any) {
     userData: 'C:/user-data',
     goalGuardPlugin: 'C:/resources/goal-no-progress-guard/index.js',
     ...(pluginIsolation === undefined ? {} : { pluginIsolation }),
+    preparePluginPresetCompatibility,
     environment: { DSH_HOME: 'C:/dsh-home' },
     onView: vi.fn(),
     onReady,
@@ -99,6 +104,27 @@ describe('RuntimeController goal guard overlay', () => {
     await options.cleanup()
     await options.cleanup()
     expect(dispose).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps starting the Runtime when preset compatibility preparation fails', async () => {
+    const preparePreset = vi.fn(async () => { throw new Error('preset migration failed') })
+    const backend = { url: new URL('http://127.0.0.1:43123/'), done: new Promise(() => {}), stop: vi.fn() }
+    mocks.startBackend.mockResolvedValue(backend)
+
+    await expect((controller(undefined, undefined, preparePreset) as any).launch(runtime())).resolves.toBeUndefined()
+    expect(preparePreset).toHaveBeenCalledWith({ home: 'C:/dsh-home', runtime: runtime() })
+    expect(mocks.startBackend).toHaveBeenCalledOnce()
+  })
+
+  it('releases only the repaired removed-client-runtime isolation before launch', async () => {
+    const release = vi.fn(async () => true)
+    const isolation = { prepare: vi.fn(), quarantine: vi.fn(), releaseRemovedClientRuntime: release }
+    const preparePreset = vi.fn(async () => 'dsh-multi-model-orchestrator')
+    mocks.startBackend.mockResolvedValue({ url: new URL('http://127.0.0.1:43123/'), done: new Promise(() => {}), stop: vi.fn() })
+
+    await (controller(undefined, isolation, preparePreset) as any).launch(runtime())
+    expect(release).toHaveBeenCalledWith('dsh-multi-model-orchestrator')
+    expect(release.mock.invocationCallOrder[0]).toBeLessThan(isolation.prepare.mock.invocationCallOrder[0]!)
   })
 
   it('stops the backend and disposes the overlay when post-start setup fails', async () => {
