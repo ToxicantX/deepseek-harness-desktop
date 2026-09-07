@@ -64,12 +64,111 @@ describe('desktop text and file context contract', () => {
     expect(intercepted).toBe(false)
   })
 
-  it('is reinjection-safe and expands pending clips before submit', () => {
+  it('is reinjection-safe and expands pending clips before keyboard, form, or send-button submit', () => {
     const script = createFileContextInjectorScript()
     expect(script).toContain("if (previous && typeof previous.dispose === 'function') previous.dispose()")
     expect(script).toContain("document.addEventListener('keydown', onSubmit, true)")
+    expect(script).toContain("document.addEventListener('click', onSubmit, true)")
     expect(script).toContain("document.addEventListener('submit', onSubmit, true)")
+    expect(script).toContain("const SEND_BUTTON_LABELS = new Set(['发送消息', 'send message'])")
+    expect(script).toContain("button.closest('[data-composer-card=\"true\"]')")
+    expect(script).toContain("else if (button) replayButtonClick(button)")
+    expect(script).toContain('try { button.click(); }')
     expect(script).toContain('for (const entry of clips.values()) value = appendEntry(value, entry)')
+  })
+
+  it('expands a pending clip before replaying the DSH send-button click', async () => {
+    const listeners = new Map<string, (event: any) => void>()
+    let editor: FakeTextAreaElement
+    let sent: string | undefined
+    class FakeElement {
+      closest(_selector: string): FakeElement | null { return null }
+    }
+    class FakeHTMLElement extends FakeElement {
+      matches(_selector: string): boolean { return false }
+    }
+    const composer = new class extends FakeHTMLElement {
+      querySelector(selector: string): FakeTextAreaElement | null {
+        return selector.includes('textarea') ? editor : null
+      }
+    }()
+    class FakeTextAreaElement extends FakeHTMLElement {
+      private current = ''
+      get value(): string { return this.current }
+      set value(value: string) { this.current = value }
+      override matches(selector: string): boolean { return selector.includes('textarea') }
+      override closest(selector: string): FakeElement | null {
+        if (selector === 'textarea,[contenteditable="true"]') return this
+        if (selector === '[data-composer-card="true"]') return composer
+        if (selector === '[data-input-scroll="true"]') return this
+        return null
+      }
+      dispatchEvent(): boolean { return true }
+      focus(): void {}
+    }
+    class FakeInputElement extends FakeHTMLElement {}
+    class FakeFormElement extends FakeHTMLElement {}
+    class FakeButtonElement extends FakeHTMLElement {
+      disabled = false
+      getAttribute(name: string): string | null { return name === 'aria-label' ? '发送消息' : null }
+      override closest(selector: string): FakeElement | null {
+        if (selector === 'button[aria-label]') return this
+        if (selector === '[data-composer-card="true"]') return composer
+        return null
+      }
+      click(): void {
+        const event = {
+          type: 'click',
+          target: this,
+          stopped: false,
+          preventDefault() {},
+          stopImmediatePropagation() { this.stopped = true },
+        }
+        listeners.get('click')?.(event)
+        if (!event.stopped) sent = editor.value
+      }
+    }
+    const button = new FakeButtonElement()
+    class FakeIconElement extends FakeElement {
+      override closest(selector: string): FakeElement | null { return selector === 'button[aria-label]' ? button : null }
+    }
+    class PendingClipMap extends Map<string, any> {
+      constructor() {
+        super()
+        this.set('clip-1', { name: 'long.textclip', text: '长文本'.repeat(200), isFile: false, element: null })
+      }
+    }
+    const windowFixture = { addEventListener() {}, removeEventListener() {} } as any
+    const documentFixture = {
+      addEventListener: (type: string, listener: (event: any) => void) => listeners.set(type, listener),
+      removeEventListener() {},
+      querySelectorAll: () => [],
+    }
+    const execute = new Function(
+      'window', 'document', 'Element', 'HTMLElement', 'HTMLTextAreaElement', 'HTMLInputElement',
+      'InputEvent', 'Node', 'HTMLFormElement', 'HTMLButtonElement', 'KeyboardEvent', 'Map',
+      'return ' + createFileContextInjectorScript(),
+    )
+    execute(
+      windowFixture, documentFixture, FakeElement, FakeHTMLElement, FakeTextAreaElement, FakeInputElement,
+      class {}, FakeElement, FakeFormElement, FakeButtonElement, class {}, PendingClipMap,
+    )
+    editor = new FakeTextAreaElement()
+    editor.value = '修复这个问题'
+    const event = {
+      type: 'click',
+      target: new FakeIconElement(),
+      prevented: false,
+      stopped: false,
+      preventDefault() { this.prevented = true },
+      stopImmediatePropagation() { this.stopped = true },
+    }
+
+    listeners.get('click')?.(event)
+    await new Promise(resolve => setTimeout(resolve, 5))
+
+    expect(event).toMatchObject({ prevented: true, stopped: true })
+    expect(sent).toBe('修复这个问题\n\n' + '长文本'.repeat(200))
   })
 
   it('exposes only Electron file-path resolution and injects on the trusted main page', () => {

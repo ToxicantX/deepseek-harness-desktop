@@ -16,10 +16,21 @@ export function createFileContextInjectorScript(): string {
   let clipSequence = 0;
   let busy = false;
   let replayingSubmit = false;
+  const SEND_BUTTON_LABELS = new Set(['发送消息', 'send message']);
   const CHAT_EDITOR_SELECTOR = '[data-composer-card="true"] [data-input-scroll="true"] textarea,[data-composer-card="true"] [data-input-scroll="true"] [contenteditable="true"]';
   const isChatEditor = node => node instanceof HTMLElement && node.matches('textarea,[contenteditable="true"]') && Boolean(node.closest('[data-composer-card="true"]')) && Boolean(node.closest('[data-input-scroll="true"]'));
   const editorFromTarget = target => target instanceof Element ? target.closest('textarea,[contenteditable="true"]') : null;
   const findEditor = () => [...document.querySelectorAll(CHAT_EDITOR_SELECTOR)].find(node => isChatEditor(node) && node.getBoundingClientRect().width > 0 && node.getBoundingClientRect().height > 0) || null;
+  const editorInComposer = target => {
+    const composer = target instanceof Element ? target.closest('[data-composer-card="true"]') : null;
+    const editor = composer && composer.querySelector('[data-input-scroll="true"] textarea,[data-input-scroll="true"] [contenteditable="true"]');
+    return isChatEditor(editor) ? editor : null;
+  };
+  const sendButtonFromTarget = target => {
+    const button = target instanceof Element ? target.closest('button[aria-label]') : null;
+    if (!(button instanceof HTMLButtonElement) || button.disabled || !button.closest('[data-composer-card="true"]')) return null;
+    return SEND_BUTTON_LABELS.has((button.getAttribute('aria-label') || '').trim().toLowerCase()) ? button : null;
+  };
   const readValue = node => node instanceof HTMLTextAreaElement || node instanceof HTMLInputElement ? node.value : node.innerText;
   const writeValue = (node, value) => {
     if (node instanceof HTMLTextAreaElement || node instanceof HTMLInputElement) {
@@ -285,13 +296,26 @@ export function createFileContextInjectorScript(): string {
       finally { replayingSubmit = false; }
     }, 0);
   };
+  const replayButtonClick = button => {
+    setTimeout(() => {
+      replayingSubmit = true;
+      try { button.click(); }
+      finally { replayingSubmit = false; }
+    }, 0);
+  };
   const onSubmit = event => {
     if (replayingSubmit) return;
     let editor = null;
+    let button = null;
     if (event.type === 'keydown') {
       if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
       editor = editorFromTarget(event.target);
       if (!isChatEditor(editor)) return;
+    } else if (event.type === 'click') {
+      button = sendButtonFromTarget(event.target);
+      if (!button) return;
+      editor = editorInComposer(button);
+      if (!editor) return;
     } else {
       const form = event.target instanceof HTMLFormElement ? event.target : null;
       editor = findEditor();
@@ -301,13 +325,16 @@ export function createFileContextInjectorScript(): string {
     event.preventDefault();
     event.stopImmediatePropagation();
     if (!expandClips(editor)) return;
-    if (event.type === 'keydown') replayKeydown(event, editor); else replayFormSubmit(event);
+    if (event.type === 'keydown') replayKeydown(event, editor);
+    else if (button) replayButtonClick(button);
+    else replayFormSubmit(event);
   };
   window.addEventListener('paste', onPaste, true);
   document.addEventListener('paste', onPaste, true);
   document.addEventListener('keydown', onSubmit, true);
+  document.addEventListener('click', onSubmit, true);
   document.addEventListener('submit', onSubmit, true);
-  disposers.push(() => window.removeEventListener('paste', onPaste, true), () => document.removeEventListener('paste', onPaste, true), () => document.removeEventListener('keydown', onSubmit, true), () => document.removeEventListener('submit', onSubmit, true));
+  disposers.push(() => window.removeEventListener('paste', onPaste, true), () => document.removeEventListener('paste', onPaste, true), () => document.removeEventListener('keydown', onSubmit, true), () => document.removeEventListener('click', onSubmit, true), () => document.removeEventListener('submit', onSubmit, true));
   window[key] = { dispose() { for (const dispose of disposers.splice(0)) dispose(); for (const tray of document.querySelectorAll('[' + TRAY_ATTR + ']')) tray.remove(); clips.clear(); delete window[key]; } };
   return { ok: true };
   })();`;

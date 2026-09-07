@@ -513,3 +513,21 @@
 - `tests/runtime-controller-overlay.spec.ts`：合并双方测试依赖注入参数及全部 Runtime 启动回归场景。
 - `progress.md`：追加本轮冲突解决、验证和回滚记录。
 - 回滚点：`b88cb64809e6bb0fc74d0b0ebdb7926d784532d9`。执行 `git restore --source=b88cb64809e6bb0fc74d0b0ebdb7926d784532d9 -- src/runtime-controller.ts tests/runtime-controller-overlay.spec.ts` 可将两个目标文件恢复到合并前的本地版本；`progress.md` 按追加式历史记录保留。
+
+## 2026-09-07 - Task: 修复点击发送时丢失待发送长文本
+### What was done
+- 补齐新版 DSH 使用普通按钮触发发送时的壳侧提交接管：仅识别聊天输入卡片内中英文“发送消息”按钮，在原点击进入 DSH 前展开待发送 `.textclip`，随后重放同一按钮点击。
+- 发送按钮从所属输入卡片内解析对应编辑器，避免多窗口或其他输入控件误用全局编辑器；加号、模型和权限等工具按钮保持原行为。
+- 增加真实执行注入脚本的回归测试，验证待发送折叠内容会在按钮点击重放前写回输入框并进入发送值。
+### Testing
+- `pnpm exec vitest run tests/file-context-ui-contract.spec.ts --maxWorkers=1 --testTimeout=20000`：通过，1 个测试文件、6 个测试。
+- `pnpm run typecheck`：通过；当前 Node.js 22.22.0 低于仓库声明的 Node.js 24，pnpm 输出 engine 警告。
+- `pnpm test -- --maxWorkers=1 --testTimeout=20000`：通过，23 个测试文件、139 个测试。
+- `pnpm run build`：通过；点击发送接管逻辑已进入 `lib/main.js`。
+- `git diff --check`：通过。未启动当前桌面壳进行真实会话发送烟测。
+### Notes
+- `src/file-context-injector.ts`：增加发送按钮识别、同卡片编辑器解析、点击重放及监听清理。
+- `tests/file-context-ui-contract.spec.ts`：增加按钮提交静态契约和长文本展开后再发送的执行级回归测试。
+- `docs/conversation-edit-retry.md`：记录回车、表单和发送按钮三种提交路径的长文本展开规则。
+- `progress.md`：追加本轮施工、验证和回滚记录。
+- 回滚点：`56a587004fca9d48b7a36a84249ce04c91e986a3`。执行 `git restore --source=56a587004fca9d48b7a36a84249ce04c91e986a3 -- src/file-context-injector.ts tests/file-context-ui-contract.spec.ts docs/conversation-edit-retry.md` 可回滚本轮代码、测试和文档；`progress.md` 按追加式历史记录保留。
