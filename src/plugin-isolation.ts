@@ -10,7 +10,7 @@ import { desktopEnvironment } from './backend.ts'
 import { validatePackageName } from './plugin-manager.ts'
 import type { InstalledRuntime } from './runtime-store.ts'
 
-export type IsolationReason = 'manual' | 'removed-client-runtime' | 'import-incompatible'
+export type IsolationReason = 'manual' | 'removed-client-runtime' | 'import-incompatible' | 'preset-conflict'
 export interface IsolatedPlugin { name: string; reason: IsolationReason }
 export class PluginImportFailure extends Error {
   constructor(readonly packages: string[]) {
@@ -90,7 +90,7 @@ export class PluginIsolation {
     try {
       const state = JSON.parse(await readFile(this.filename, 'utf8'))
       if (state.schemaVersion !== 1 || !Array.isArray(state.plugins) || state.plugins.length > 1000
-        || state.plugins.some((row: IsolatedPlugin) => !row || !thirdParty(row.name) || !['manual', 'removed-client-runtime', 'import-incompatible'].includes(row.reason))) {
+        || state.plugins.some((row: IsolatedPlugin) => !row || !thirdParty(row.name) || !['manual', 'removed-client-runtime', 'import-incompatible', 'preset-conflict'].includes(row.reason))) {
         throw new Error('Invalid Shell plugin isolation state')
       }
       return state.plugins

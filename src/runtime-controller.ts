@@ -174,7 +174,15 @@ export class RuntimeController {
     return this.enqueue(async () => {
       const recovery = this.recoveryPlan
       if (recovery?.kind !== 'plugin-preset-conflict') throw new Error('没有可恢复的冲突插件预设')
-      await recovery.plan.apply()
+      try {
+        await recovery.plan.apply()
+      } catch (error: unknown) {
+        const runtime = this.selectedRuntime
+        const isolation = this.pluginIsolation
+        if (runtime === undefined || isolation === undefined || !isolation.supported(runtime)
+          || !(await isolation.packages()).includes(recovery.plan.pluginName)) throw error
+        await isolation.disable(recovery.plan.pluginName, 'preset-conflict')
+      }
       this.recoveryPlan = undefined
       await this.boot()
     })

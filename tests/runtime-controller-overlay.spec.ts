@@ -63,6 +63,24 @@ describe('RuntimeController goal guard overlay', () => {
     expect(mocks.startBackend).toHaveBeenCalledTimes(2)
   })
 
+  it('isolates the third-party plugin when its preset reset fails, then restarts DSH', async () => {
+    const disable = vi.fn(async () => {})
+    const isolation = { supported: () => true, packages: vi.fn(async () => ['dsh-multi-model-orchestrator']), disable }
+    const value = controller(undefined, isolation)
+    const boot = vi.fn(async () => {})
+    ;(value as any).boot = boot
+    ;(value as any).selectedRuntime = runtime()
+    ;(value as any).recoveryPlan = {
+      kind: 'plugin-preset-conflict',
+      plan: { pluginName: 'dsh-multi-model-orchestrator', presetId: 'multi-model-orchestrator', apply: vi.fn(async () => { throw new Error('旧安装器仍不兼容') }) },
+    }
+
+    await value.recoverPluginPreset()
+
+    expect(disable).toHaveBeenCalledWith('dsh-multi-model-orchestrator', 'preset-conflict')
+    expect(boot).toHaveBeenCalledOnce()
+  })
+
   it('bounds automatic quarantine retries after both backend and frontend failures', async () => {
     const isolation = { prepare: vi.fn(), quarantine: vi.fn(async () => true) }
     mocks.startBackend.mockRejectedValue(new Error('backend import failure'))
