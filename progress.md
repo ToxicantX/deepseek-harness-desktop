@@ -497,3 +497,19 @@
 - `progress.md`：追加本轮施工、验证、当前环境迁移和回滚记录。
 - 仓库回滚点：`40d7258b6a4de14b78127feb0936a2641258ef3b`。执行 `git restore --source=40d7258b6a4de14b78127feb0936a2641258ef3b -- src/plugin-isolation.ts src/runtime-controller.ts tests/plugin-isolation.spec.ts tests/runtime-controller-overlay.spec.ts`，再执行 `Remove-Item -LiteralPath 'src\plugin-preset-compatibility.ts','tests\plugin-preset-compatibility.spec.ts','docs\plugin-preset-compatibility.md' -Force` 可回滚本轮及关联的未提交兼容改动；`progress.md` 保留追加历史。
 - 当前用户环境回滚副本：`C:\Users\karma617\.dsh\.desktop-plugin-runtime-compat-backup-20260907-142235`。使用 DSH `plugin --profile web remove dsh-multi-model-orchestrator` 移除本轮安装，删除本轮生成的 `multi-model-orchestrator`、`orchestrator` 两个预设目录，再将备份中的隔离 JSON 复制回原位置，可恢复迁移前状态。
+
+## 2026-09-07 - Task: 解决 main 分支 Runtime Controller 合并冲突
+### What was done
+- 合并本地插件预设兼容准备与上游 Agent preset schema 恢复路径，保留多模型插件预设迁移、旧客户端隔离释放、启动失败后的预设修复及冲突插件自动隔离行为。
+- 合并 Runtime Controller 测试注入入口与双方回归场景，确保预设兼容准备和新版 schema 恢复可独立验证。
+### Testing
+- `pnpm exec vitest run tests/runtime-controller-overlay.spec.ts tests/agent-preset-schema-recovery.spec.ts tests/plugin-preset-recovery.spec.ts --maxWorkers=1 --testTimeout=20000`：通过，3 个测试文件、19 个测试。
+- `pnpm run typecheck`：通过；当前 Node.js 22.22.0 低于仓库声明的 Node.js 24，pnpm 输出 engine 警告。
+- `pnpm test -- --maxWorkers=1 --testTimeout=20000`：通过，23 个测试文件、138 个测试。
+- `pnpm run build`：通过；合并后的 Runtime Controller 已进入 `lib/main.js`，同样存在上述 Node.js engine 警告。
+- `git diff --check`：通过；两个目标文件已清除冲突标记。未启动真实 Electron。
+### Notes
+- `src/runtime-controller.ts`：合并双方 Runtime 启动前预设处理、schema 恢复和冲突插件隔离入口。
+- `tests/runtime-controller-overlay.spec.ts`：合并双方测试依赖注入参数及全部 Runtime 启动回归场景。
+- `progress.md`：追加本轮冲突解决、验证和回滚记录。
+- 回滚点：`b88cb64809e6bb0fc74d0b0ebdb7926d784532d9`。执行 `git restore --source=b88cb64809e6bb0fc74d0b0ebdb7926d784532d9 -- src/runtime-controller.ts tests/runtime-controller-overlay.spec.ts` 可将两个目标文件恢复到合并前的本地版本；`progress.md` 按追加式历史记录保留。

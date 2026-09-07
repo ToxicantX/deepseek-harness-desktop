@@ -17,6 +17,7 @@ import { PluginImportFailure, PluginIsolation } from './plugin-isolation.ts'
 import { inspectProfileBundleRecovery, type ProfileBundleRecoveryPlan } from './profile-bundle-recovery.ts'
 import { preparePluginPresetCompatibility, type PluginPresetCompatibilityInput } from './plugin-preset-compatibility.ts'
 import { inspectPluginPresetRecovery, type PluginPresetRecoveryPlan } from './plugin-preset-recovery.ts'
+import { inspectAgentPresetSchemaRecovery } from './agent-preset-schema-recovery.ts'
 import { RuntimeStore, type InstalledRuntime, type RuntimeState } from './runtime-store.ts'
 import {
   inspectStaleLocalPluginRecovery,
@@ -58,6 +59,7 @@ type StaleLocalPluginRecoveryInspector = typeof inspectStaleLocalPluginRecovery
 type ProfileBundleRecoveryInspector = typeof inspectProfileBundleRecovery
 type PluginPresetRecoveryInspector = typeof inspectPluginPresetRecovery
 type PluginPresetCompatibilityPreparer = (input: PluginPresetCompatibilityInput) => Promise<string | undefined>
+type AgentPresetSchemaRecoveryInspector = typeof inspectAgentPresetSchemaRecovery
 type RuntimeRecoveryPlan =
   | { kind: 'stale-local-plugins'; plan: StaleLocalPluginRecoveryPlan }
   | { kind: 'profile-bundle-mismatch'; plan: ProfileBundleRecoveryPlan }
@@ -75,6 +77,7 @@ export interface RuntimeControllerOptions {
   inspectProfileBundles?: ProfileBundleRecoveryInspector
   inspectPluginPreset?: PluginPresetRecoveryInspector
   preparePluginPresetCompatibility?: PluginPresetCompatibilityPreparer
+  inspectAgentPresetSchema?: AgentPresetSchemaRecoveryInspector
   pluginIsolation?: PluginIsolation
   onView(view: RuntimeView): void
   onReady(url: URL, runtime: InstalledRuntime, cliDirectory: string): Promise<void>
@@ -93,6 +96,7 @@ export class RuntimeController {
   private readonly inspectProfileBundles: ProfileBundleRecoveryInspector
   private readonly inspectPluginPreset: PluginPresetRecoveryInspector
   private readonly preparePluginPresetCompatibility: PluginPresetCompatibilityPreparer
+  private readonly inspectAgentPresetSchema: AgentPresetSchemaRecoveryInspector
   private readonly pluginIsolation: PluginIsolation | undefined
   private readonly onView: (view: RuntimeView) => void
   private readonly onReady: (url: URL, runtime: InstalledRuntime, cliDirectory: string) => Promise<void>
@@ -124,6 +128,7 @@ export class RuntimeController {
     this.inspectProfileBundles = options.inspectProfileBundles ?? inspectProfileBundleRecovery
     this.inspectPluginPreset = options.inspectPluginPreset ?? inspectPluginPresetRecovery
     this.preparePluginPresetCompatibility = options.preparePluginPresetCompatibility ?? preparePluginPresetCompatibility
+    this.inspectAgentPresetSchema = options.inspectAgentPresetSchema ?? inspectAgentPresetSchemaRecovery
     this.pluginIsolation = options.pluginIsolation
     this.onView = options.onView
     this.onReady = options.onReady
@@ -174,8 +179,30 @@ export class RuntimeController {
     return this.enqueue(async () => {
       const recovery = this.recoveryPlan
       if (recovery?.kind !== 'plugin-preset-conflict') throw new Error('没有可恢复的冲突插件预设')
-      await recovery.plan.apply()
+      let isolate = false
+      try {
+        await recovery.plan.apply()
+      } catch (error: unknown) {
+        isolate = true
+        if (error instanceof Error && !/preset|agent-tool-presentation|multi-model-orchestrator|tool-presentation|mode.*expected/iu.test(error.message)) throw error
+      }
       this.recoveryPlan = undefined
+      if (!isolate) {
+        try {
+          await this.boot()
+          return
+        } catch (error: unknown) {
+          if (!(error instanceof Error) || !/preset|agent-tool-presentation|multi-model-orchestrator|tool-presentation|mode.*expected/iu.test(error.message)) throw error
+          isolate = true
+        }
+      }
+      const runtime = this.selectedRuntime
+      const isolation = this.pluginIsolation
+      if (runtime === undefined || isolation === undefined || !isolation.supported(runtime)
+        || !(await isolation.packages()).includes(recovery.plan.pluginName)) {
+        throw new Error('冲突插件无法自动隔离，请先升级插件后重试')
+      }
+      await isolation.disable(recovery.plan.pluginName, 'preset-conflict')
       await this.boot()
     })
   }
@@ -357,6 +384,29 @@ export class RuntimeController {
         return
       } catch (error) {
         const diagnostics = error instanceof Error ? error.message : String(error)
+        if (trial === undefined && attempt === 0 && this.recoveryPlan?.kind === 'plugin-preset-conflict') {
+          const recovery = this.recoveryPlan
+          const isolation = this.pluginIsolation
+          if (isolation !== undefined && isolation.supported(runtime)
+            && (await isolation.packages()).includes(recovery.plan.pluginName)) {
+            await isolation.disable(recovery.plan.pluginName, 'preset-conflict')
+            this.recoveryPlan = undefined
+            message = '已隔离冲突插件，正在重新启动 DSH'
+            continue
+          }
+        }
+        if (trial === undefined && attempt === 0) {
+          const plan = await this.inspectAgentPresetSchema({
+            home: this.environment.DSH_HOME ?? join(homedir(), '.dsh'),
+            runtime,
+            diagnostics,
+          }).catch(() => undefined)
+          if (plan !== undefined) {
+            await plan.apply()
+            message = '已迁移 DSH 0.1.3 不兼容的 Agent preset，正在重新启动 DSH'
+            continue
+          }
+        }
         if (trial !== undefined || attempt >= 3 || this.pluginIsolation === undefined
           || !await this.pluginIsolation.quarantine(runtime, this.environment, error instanceof PluginImportFailure ? error : diagnostics)) throw error
         message = '已隔离不兼容插件，正在重新启动 DSH'
@@ -376,6 +426,8 @@ export class RuntimeController {
     } catch {
       // A third-party preset compatibility repair must never block the DSH Runtime.
     }
+    const schemaMigration = await this.inspectAgentPresetSchema({ home, runtime }).catch(() => undefined)
+    if (schemaMigration !== undefined) await schemaMigration.apply()
     let backend: RunningBackend
     let overlayDisposed = false
     const overlay = await prepareGoalGuardOverlay({

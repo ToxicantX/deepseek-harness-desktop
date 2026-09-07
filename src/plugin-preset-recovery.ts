@@ -10,6 +10,8 @@ const MARKER_NAME = '.dsh-multi-model-orchestrator.json'
 const MANAGED_FILES = ['agent.cordis.yml', 'preset.yml'] as const
 const INSTALL_TIMEOUT_MS = 2 * 60_000
 const DIAGNOSTIC_PATTERN = /failed to apply loader entry multi-model-orchestrator-settings \(dsh-multi-model-orchestrator\): Refusing to modify preset target ([^\r\n]{1,32768}?): (?:(?:agent\.cordis\.yml|preset\.yml) (?:does not match the packaged preset|has changed since it was managed)\.|the management marker is (?:invalid|foreign or invalid)\.) Use --force to replace it\./gu
+const LEGACY_MODE_PATTERN = /^\s*mode:\s*code\s*$/mu
+const STARTUP_CONFLICT_PATTERN = /runtime exited before readiness|检测到冲突的插件预设|multi-model-orchestrator/iu
 
 export interface PluginPresetRecoveryInput {
   home: string
@@ -125,7 +127,8 @@ export async function inspectPluginPresetRecovery(
   if (!isAbsolute(input.home) && !win32.isAbsolute(input.home)) return undefined
   const target = join(input.home, '.agent-presets', PRESET_ID)
   const targets = diagnosticTargets(input.diagnostics)
-  if (targets.length === 0 || targets.some(value => canonicalPath(value) !== canonicalPath(target))) return undefined
+  if (targets.length > 0 && targets.some(value => canonicalPath(value) !== canonicalPath(target))) return undefined
+  if (targets.length === 0 && !STARTUP_CONFLICT_PATTERN.test(input.diagnostics)) return undefined
 
   const packageRoot = join(input.home, 'profiles', 'web', 'node_modules', PLUGIN_NAME)
   const source = join(packageRoot, 'preset')
@@ -139,6 +142,13 @@ export async function inspectPluginPresetRecovery(
     ])
   } catch {
     return undefined
+  }
+  if (targets.length === 0) {
+    const [sourcePreset, targetPreset] = await Promise.all([
+      readFile(join(source, 'agent.cordis.yml'), 'utf8'),
+      readFile(join(target, 'agent.cordis.yml'), 'utf8'),
+    ])
+    if (!LEGACY_MODE_PATTERN.test(targetPreset) || LEGACY_MODE_PATTERN.test(sourcePreset)) return undefined
   }
 
   const runInstaller = options.runInstaller ?? defaultRunInstaller

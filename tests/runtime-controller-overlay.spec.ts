@@ -29,6 +29,8 @@ function controller(
   onReady = vi.fn(async () => {}),
   pluginIsolation?: any,
   preparePluginPresetCompatibility: (input: any) => Promise<string | undefined> = vi.fn(async () => undefined),
+  inspectAgentPresetSchema?: any,
+  inspectPluginPreset?: any,
 ) {
   return new RuntimeController({
     shellVersion: '0.1.16',
@@ -38,6 +40,8 @@ function controller(
     goalGuardPlugin: 'C:/resources/goal-no-progress-guard/index.js',
     ...(pluginIsolation === undefined ? {} : { pluginIsolation }),
     preparePluginPresetCompatibility,
+    ...(inspectAgentPresetSchema === undefined ? {} : { inspectAgentPresetSchema }),
+    ...(inspectPluginPreset === undefined ? {} : { inspectPluginPreset }),
     environment: { DSH_HOME: 'C:/dsh-home' },
     onView: vi.fn(),
     onReady,
@@ -51,6 +55,77 @@ beforeEach(() => {
 })
 
 describe('RuntimeController goal guard overlay', () => {
+  it('automatically migrates the exact DSH 0.1.3 preset schema error before retrying', async () => {
+    const apply = vi.fn(async () => {})
+    const inspect = vi.fn(async (input: { diagnostics?: string }) => input.diagnostics === undefined
+      ? undefined
+      : ({ presetId: 'multi-model-orchestrator', mode: 'ptc', apply }))
+    mocks.startBackend
+      .mockRejectedValueOnce(new Error('failed to apply loader entry tool-presentation (@deepseek-ai/dsh-agent-tool-presentation): invalid config: $.mode expected "native" | "ptc" | "both", but got "code" at C:/dsh/.agent-presets/multi-model-orchestrator/agent.cordis.yml'))
+      .mockResolvedValue({ url: new URL('http://127.0.0.1:43123/'), done: new Promise(() => {}), stop: vi.fn() })
+
+    await (controller(undefined, undefined, undefined, inspect) as any).launch(runtime())
+
+    expect(inspect).toHaveBeenCalledTimes(3)
+    expect(apply).toHaveBeenCalledOnce()
+    expect(mocks.startBackend).toHaveBeenCalledTimes(2)
+  })
+
+  it('automatically isolates a preset conflict when Runtime only reports an early exit', async () => {
+    const disable = vi.fn(async () => {})
+    const isolation = { supported: () => true, packages: vi.fn(async () => ['dsh-multi-model-orchestrator']), disable, prepare: vi.fn(async () => undefined), quarantine: vi.fn(async () => false) }
+    const inspectPluginPreset = vi.fn(async (input: { diagnostics?: string }) => input.diagnostics === undefined
+      ? undefined
+      : ({ pluginName: 'dsh-multi-model-orchestrator', presetId: 'multi-model-orchestrator', apply: vi.fn(async () => {}) }))
+    mocks.startBackend
+      .mockRejectedValueOnce(new Error('DSH runtime exited before readiness: exit code 1'))
+      .mockResolvedValue({ url: new URL('http://127.0.0.1:43123/'), done: new Promise(() => {}), stop: vi.fn() })
+
+    await (controller(undefined, isolation, undefined, undefined, inspectPluginPreset) as any).launch(runtime())
+
+    expect(disable).toHaveBeenCalledWith('dsh-multi-model-orchestrator', 'preset-conflict')
+    expect(mocks.startBackend).toHaveBeenCalledTimes(2)
+    expect(isolation.quarantine).not.toHaveBeenCalled()
+  })
+
+  it('isolates the third-party plugin when its preset reset fails, then restarts DSH', async () => {
+    const disable = vi.fn(async () => {})
+    const isolation = { supported: () => true, packages: vi.fn(async () => ['dsh-multi-model-orchestrator']), disable }
+    const value = controller(undefined, isolation)
+    const boot = vi.fn(async () => {})
+    ;(value as any).boot = boot
+    ;(value as any).selectedRuntime = runtime()
+    ;(value as any).recoveryPlan = {
+      kind: 'plugin-preset-conflict',
+      plan: { pluginName: 'dsh-multi-model-orchestrator', presetId: 'multi-model-orchestrator', apply: vi.fn(async () => { throw new Error('preset reset failed') }) },
+    }
+
+    await value.recoverPluginPreset()
+
+    expect(disable).toHaveBeenCalledWith('dsh-multi-model-orchestrator', 'preset-conflict')
+    expect(boot).toHaveBeenCalledOnce()
+  })
+
+  it('isolates the plugin when reset succeeds but the restarted Runtime rewrites the old schema', async () => {
+    const disable = vi.fn(async () => {})
+    const isolation = { supported: () => true, packages: vi.fn(async () => ['dsh-multi-model-orchestrator']), disable }
+    const value = controller(undefined, isolation)
+    ;(value as any).selectedRuntime = runtime()
+    const boot = vi.fn()
+      .mockRejectedValueOnce(new Error('invalid config: $.mode expected "native" | "ptc" | "both", but got "code"'))
+      .mockResolvedValueOnce(undefined)
+    ;(value as any).boot = boot
+    ;(value as any).recoveryPlan = {
+      kind: 'plugin-preset-conflict',
+      plan: { pluginName: 'dsh-multi-model-orchestrator', presetId: 'multi-model-orchestrator', apply: vi.fn(async () => {}) },
+    }
+
+    await value.recoverPluginPreset()
+
+    expect(disable).toHaveBeenCalledWith('dsh-multi-model-orchestrator', 'preset-conflict')
+    expect(boot).toHaveBeenCalledTimes(2)
+  })
+
   it('bounds automatic quarantine retries after both backend and frontend failures', async () => {
     const isolation = { prepare: vi.fn(), quarantine: vi.fn(async () => true) }
     mocks.startBackend.mockRejectedValue(new Error('backend import failure'))
