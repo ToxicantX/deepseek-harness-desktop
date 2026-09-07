@@ -66,8 +66,15 @@ for /f "delims=" %%V in ('call %PNPM_CMD% --version 2^>nul') do set "PNPM_VERSIO
 if not "%PNPM_VERSION%"=="%EXPECTED_PNPM%" goto :pnpm_version_invalid
 for /f "delims=" %%V in ('call "%NODE_EXE%" -p "require('./package.json').version"') do set "APP_VERSION=%%V"
 
-where powershell >nul 2>&1
+set "POWERSHELL_EXE=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
+if not exist "%POWERSHELL_EXE%" (
+    set "POWERSHELL_EXE="
+    for /f "delims=" %%P in ('"%SystemRoot%\System32\where.exe" powershell.exe 2^>nul') do if not defined POWERSHELL_EXE set "POWERSHELL_EXE=%%P"
+)
+if not defined POWERSHELL_EXE goto :powershell_missing
+"%POWERSHELL_EXE%" -NoLogo -NoProfile -NonInteractive -Command "exit 0" >nul 2>&1
 if errorlevel 1 goto :powershell_missing
+echo Using Windows PowerShell from %POWERSHELL_EXE%
 
 echo [1/4] Installing dependencies...
 call %PNPM_CMD% install --frozen-lockfile
@@ -79,7 +86,7 @@ if errorlevel 1 goto :test_failed
 
 echo [3/4] Preparing Windows build output...
 set "OUTPUT_DIR=dist"
-powershell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0scripts\prepare-windows-dist.ps1" -DistPath "%~dp0%OUTPUT_DIR%"
+"%POWERSHELL_EXE%" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0scripts\prepare-windows-dist.ps1" -DistPath "%~dp0%OUTPUT_DIR%"
 if "%ERRORLEVEL%"=="2" goto :use_fallback_output
 if errorlevel 1 goto :prepare_failed
 goto :output_ready
@@ -87,7 +94,7 @@ goto :output_ready
 :use_fallback_output
 set "OUTPUT_DIR=dist-next"
 echo The standard dist directory is in use; building into %OUTPUT_DIR% instead.
-powershell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0scripts\prepare-windows-dist.ps1" -DistPath "%~dp0%OUTPUT_DIR%"
+"%POWERSHELL_EXE%" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0scripts\prepare-windows-dist.ps1" -DistPath "%~dp0%OUTPUT_DIR%"
 if errorlevel 1 goto :prepare_failed
 
 :output_ready
@@ -131,7 +138,8 @@ echo ERROR: Enable Corepack or install the pnpm version declared in package.json
 goto :done
 
 :powershell_missing
-echo ERROR: Windows PowerShell was not found on PATH.
+echo ERROR: Windows PowerShell was not found or failed to start.
+echo ERROR: Checked the Windows system directory and PATH. Executable: %POWERSHELL_EXE%
 goto :done
 
 :install_failed

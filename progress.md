@@ -626,3 +626,17 @@
 - `docs/windows-build.md`：记录直接调用规则、故障解释和验证边界。
 - `progress.md`：追加本轮实施与测试记录。
 - 回滚：`git restore --source=85e2b160b89fab486a08a734fb3bd68a13e53143 -- build-windows.bat tests/runtime-release-scripts.spec.mjs`；删除本轮新增文档 `docs/windows-build.md`，进度日志保留。
+
+## 2026-09-07 - Task: 修复构建脚本依赖 PATH 发现 Windows PowerShell
+### What was done
+- 优先从 Windows 系统目录定位 PowerShell，缺失时再查 PATH；启动检查和两处输出目录准备使用同一绝对路径。
+- 添加工具 PATH 为空时实际启动系统 PowerShell 的 CMD 回归，保留 pnpm 回归覆盖。
+### Testing
+- `pnpm test -- tests/runtime-release-scripts.spec.mjs --maxWorkers=1 --testTimeout=20000`：14 个测试通过，包含真实系统 PowerShell 执行；终端 Node.js 22.22.0 输出 engine 警告。
+- `git diff --check` 与批处理纯 CRLF 检查通过。未运行完整打包，也未在报错电脑现场验证。
+### Notes
+- `build-windows.bat`：PowerShell 绝对路径发现、启动检查、调用和诊断。
+- `tests/runtime-release-scripts.spec.mjs`：增加无工具 PATH 的 PowerShell 执行测试，调整已有测试的片段边界。
+- `docs/windows-build.md`：补充 PowerShell 发现顺序及验证说明。
+- `progress.md`：追加本轮记录。
+- 回滚：`git restore --source=a837363009c1da49f29c8c9e02b8508b72b39f2f -- build-windows.bat tests/runtime-release-scripts.spec.mjs docs/windows-build.md`；保留进度历史。

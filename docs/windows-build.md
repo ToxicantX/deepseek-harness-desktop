@@ -7,3 +7,5 @@
 出现“using DSH Runtime pnpm”后仍提示未找到 pnpm，是旧脚本重复依赖命令发现的缺陷。更新仓库中的构建脚本后重试。版本不匹配仍会停止构建，要求与 `package.json` 中的 `packageManager` 一致。
 
 回归验证执行真实 Windows CMD 下的工具发现、版本检查及模拟安装调用，覆盖带空格的 Runtime 路径和 PATH 工具缺失；不执行实际依赖安装或打包。目标电脑的完整构建仍需现场复验。
+
+Windows PowerShell 优先使用 `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe`，系统位置缺失时再通过系统目录中的 `where.exe` 查找 PATH。启动检查与两处输出目录准备命令使用同一个绝对路径，不要求 PowerShell 目录已加入 PATH。若文件缺失或启动检查失败，脚本会在安装依赖前停止并输出检查路径。回归测试在清空工具 PATH 后实际启动系统 PowerShell。

@@ -42,7 +42,7 @@ describe('Runtime release scripts', () => {
     await writeFile(join(tools, 'pnpm.cmd'), '@echo off\r\nif "%~1"=="--version" (echo 11.7.0& exit /b 0)\r\necho INVOKED:%*\r\n')
     await writeFile(join(directory, 'package.json'), JSON.stringify({ packageManager: 'pnpm@11.7.0', version: '0.0.0' }))
     // Execute the actual discovery/version/subroutine blocks without installing or packaging.
-    const discovery = windowsBuildScript.slice(windowsBuildScript.indexOf('where pnpm'), windowsBuildScript.indexOf('where powershell'))
+    const discovery = windowsBuildScript.slice(windowsBuildScript.indexOf('where pnpm'), windowsBuildScript.indexOf('set "POWERSHELL_EXE='))
     const subroutine = windowsBuildScript.slice(windowsBuildScript.indexOf('\n:add_runtime_pnpm_to_path\n'), windowsBuildScript.indexOf('\n:done'))
     const harness = [
       '@echo off', 'setlocal', 'set "PNPM_CMD=pnpm"', 'set "RUNTIME_PNPM="',
@@ -59,6 +59,24 @@ describe('Runtime release scripts', () => {
     expect(stdout).toContain('using DSH Runtime pnpm')
     expect(stdout).toContain('INVOKED:install --frozen-lockfile')
     expect(stdout).not.toContain('Corepack')
+  })
+
+  it.skipIf(process.platform !== 'win32')('runs system PowerShell with no tools on PATH', async () => {
+    const directory = await fixtureDirectory()
+    const start = windowsBuildScript.indexOf('set "POWERSHELL_EXE=')
+    expect(start).toBeGreaterThan(0)
+    const discovery = windowsBuildScript.slice(start, windowsBuildScript.indexOf('echo [1/4]'))
+    await writeFile(join(directory, 'check.cmd'), [
+      '@echo off', 'setlocal', discovery,
+      '"%POWERSHELL_EXE%" -NoLogo -NoProfile -NonInteractive -Command "Write-Output \'POWERSHELL_OK\'"',
+      'exit /b %ERRORLEVEL%', ':powershell_missing', 'exit /b 1',
+    ].join('\n').replace(/\r?\n/g, '\r\n'))
+    const { stdout } = await execFileAsync(process.env.ComSpec || 'cmd.exe', ['/d', '/c', 'check.cmd'], {
+      cwd: directory,
+      env: { ...process.env, PATH: directory },
+    })
+    expect(stdout).toContain('POWERSHELL_OK')
+    expect(windowsBuildScript.match(/"%POWERSHELL_EXE%" .* -File /g)).toHaveLength(2)
   })
 
   it('refuses catalogs that offer authenticated runtimes to old Shell versions', async () => {
