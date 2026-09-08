@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'">
+  <title>后院鱼塘</title>
+  <link rel="stylesheet" href="koi-pond.css">
+</head>
+<body>
+  <main>
+    <canvas id="pond" tabindex="0" aria-label="锦鲤池塘：点击水面投喂；方向键移动投喂点，空格投喂"></canvas>
+    <header>
+      <div class="seal" aria-hidden="true">庭</div>
+      <div><p class="eyebrow">A LITTLE GARDEN, BETWEEN TASKS</p><h1>后院鱼塘<span>一池闲趣，日日生长。</span></h1></div>
+      <button id="light" aria-pressed="false">☾ 入夜</button>
+    </header>
+    <aside>
+      <p class="eyebrow">池中小住客 <span id="count">—</span></p>
+      <h2>与你一起慢慢长大</h2>
+      <p id="journey">正在读取庭院手记…</p>
+      <div id="fish-list"></div>
+      <div id="profile" hidden>
+        <form id="rename-form">
+          <label for="fish-name">给它一个名字</label>
+          <div class="name-row"><input id="fish-name" required maxlength="32" autocomplete="off"><button>落款</button></div>
+        </form>
+        <p id="lineage"></p>
+      </div>
+      <p id="eggs"></p>
+      <details><summary>庭院手记 · 成长规则</summary>
+        <p>成功发送一条主会话消息，每条锦鲤升 1 级。失败、历史加载、助手回复与原会话重试不计入。</p>
+        <p>每 100 级渐长体型、舒展鳍尾；500 级异性配对产卵，再聊 5 次迎来新鱼。每条鱼一生繁育一次，鱼与卵合计最多 16 位。</p>
+        <p>点击水面投喂，切换「抚水」轻点泛起涟漪。投喂不刷等级，没有饥饿、死亡或离线惩罚。关掉庭院也会随对话成长。</p>
+      </details>
+    </aside>
+    <footer>
+      <div class="tools" aria-label="互动方式">
+        <button id="feed" class="active" aria-pressed="true">◌ 投喂</button>
+        <button id="ripple" aria-pressed="false">≈ 抚水</button>
+      </div>
+      <p id="hint">轻点水面，送它们一餐小欢喜</p>
+      <span class="garden-label">日々是好日 <i>／</i> KOI GARDEN</span>
+    </footer>
+    <p id="notice" role="status" aria-live="polite"></p>
+  </main>
+  <script src="koi-pond.js"></script>
+</body>
+</html>

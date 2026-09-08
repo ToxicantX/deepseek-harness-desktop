@@ -692,7 +692,20 @@ export function installConversationReplayModuleHook(): string {
 
   function registerModuleFactoryTransform(moduleId, transform) {
     if (typeof moduleId !== 'string' || moduleId.length === 0 || typeof transform !== 'function') return false
-    moduleFactoryTransforms.set(moduleId, transform)
+    const previous = moduleFactoryTransforms.get(moduleId)
+    moduleFactoryTransforms.set(moduleId, factory => {
+      let current = factory
+      for (const apply of [previous, transform]) {
+        if (typeof apply !== 'function') continue
+        try {
+          const result = apply(current)
+          if (typeof result === 'function') current = result
+        } catch (error) {
+          reportBoundaryFailure('桌面壳客户端模块转换失败，保留已有增强', error)
+        }
+      }
+      return current
+    })
     return true
   }
 
