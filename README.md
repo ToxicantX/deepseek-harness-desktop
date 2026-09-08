@@ -80,7 +80,14 @@ https://github.com/ToxicantX/dsh-multi-model-orchestrator
 ![帮助菜单](docs/images/menu-help.png)
 
 - **修复历史会话**：输入会话 ID 后先进行诊断，核对异常区间、事件保留状态和备份位置，再确认修复；修复后可从备份回滚。
+- **用量监控**：在独立窗口查看今日、近 7 天、近 30 天及全部记录的请求数、Token 分类、缓存命中率、模型用量和每日趋势，支持手动刷新及每 15 秒自动刷新。
 - **关于 DeepSeek Harness**：查看 Desktop Shell、当前 DSH Runtime 和 Runtime Revision 等版本信息。
+
+用量监控参考 [dsh-damage-pulse](https://github.com/wssfk12138/dsh-damage-pulse) 的用量概览，直接只读 `$DSH_HOME/sessions`（默认 `%USERPROFILE%\.dsh\sessions`）的原生 JSONL / Zstd 会话记录，无需安装插件或配置 API Key，不查询余额，也不计算费用、预算或价格。统计覆盖所有提供方及模型，仅计入含有效 `usage` 的模型回复，未上报用量的请求不会估算；派生会话的继承历史不重复计数。日期范围按北京时间自然日计算，总 Token 为未缓存输入、缓存读取、缓存写入及输出之和，推理 Token 已包含在输出中；缓存命中率为缓存读取 /（未缓存输入 + 缓存读取）。
+
+窗口首次打开会扫描本地历史记录，动态显示文件发现阶段、当前日志路径、已扫描文件数、按日志字节量计算的百分比和耗时；发现阶段使用不定进度条，完整扫描结束后才显示 100%。大量日志仍可能需要等待，后续刷新复用内存缓存。扫描会识别 `session.jsonl(.zstd)` 及 `session.vN.jsonl(.zstd)`，同一会话只读取最新一代文件，避免遗漏新版 Runtime 的今日记录或重复计算迁移保留的旧副本。已删除的会话不在统计范围内，损坏或未完整写入的日志会显示统计不完整提示。“全部”的趋势最多显示最近 30 个活跃日，汇总数值仍覆盖全部记录。修改桌面壳后需重新构建、打包并重启壳才能更新已安装程序，刷新 Web 页面不会更新原生菜单。
+
+开发验证：`pnpm test`、`pnpm run build`，随后执行 `node scripts/smoke-usage-monitor.mjs`，以临时数据在隔离 Electron 窗口中验证界面、刷新和窄窗口布局，不启动额外 Web 服务。
 
 ## 常用功能
 

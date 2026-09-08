@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>用量监控</title>
+  <style>
+    :root { color-scheme: light; font: 14px "Segoe UI", "Microsoft YaHei UI", sans-serif; color: #25282d; background: #fafbfc; }
+    * { box-sizing: border-box; letter-spacing: 0; }
+    body { margin: 0; }
+    [hidden] { display: none !important; }
+    main { max-width: 1160px; margin: 0 auto; padding: 24px 28px 32px; }
+    header, .section-heading, .actions { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+    header { padding-bottom: 22px; }
+    h1 { margin: 0; font-size: 22px; font-weight: 650; }
+    h2 { margin: 0; font-size: 15px; font-weight: 650; }
+    p { margin: 0; }
+    .subtitle { margin-top: 6px; }
+    .muted { color: #6c737e; font-size: 12px; }
+    button, input { font: inherit; }
+    button { border: 1px solid #ccd1d8; background: #fff; color: inherit; cursor: pointer; }
+    button:hover:not(:disabled) { background: #edf2f8; }
+    button:disabled { cursor: wait; opacity: .5; }
+    button:focus-visible, input:focus-visible { outline: 2px solid #326cc0; outline-offset: 3px; }
+    .icon-button { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 6px; font: 24px "Segoe UI Symbol", sans-serif; }
+    .auto-refresh { display: flex; align-items: center; gap: 6px; font-size: 12px; white-space: nowrap; }
+    input[type="checkbox"] { width: 15px; height: 15px; accent-color: #326cc0; }
+    .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid #dde1e6; padding-bottom: 18px; }
+    .ranges { display: inline-grid; grid-template-columns: repeat(4, minmax(68px, 1fr)); border: 1px solid #ccd1d8; border-radius: 6px; overflow: hidden; }
+    .ranges button { border: 0; border-right: 1px solid #dde1e6; padding: 8px 14px; min-height: 34px; }
+    .ranges button:last-child { border-right: 0; }
+    .ranges button[aria-pressed="true"] { color: #205bad; background: #eaf1fc; font-weight: 600; }
+    #usage-updated { text-align: right; overflow-wrap: anywhere; }
+    .status { min-height: 36px; display: flex; align-items: center; color: #6c737e; font-size: 12px; padding: 8px 0; }
+    .status[data-kind="error"] { color: #a32746; }
+    .progress-status { display: grid; gap: 6px; min-height: 48px; padding: 4px 0 10px; }
+    .progress-status progress { width: 100%; height: 8px; accent-color: #326cc0; }
+    .progress-meta { display: flex; justify-content: space-between; gap: 12px; color: #6c737e; font-size: 12px; }
+    .progress-meta span:first-child { min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
+    .warning { margin: 0 0 14px; padding: 10px 12px; border-left: 3px solid #bd5972; background: #fff1f4; color: #963d53; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+    .metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+    .metric { min-width: 0; border: 1px solid #dfe3e9; background: #fff; border-radius: 6px; padding: 14px 16px; }
+    .metric dt { color: #606975; font-size: 12px; display: flex; align-items: center; gap: 7px; }
+    .metric dt::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #3e73c1; flex: none; }
+    .metric.cache dt::before { background: #2b9278; }
+    .metric.activity dt::before { background: #b85e83; }
+    dl, dd { margin: 0; }
+    .metric dd { margin-top: 8px; font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+    .breakdown { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 22px; }
+    .breakdown dt { font-size: 12px; color: #6c737e; border-left: 3px solid #4c7ac3; padding-left: 7px; }
+    .breakdown .read dt { border-color: #2b9278; }
+    .breakdown .write dt { border-color: #c28931; }
+    .breakdown .output dt { border-color: #bb658d; }
+    .breakdown dd { margin-top: 7px; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+    .reasoning { margin-top: 12px; text-align: right; }
+    section { border-bottom: 1px solid #dde1e6; padding: 22px 0; }
+    .section-heading { margin-bottom: 15px; }
+    .table-wrap { overflow-x: auto; }
+    table { border-collapse: collapse; width: 100%; table-layout: fixed; font-size: 12px; }
+    th { color: #6c737e; font-weight: 500; text-align: right; background: #f1f3f6; }
+    th, td { padding: 10px 8px; border-bottom: 1px solid #e6e9ed; overflow-wrap: anywhere; }
+    td { text-align: right; font-variant-numeric: tabular-nums; }
+    th:first-child, td:first-child { text-align: left; width: 30%; }
+    td:first-child strong { font-weight: 600; display: block; }
+    .provider { display: block; color: #79808a; margin-top: 4px; }
+    .empty { padding: 26px 10px; text-align: center; color: #79808a; font-size: 13px; }
+    .day { display: grid; grid-template-columns: 90px minmax(0, 1fr) 130px; align-items: center; gap: 14px; min-height: 32px; font-size: 12px; }
+    .day-value { text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+    .track { height: 10px; background: #e9edf3; overflow: hidden; border-radius: 2px; }
+    .bar { height: 100%; background: #557fc4; border-radius: 2px; }
+    footer { display: flex; justify-content: space-between; gap: 12px; padding-top: 18px; font-size: 11px; color: #838a95; }
+    @media (max-width: 700px) {
+      main { padding: 20px 18px; }
+      .toolbar { align-items: flex-start; flex-direction: column; }
+      .metric { padding: 12px; }
+      .metric dd { font-size: 20px; }
+      .ranges button { padding-inline: 10px; }
+      .day { grid-template-columns: 78px minmax(0, 1fr) 112px; gap: 10px; }
+    }
+    @media (max-width: 480px) {
+      header { align-items: flex-start; flex-wrap: wrap; }
+      .metrics, .breakdown { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .section-heading, footer { flex-wrap: wrap; }
+      th, td { padding-inline: 4px; font-size: 11px; }
+    }
+  </style>
+</head>
+<body data-page="usage-monitor">
+  <main>
+    <header>
+      <div><h1>用量监控</h1><p class="subtitle muted">本地会话 · 北京时间 UTC+8</p></div>
+      <div class="actions">
+        <label class="auto-refresh"><input id="usage-auto" type="checkbox" checked>自动刷新 · 15 秒</label>
+        <button id="usage-refresh" class="icon-button" title="刷新用量" aria-label="刷新用量">↻</button>
+      </div>
+    </header>
+    <div class="toolbar">
+      <div class="ranges" role="group" aria-label="统计范围">
+        <button data-range="today" aria-pressed="true">今日</button>
+        <button data-range="7d" aria-pressed="false">近 7 天</button>
+        <button data-range="30d" aria-pressed="false">近 30 天</button>
+        <button data-range="all" aria-pressed="false">全部</button>
+      </div>
+      <p id="usage-updated" class="muted">尚未更新</p>
+    </div>
+    <p id="usage-status" class="status" role="status" aria-live="polite">正在读取用量…</p>
+    <div id="usage-progress-status" class="progress-status" hidden>
+      <div class="progress-meta"><span id="usage-progress-label"></span><span id="usage-elapsed"></span></div>
+      <div id="usage-progress-file" class="muted" style="overflow-wrap:anywhere" title=""></div>
+      <progress id="usage-progress" max="100" value="0" aria-label="用量扫描进度"></progress>
+    </div>
+    <p id="usage-warning" class="warning" role="alert" hidden></p>
+    <div id="usage-content" hidden>
+      <dl class="metrics">
+        <div class="metric"><dt>已记录请求</dt><dd id="usage-requests">0</dd></div>
+        <div class="metric"><dt>Token 总量</dt><dd id="usage-total">0</dd></div>
+        <div class="metric cache"><dt>缓存命中 Token</dt><dd id="usage-cache">0</dd></div>
+        <div class="metric cache"><dt>缓存命中率</dt><dd id="usage-rate">0.0%</dd></div>
+        <div class="metric activity"><dt>活跃天数</dt><dd id="usage-days">0</dd></div>
+        <div class="metric activity"><dt>使用模型</dt><dd id="usage-model-count">0</dd></div>
+      </dl>
+      <dl class="breakdown">
+        <div><dt>输入 · 未缓存</dt><dd id="usage-input">0</dd></div>
+        <div class="read"><dt>缓存读取</dt><dd id="usage-read">0</dd></div>
+        <div class="write"><dt>缓存写入</dt><dd id="usage-write">0</dd></div>
+        <div class="output"><dt>输出</dt><dd id="usage-output">0</dd></div>
+      </dl>
+      <p class="reasoning muted">其中推理 Token <span id="usage-reasoning">0</span>（已含于输出）</p>
+      <section>
+        <div class="section-heading"><h2>模型用量</h2><span class="muted">按 Token 总量排序</span></div>
+        <div class="table-wrap">
+          <table aria-label="模型用量">
+            <thead><tr><th scope="col">模型 / 提供方</th><th scope="col">请求</th><th scope="col">输入¹</th><th scope="col">输出</th><th scope="col">总 Token</th><th scope="col">命中率</th></tr></thead>
+            <tbody id="usage-models"></tbody>
+          </table>
+        </div>
+        <p id="usage-model-empty" class="empty" hidden>此范围暂无已记录用量</p>
+      </section>
+      <section>
+        <div class="section-heading"><h2>每日用量</h2><span id="usage-trend-caption" class="muted">Token / 日</span></div>
+        <div id="usage-trend"></div>
+        <p id="usage-trend-empty" class="empty" hidden>暂无趋势数据</p>
+      </section>
+    </div>
+    <footer><span>DSH 本地记录</span><span>¹ 输入包含未缓存、缓存读取及缓存写入</span></footer>
+  </main>
+</body>
+</html>
