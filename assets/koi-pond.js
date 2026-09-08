@@ -9,6 +9,8 @@
   let fish = [], food = [], ripples = [], last = 0, frame = 0, noticeTimer, lastFeed = 0
   let keyboardPoint = { x: .4, y: .55 }, keyboardActive = false
   const backdrop = document.createElement('canvas')
+  const refractionCanvas = document.createElement('canvas')
+  const refractionContext = refractionCanvas.getContext('2d', { willReadFrequently: true })
   const sceneImages = { day: new Image(), night: new Image() }
   let sceneFrame = { x: 0, y: 0, width: 1723, height: 913 }
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -135,12 +137,37 @@
   }
   function interact(x, y) {
     if (!state || waterDistance(x, y) > 1) return
-    ripples.push({ x, y, age: 0 })
+    ripples.push({ x, y, age: 0, strong: mode === 'ripple' })
     ripples = ripples.slice(-24)
     if (mode !== 'feed') return
     if (performance.now() - lastFeed < 250 || food.length >= 45) { notify('饲料够啦，等它们慢慢吃。'); return }
     lastFeed = performance.now()
     for (let i = 0; i < 5; i++) food.push({ x: clamp(x + random(-13, 13), 15, width - 15), y: clamp(y + random(-13, 13), 15, height - 15), age: 0 })
+  }
+  function refractWater(waves) {
+    const padding = 16
+    const left = Math.max(0, Math.floor(Math.min(...waves.map(r => r.x - r.age * window.koiWater.speed)) - padding))
+    const top = Math.max(0, Math.floor(Math.min(...waves.map(r => r.y - r.age * window.koiWater.speed)) - padding))
+    const right = Math.min(width, Math.ceil(Math.max(...waves.map(r => r.x + r.age * window.koiWater.speed)) + padding))
+    const bottom = Math.min(height, Math.ceil(Math.max(...waves.map(r => r.y + r.age * window.koiWater.speed)) + padding))
+    const w = right - left, h = bottom - top
+    if (w <= 0 || h <= 0) return
+    if (refractionCanvas.width !== w) refractionCanvas.width = w
+    if (refractionCanvas.height !== h) refractionCanvas.height = h
+    const dpr = canvas.width / width
+    // Read the current scene, including underwater koi, before any wave displaces it.
+    refractionContext.drawImage(canvas, left * dpr, top * dpr, w * dpr, h * dpr, 0, 0, w, h)
+    const source = refractionContext.getImageData(0, 0, w, h)
+    const pixels = window.koiWater.refract(source, waves.map(r => ({
+      x: r.x - left, y: r.y - top, age: r.age, strength: reduced ? .4 : 1,
+    })))
+    refractionContext.putImageData(new ImageData(pixels, w, h), 0, 0)
+    ctx.save()
+    const center = waterPosition(0, 0)
+    ctx.beginPath(); ctx.ellipse(center.x, center.y, sceneFrame.width * .235, sceneFrame.height * .35, 0, 0, Math.PI * 2)
+    ctx.clip()
+    ctx.drawImage(refractionCanvas, left, top)
+    ctx.restore()
   }
   function animate(now) {
     const dt = Math.min((now - last) / 1000 || .016, .05); last = now
@@ -175,12 +202,21 @@
     }
     for (const p of food) { p.age += dt; ellipse(ctx, p.x + 2, p.y + 3, 3, 2, '#061f2399'); ellipse(ctx, p.x, p.y, 2.5, 2, '#d4a565') }
     food = food.filter(p => p.age < 25)
+    for (const r of ripples) r.age += dt
+    ripples = ripples.filter(r => r.age < window.koiWater.duration)
+    const waves = ripples.filter(r => r.strong)
+    if (waves.length) refractWater(waves)
     for (const r of ripples) {
-      r.age += dt
-      ctx.strokeStyle = `rgba(190,218,194,${Math.max(0, .3 - r.age * .12)})`; ctx.lineWidth = 1
-      for (let i = 0; i < 2; i++) { ctx.beginPath(); ctx.ellipse(r.x, r.y, 5 + r.age * 26 + i * 8, 3 + r.age * 20 + i * 6, 0, 0, Math.PI * 2); ctx.stroke() }
+      if (r.strong) continue
+      const opacity = .3 * Math.max(0, 1 - r.age / 2.5)
+      ctx.strokeStyle = `rgba(190,218,194,${opacity})`
+      ctx.lineWidth = 1
+      for (let i = 0; i < 2; i++) {
+        ctx.beginPath()
+        ctx.ellipse(r.x, r.y, 5 + r.age * 26 + i * 8, 3 + r.age * 20 + i * 6, 0, 0, Math.PI * 2)
+        ctx.stroke()
+      }
     }
-    ripples = ripples.filter(r => r.age < 2.5)
     if (night) {
       for (let i = 0; i < 12; i++) {
         const p = waterPosition(i * 2.399, .86)

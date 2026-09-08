@@ -111,16 +111,69 @@ app.whenReady().then(async () => {
   await js(\`window.pellets = 0;
     const c = document.getElementById('pond').getContext('2d');
     const draw = c.drawImage.bind(c), ellipse = c.ellipse.bind(c);
-    c.drawImage = (...args) => { window.pellets = 0; return draw(...args); };
-    c.ellipse = (...args) => { if (args[2] === 2.5) window.pellets++; return ellipse(...args); };
+    const refract = window.koiWater.refract;
+    window.refractionHistory = [];
+    window.koiWater.refract = (source, waves) => {
+      const start = performance.now(), output = refract(source, waves);
+      const duration = performance.now() - start;
+      let changed = 0, transparent = 0;
+      for (let i = 0; i < output.length; i += 4) {
+        if (!output[i + 3]) transparent++;
+        else if (output[i] !== source.data[i] || output[i + 1] !== source.data[i + 1] || output[i + 2] !== source.data[i + 2]) changed++;
+      }
+      window.latestRefraction = { changed, transparent, duration, width: source.width, height: source.height };
+      window.refractionHistory.push(window.latestRefraction);
+      return output;
+    };
+    c.drawImage = (...args) => {
+      if (args.length === 5 && args[1] === 0 && args[2] === 0) {
+        window.pellets = 0; window.feedRings = []; window.latestRefraction = null;
+      }
+      return draw(...args);
+    };
+    c.ellipse = (...args) => {
+      if (args[2] === 2.5) window.pellets++;
+      if (args[0] === 410 && args[1] === 400) window.feedRings.push({ width: c.lineWidth, color: c.strokeStyle });
+      return ellipse(...args);
+    };
     document.getElementById('pond').dispatchEvent(new PointerEvent('pointerdown', { clientX: 410, clientY: 400 }));\`);
   await delay(150);
   assert((await js('window.pellets')) > 0, 'Feed must create rendered pellets');
+  const feedRings = await js('window.feedRings');
+  assert.equal(feedRings.length, 2);
+  assert(feedRings.every(ring => ring.width === 1 && ring.color.startsWith('rgba(190, 218, 194,')), 'Feeding must keep its original gentle waves');
   for (let attempt = 0; attempt < 60 && await js('window.pellets') > 0; attempt++) await delay(250);
   assert.equal(await js('window.pellets'), 0, 'Fish must eat pellets before their 25-second expiry');
-  await js("document.getElementById('ripple').click(); document.getElementById('pond').dispatchEvent(new PointerEvent('pointerdown', {clientX:350,clientY:400}));");
-  await delay(100);
-  assert.equal(await js('window.pellets'), 0);
+  for (const theme of ['day', 'night']) {
+    if (theme === 'night') await js("document.getElementById('light').click()");
+    await js("document.getElementById('ripple').click(); document.getElementById('pond').dispatchEvent(new PointerEvent('pointerdown', {clientX:610,clientY:400}));");
+    await delay(400);
+    assert.equal(await js('window.pellets'), 0);
+    const refraction = await js('window.latestRefraction');
+    assert(refraction.changed > 100, 'The wave must displace actual scene pixels, not draw outlines');
+    assert(refraction.transparent > 100, 'Pixels outside the wave must stay untouched');
+    assert(refraction.width < 1280 && refraction.height < 720, 'Only the local region should be sampled');
+    await fs.writeFile(join(directory, 'pond-ripple-' + theme + '.png'), (await win.webContents.capturePage()).toPNG());
+    for (let frame = 0; frame < 8; frame++) {
+      await fs.writeFile(join(directory, 'refraction-' + theme + '-' + frame + '.png'),
+        (await win.webContents.capturePage({ x: 450, y: 270, width: 320, height: 260 })).toPNG());
+      await delay(110);
+    }
+    await delay(2300);
+    assert.equal(await js('window.latestRefraction'), null, 'Waves must still expire');
+  }
+  const timings = await js('window.refractionHistory.map(sample => sample.duration).sort((a,b) => a-b)');
+  const refractionTiming = { samples: timings.length, medianMs: timings[Math.floor(timings.length / 2)], p95Ms: timings[Math.floor(timings.length * .95)] };
+  const overlapTiming = await js(\`(() => {
+    const source = document.getElementById('pond').getContext('2d').getImageData(430, 250, 360, 320);
+    const waves = Array.from({length:24}, (_,i) => ({x:180+(i%4)*5,y:160+Math.floor(i/4)*5,age:1.2}));
+    const start = performance.now();
+    window.koiWater.refract(source, waves);
+    return performance.now() - start;
+  })()\`);
+  refractionTiming.overlap24KernelMs = overlapTiming;
+  await fs.writeFile(join(directory, 'refraction-timing.json'), JSON.stringify(refractionTiming, null, 2));
+  await js("document.getElementById('light').click()");
   await js("document.getElementById('feed').click(); document.getElementById('zen').click()");
   assert.equal(await js("document.getElementById('zen').getAttribute('aria-pressed')"), 'true');
   const onlyCanvasVisible = "Array.from(document.querySelector('main').children).filter(e => getComputedStyle(e).display !== 'none').map(e => e.id)";
@@ -174,7 +227,7 @@ app.whenReady().then(async () => {
   assert.deepEqual(errors, []);
   await fs.writeFile(join(directory, 'result.json'), JSON.stringify({
     passed: true, checks: ['preload IPC', 'singleton window', 'rename', 'feeding and eating',
-      'ripples', 'zen hides UI and notifications', 'right-click exits without feeding', 'zen restores UI',
+      'day/night sine refraction changes pixels locally and decays', 'zen hides UI and notifications', 'right-click exits without feeding', 'zen restores UI',
       'day/night artwork decoded', 'design-size screenshots', 'return button',
       'day/night', 'deduplication', 'closed-window growth', 'reopen', 'save reload', 'small viewport'],
     directory,

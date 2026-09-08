@@ -833,3 +833,110 @@ Remove-Item -LiteralPath 'src/conversation-replay-host-injector.ts','src/convers
 - progress.md：仅追加本轮结果、验证证据和回滚方式。
 - 还原边界：被原面板遮住的景物属于重建，并非原始隐藏图层；本机字体、动态锦鲤及额外保留的日夜／禅入口与设计稿存在差异，不宣称像素级 100% 一致。
 - 本轮回滚补丁：C:\Users\karma617\AppData\Local\Temp\dsh-koi-art-rollback-51cois3y\revert-art-keep-zen.patch，基于 9151d32 及已有禅模式差异构造，已通过 git apply --check --ignore-space-change 验证。执行 git apply --ignore-space-change "C:\Users\karma617\AppData\Local\Temp\dsh-koi-art-rollback-51cois3y\revert-art-keep-zen.patch"，再执行 Remove-Item -LiteralPath assets/koi-pond-day.webp, assets/koi-pond-night.webp, assets/koi-pond-lotus.svg, assets/koi-pond-frame.svg, scripts/prepare-koi-art.py，最后 pnpm run build；保留此前禅模式、用户存档及本日志。该补丁保存在临时目录，长期留存请先备份，后续继续修改文件时应重新核对补丁。
+
+## 2026-09-08 - Task: 增强玩水涟漪的可见度
+### What was done
+- 采用直接增强方案，不增加力度设置项：玩水涟漪从两圈变为三圈，半径扩大 50%，线宽从 1 增至 1.8 像素，初始不透明度从 30% 提升至 60%，并使用更明亮的水面高光色。
+- 保持 2.5 秒淡出和波纹数量上限；投喂与进食保留原来的小波纹，不改变鱼塘布局、成长或存档规则。
+### Testing
+- node --check assets/koi-pond.js 与 git diff --check 通过；鱼塘专项 tests/koi-pond.spec.ts 的 15 项测试通过。
+- 独立隐藏 Electron 冒烟通过：日间、夜间均实际记录三圈绘制、1.8 像素线宽、12 像素环间距及提亮颜色，确认正常淡出且玩水不投食；另确认投喂仍为原色、两圈、1 像素线宽。
+- 已目视检查日夜涟漪截图；最终冒烟输出 C:\Users\karma617\AppData\Local\Temp\dsh-koi-smoke-TlQlWw，包含 pond-ripple-day.png、pond-ripple-night.png 及原有交互检查。
+- 初次新增线宽断言使用浮点全等导致失败，调整为 0.001 容差后通过；仅修正测试浮点比较，没有放宽产品参数。
+- 修正旧玩水冒烟落点：原坐标处于新背景中央水域之外，改为有效水面坐标，并增加实际波纹绘制断言，避免仅以“不产生饲料”误判玩水成功。
+- 本轮未重新打包、未重启当前桌面壳；独立 Electron 验证不等同于现有安装实例已加载新资源。
+### Notes
+- assets/koi-pond.js：仅为玩水创建强涟漪，按类型设置圈数、尺度、颜色、透明度及线宽。
+- scripts/smoke-koi-pond.mjs：增加真实绘制参数、日夜截图、淡出和投喂保持轻波纹的检查。
+- docs/koi-pond.md：记录增强后的玩水波纹参数及无新增设置项。
+- progress.md：仅在末尾追加本轮结果与验证证据。
+- 回滚方式：git restore --source=540408c216e637a1041727f4866ee17c8773a1d6 -- assets/koi-pond.js scripts/smoke-koi-pond.mjs docs/koi-pond.md；保留本日志及用户存档，该回滚点保留此前日夜美术与禅模式。
+
+## 2026-09-08 - Task: 为玩水波纹增加自然轮廓与轻微立体感
+### What was done
+- 将玩水的标准椭圆改为轻微不规则的连续轮廓，每次点击使用独立相位，波形随扩散缓慢变化，避免整齐白圈和逐帧随机抖动。
+- 为三道波纹叠加方向性渐变亮边与错位柔暗边，表现波峰和波谷；根据截图减弱暗边，避免黑色描边过重。
+- 保留上一轮增强后的范围、三道波纹与 2.5 秒淡出；投喂和进食的小波纹不变，不改动存档或成长规则。
+### Testing
+- node --check assets/koi-pond.js、git diff --check 通过；鱼塘专项 tests/koi-pond.spec.ts 的 15 项通过。
+- 独立隐藏 Electron 冒烟通过：日夜场景均检查三组亮暗双层绘制、亮边渐变、明暗错位、轮廓偏离标准椭圆、正常淡出、玩水不投食，以及原有投喂小波纹和禅模式等交互。
+- 已目视检查日夜效果，最终截图及结果目录 C:\Users\karma617\AppData\Local\Temp\dsh-koi-smoke-zeluH0；最终日间截图确认暗边已减弱、保留轻微凹凸感。
+- 本轮未打包、未重启当前桌面壳；这是轻量绘制效果，不是流体物理模拟。
+### Notes
+- assets/koi-pond.js：增加连续不规则波形与方向性亮暗分层绘制，仅用于玩水。
+- scripts/smoke-koi-pond.mjs：从标准椭圆参数检查改为实际轮廓、亮暗层、错位及渐变检查。
+- docs/koi-pond.md：更新自然波纹的表现与模拟边界说明。
+- progress.md：仅追加本轮结果、验证与回滚记录。
+- 回滚：本轮修改前已将三个文件备份到 C:\Users\karma617\AppData\Local\Temp\dsh-ripple-before-966486996c6d47008429a9b3c503db30。执行 Copy-Item -LiteralPath "C:\Users\karma617\AppData\Local\Temp\dsh-ripple-before-966486996c6d47008429a9b3c503db30\koi-pond.js" -Destination assets/koi-pond.js；对同目录 smoke-koi-pond.mjs 和 koi-pond.md 分别复制回 scripts/smoke-koi-pond.mjs 和 docs/koi-pond.md。保留本日志，该方式保留上一轮加大波纹的改动；长期保留回滚点请备份临时目录。
+
+## 2026-09-08 - Task: 壳侧 PowerShell 启动与工作目录兼容
+### What was done
+- 自动发现 PowerShell 时验证实际启动能力，跳过失效别名；执行前区分损坏路径与不存在目录，不自动重放命令。
+### Testing
+- 使用已安装 Runtime 的 Node 24：定向 Vitest 5/5 通过；tsc --noEmit 退出码 0。
+- 已检查 0.1.3-alpha.1 实际模块特征；尚未在附件所述机器执行主/子代理验收。
+### Notes
+- src/runtime-tool-compatibility.ts：新增只在内存生效的定点模块适配。
+- src/shutdown-hook.ts：接入工具兼容钩子。
+- tests/runtime-tool-compatibility.spec.ts：覆盖别名探测、路径校验及未知版本保留。
+- docs/runtime-tool-compatibility.md：说明生效、验证和回滚。
+- progress.md：仅追加本轮记录，保留已有未提交内容。
+- 回滚：移除 shutdown-hook.ts 中 installRuntimeToolCompatibility 的导入和调用后重新构建，停用全部本轮适配；无需修改 DSH 或会话。
+
+## 2026-09-08 - Task: 降低模型代码解析失败后的重复试错
+### What was done
+- 复现附件两段原始代码的解析错误，定位普通字符串实际换行与 new_string 字段引号错误。
+- 补充共享 SDK 编码指引和执行前解析失败诊断，不修改模型代码、不重试已完成调用。
+### Testing
+- Node 24 直接解析附件：两段错误分别复现 Expected comma 与 Unexpected token async，第三段可解析。
+- 定向 Vitest 8/8 通过；tsc --noEmit 退出码 0。尚未验证在线模型错误率变化。
+### Notes
+- src/runtime-tool-compatibility.ts：新增 SDK 指引与解析失败限定入口适配。
+- tests/runtime-tool-compatibility.spec.ts：新增语法复现、无副作用失败及重复适配测试。
+- docs/runtime-tool-compatibility.md：记录已证实根因及缓解范围。
+- progress.md：追加本任务记录。
+- 回滚：移除加载钩子中 adaptRuntimeCode 和 adaptRuntimeToolPrompt 两个路由并重新构建；或按上一任务方式停用完整兼容钩子。
+
+## 2026-09-08 - Task: 壳侧压缩日志读取及工具兼容整体验证
+### What was done
+- 现有 read 仅对 .jsonl.zstd 增加有界解压，保留文件服务路径解析、类型检查及原有行号分页/输出限制；不新增独立工具、不写入 DSH 核心。
+- 处理连续 Zstandard 帧，压缩输入限 16 MiB、解压合计限 64 MiB，支持帧间取消与严格 UTF-8 校验。
+- 新增实际安装 Runtime 模块的隔离冒烟脚本；未启动或重启 DSH 服务，未生成安装包。
+### Testing
+- 首轮拼接帧回归确实失败：Node 单次解压只返回第一帧；按实际消费字节逐帧处理后定向 14/14 通过。
+- 使用 Runtime Node 24：tsc --noEmit 退出码 0；pnpm test 全量 27 文件/190 测试通过；pnpm run build 退出码 0。
+- 首次直接调用 Vitest 全量有 1 项发布脚本测试因缺少 npm_execpath 失败；改用 pnpm test 正式入口后全部通过。
+- smoke-runtime-tool-compatibility.mjs 针对本机 0.1.3-alpha.1：四个实际模块匹配、语法检查及导入通过；真实 PowerShell 固定输出通过；损坏目录在执行前报错；实际代码执行器解析失败提示通过；实际注册 read 对合成拼接帧、分页及文件服务拒绝路径通过；四个核心文件前后 SHA-256 相同。
+- git diff --check 退出码 0，仅有已有 progress.md 换行规范提示；构建有原工具的 CJS/依赖打包提示。
+- 未验证：附件机器上的实际主/子代理调用、打包 Electron 应用、在线模型语法错误率；现有正在运行的应用尚未应用这些源码变更。
+### Notes
+- src/runtime-tool-compatibility.ts：新增有界多帧压缩日志读取与精确模块路由。
+- src/shutdown-hook.ts：本轮前序任务已接入兼容钩子，此任务保留该入口。
+- tests/runtime-tool-compatibility.spec.ts：新增分页、多帧、损坏/超限/编码、取消、拒绝访问及普通文件路由测试。
+- scripts/smoke-runtime-tool-compatibility.mjs：新增隔离实际 Runtime 冒烟与核心文件哈希核对。
+- docs/runtime-tool-compatibility.md：补充读取范围、限额、性能边界及冒烟使用方法。
+- progress.md：追加本任务证据；原有 koi-pond 相关修改未编辑，构建产物包含当前工作区已有变更。
+- 回滚：移除 src/shutdown-hook.ts 中 installRuntimeToolCompatibility 的导入与调用，然后 pnpm run build；重新打包/启动后停用全部本轮适配。仅停用压缩读取可移除钩子中 adaptRuntimeRead 路由。不要用 git restore progress.md 覆盖其他未提交记录。
+
+## 2026-09-08 - Task: 依据正弦衰减与双线性插值重做玩水折射
+### What was done
+- 用径向正弦位移替代玩水的亮暗轮廓描线：波包由点击中心向外传播，振幅随时间、距离及寿命逐渐衰减，并使用平滑包络避免波前硬边。
+- 从当前背景与锦鲤画面读取点击附近像素，保留浮点采样坐标，以周围四像素双线性插值产生真实画面扭曲；多波位移先叠加，再从未变形的原帧采样一次，避免累计拖影。
+- 保留投喂和进食原有轻波纹、中央水域裁切、2.5 秒动画寿命、减少动态效果及禅模式，不改动成长、存档、Runtime 或其他任务文件。
+- 只处理活动区域，预计算径向三角函数短表；新增本地纯计算脚本，无网络、WebGL、第三方依赖或线程改动。
+### Testing
+- node --check assets/koi-pond-refraction.js、node --check assets/koi-pond.js 与本轮文件 git diff --check 通过。
+- tests/koi-pond-refraction.spec.mjs 与 tests/koi-pond.spec.ts：21 项通过，覆盖四像素权重结果、边界钳制、正弦传播、振幅衰减、波包外透明、到期消失、重叠位移、减弱强度及加载顺序。
+- 独立隐藏 Electron 冒烟通过：日夜场景实际像素发生改变、处理区域小于全画面、波包外像素不覆盖、正常到期、投喂保持原有小波纹、禅模式、改名及存档恢复等。
+- 输出目录 C:\Users\karma617\AppData\Local\Temp\dsh-koi-smoke-xPGyzl，含日夜截图、局部连续帧与 refraction-timing.json；已查看实际折射局部画面，并生成 refraction-day.gif、refraction-night.gif 用于预览。
+- 本机隐藏 Electron 样本：275 次单击折射内核调用，中位约 4.7 ms、P95 约 14.2 ms；24 个重叠波纹单次约 36.4 ms。这些仅为 CPU 内核时间，不含取图、回写与整窗渲染，也不代表稳定 60 FPS。
+- 本轮未自行执行全量构建或打包，未重启当前桌面壳、未发送模型请求。工作区并行出现的 Runtime 工具兼容性源码、测试、文档和进度记录均未修改或覆盖。
+### Notes
+- assets/koi-pond-refraction.js：新增正弦衰减、径向查表、多波位移相加与显式双线性像素采样内核。
+- assets/koi-pond.js：去除玩水轮廓描线，接入局部画面取样与折射回写，保留其他互动。
+- assets/koi-pond.html：在鱼塘主脚本前加载本地折射脚本。
+- tests/koi-pond-refraction.spec.mjs：新增 6 项数学、采样、边界、叠加与资源加载测试。
+- scripts/smoke-koi-pond.mjs：从轮廓绘制检查改为真实像素差异、局部区域、寿命与性能采样，输出连续帧。
+- docs/koi-pond.md：更新玩法表现、公式与采样步骤、CPU 开销和二维近似边界。
+- progress.md：仅追加本轮证据与回滚记录，保留其他任务新增历史。
+- 回滚点：C:\Users\karma617\AppData\Local\Temp\dsh-refraction-before-9cab16e152ab40a699eb52c9ca3d4193。用 Copy-Item -LiteralPath 将该目录的 koi-pond.js、koi-pond.html 分别复制回 assets/ 对应文件，smoke-koi-pond.mjs 复制回 scripts/，koi-pond.md 复制回 docs/；执行 Remove-Item -LiteralPath assets/koi-pond-refraction.js, tests/koi-pond-refraction.spec.mjs。保留本日志、存档及 Runtime 并行改动。临时备份包含上一轮自然轮廓波纹，长期需要回滚时请另行备份该目录。
