@@ -6,6 +6,11 @@ import { preparePluginPresetCompatibility } from '../src/plugin-preset-compatibi
 
 const presentation = (mode: string) => [
   '# keep this comment',
+  '- id: persona',
+  "  name: '@deepseek-ai/dsh-persona'",
+  '  config:',
+  '    text: |- # keep persona comment',
+  '      You are the orchestrator.',
   '- id: tool-presentation',
   "  name: '@deepseek-ai/dsh-agent-tool-presentation'",
   '  config:',
@@ -13,7 +18,12 @@ const presentation = (mode: string) => [
   '',
 ].join('\r\n')
 
-async function fixture(runtimeMode: string, pluginMode = 'code', runtimeLayout: 'current' | 'legacy' = 'current') {
+async function fixture(
+  runtimeMode: string,
+  pluginMode = 'code',
+  runtimeLayout: 'current' | 'legacy' = 'current',
+  personaVersion = '0.1.3-alpha.1',
+) {
   const root = await mkdtemp(join(tmpdir(), 'dsh-preset-compat-'))
   const runtimePackage = join(root, 'runtime', 'app', 'node_modules', '@deepseek-ai', 'dsh')
   const dshBin = join(runtimePackage, 'lib', 'bin.js')
@@ -25,6 +35,9 @@ async function fixture(runtimeMode: string, pluginMode = 'code', runtimeLayout: 
   await mkdir(join(runtimePresetRoot, runtimePresetId), { recursive: true })
   await mkdir(join(pluginRoot, 'preset'), { recursive: true })
   await mkdir(join(pluginRoot, 'preset-legacy'), { recursive: true })
+  const personaRoot = join(root, 'home', 'profiles', 'node_modules', '@deepseek-ai', 'dsh-persona')
+  await mkdir(personaRoot, { recursive: true })
+  await writeFile(join(personaRoot, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-persona', version: personaVersion }))
   await writeFile(join(runtimePresetRoot, runtimePresetId, 'agent.cordis.yml'), presentation(runtimeMode))
   const packagePath = join(pluginRoot, 'package.json')
   await writeFile(packagePath, JSON.stringify({
@@ -57,6 +70,18 @@ describe('plugin preset compatibility', () => {
     expect(JSON.parse(await readFile(value.packagePath, 'utf8')).dsh.client.inject).toEqual(['@deepseek-ai/dsh-client-ui-settings'])
   })
 
+  it('renames the legacy persona text key when the installed persona package requires prefix', async () => {
+    const value = await fixture('ptc', 'ptc', 'current', '0.1.3-alpha.2')
+    const before = await readFile(value.sourcePath, 'utf8')
+    await expect(preparePluginPresetCompatibility(value)).resolves.toBe('dsh-multi-model-orchestrator')
+    const after = await readFile(value.sourcePath, 'utf8')
+    expect(after).toBe(before.replace('text: |-', 'prefix: |-'))
+    expect(await readFile(value.legacySourcePath, 'utf8')).toContain('prefix: |-')
+    expect(after).toContain('# keep persona comment')
+    await expect(preparePluginPresetCompatibility(value)).resolves.toBe('dsh-multi-model-orchestrator')
+    expect(await readFile(value.sourcePath, 'utf8')).toBe(after)
+  })
+
   it('is idempotent and leaves runtimes that still use code unchanged', async () => {
     const current = await fixture('ptc')
     await preparePluginPresetCompatibility(current)
@@ -68,6 +93,7 @@ describe('plugin preset compatibility', () => {
     const before = await readFile(former.sourcePath, 'utf8')
     await expect(preparePluginPresetCompatibility(former)).resolves.toBeUndefined()
     expect(await readFile(former.sourcePath, 'utf8')).toBe(before)
+    expect(before).toContain('text: |-')
   })
 
   it('breaks pnpm hard links instead of modifying the shared store copy', async () => {

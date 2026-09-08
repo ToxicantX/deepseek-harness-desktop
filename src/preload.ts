@@ -3,6 +3,7 @@ import { installConversationReplayModuleHook, runIsolatedShellInjection } from '
 import { injectDesktopReplayClient, installDesktopReplayClientHook } from './conversation-replay-client-injector.ts'
 import { injectKoiPondDialogue, installKoiPondDialogueHook } from './koi-pond-injector.ts'
 import { injectCustomProviderUserAgentFactorySource, installCustomProviderUserAgentHook } from './custom-provider-user-agent-injector.ts'
+import { injectOpenInAppFactorySource, installOpenInAppCompatibilityHook } from './open-in-app-compatibility.ts'
 import { installUsageMonitor } from './usage-monitor-renderer.ts'
 import type { UsageScanProgress } from './usage-monitor.ts'
 import type { RuntimePreference } from './catalog.ts'
@@ -27,9 +28,19 @@ runIsolatedShellInjection('桌面壳自定义提供方 User-Agent 注入启动�
     args: [injectCustomProviderUserAgentFactorySource.toString()],
   })
 })
+runIsolatedShellInjection('桌面壳文件资源管理器兼容注入启动失败', () => {
+  contextBridge.executeInMainWorld({
+    func: installOpenInAppCompatibilityHook,
+    args: [injectOpenInAppFactorySource.toString()],
+  })
+})
 
 contextBridge.exposeInMainWorld('dshDesktopFiles', {
   getAbsolutePath: (file: File): string => webUtils.getPathForFile(file),
+})
+
+contextBridge.exposeInMainWorld('dshDesktopOpenInApp', {
+  openExplorer: (path: string) => ipcRenderer.invoke('open-in-app:explorer', path),
 })
 
 runIsolatedShellInjection('鱼塘成长观察启动失败', () => {

@@ -37,6 +37,31 @@
 
 截图和附件中的错误未包含壳版本及适配日志，因此仅凭错误文本不能确认上一轮兼容是否已在报错机器加载。新版仍需重新构建/部署后验证，已有错误历史不会被移除。
 
+## Grep 正则与超时
+
+现有 `grep` 增加可选 `literal` 参数。默认仍使用 ripgrep 正则；搜索 PHP 命名空间、方法调用或其他包含反斜杠、括号、方括号的源码原文时，使用 `literal: true`，命令会加入 `--fixed-strings`。多个精确关键词分别调用 grep，避免把源码转义、正则转义和 TypeScript/JSON 转义混在同一个长表达式中。
+
+非法正则仍会阻止搜索，并在错误中明确提示 `literal: true`、分别搜索多个字面量及缩小 `path`/`include`。不把错误表达式自动转换后执行，避免错误转义被解释成另一个合法但含义不同的查询。
+
+默认搜索预算由 30 秒提高到 60 秒；显式配置仍优先。主、子代理提示要求先限定目录和文件 glob，再重试宽泛或超时搜索。调用方主动取消仍立即结束，不以自动重试覆盖取消结果。工具继续使用 Runtime 自带的 `@vscode/ripgrep`，无需安装系统 rg。
+
+## 重复文本的精确编辑
+
+现有 `edit` 增加可选 `occurrence` 参数，用于 `old_string` 确实重复、但只应修改其中一处的情况。该值从 1 开始计数；例如读取文件确认目标是第二处后，传入 `occurrence: 2`。文件系统后端仍在原有目标锁、已读版本检查和原子写入流程内选择该匹配，不会先在壳外读取再覆盖整份文件。
+
+`occurrence` 与 `replace_all` 互斥，零、负数、小数、超出实际匹配数量都会报错。未提供 occurrence 时保留原行为：唯一匹配正常编辑，多处匹配返回错误；错误信息会给出可用的 `1..N` 范围。这样不会在目标位置不明确时默认修改第一处，也不会把局部修改扩大为全量替换。
+
+主、子代理提示同步要求：先读取当前文件；优先扩大 `old_string` 上下文，若上下文过长则使用已核对的 occurrence；同一区域每次编辑后重新读取。示例：
+
+```typescript
+await tools.edit({
+  file_path: "application/common/service/ExcelImportService.php",
+  old_string: "目标重复片段",
+  new_string: "替换内容",
+  occurrence: 2,
+})
+```
+
 ## 验证与回滚
 
 使用 Node 24 执行 `node_modules/vitest/vitest.mjs run tests/runtime-tool-compatibility.spec.ts` 和 `node_modules/typescript/bin/tsc --noEmit`。
@@ -47,7 +72,7 @@
 node scripts/smoke-runtime-tool-compatibility.mjs "C:\path\to\runtime"
 ```
 
-此脚本检查四个实际模块的特征匹配、适配后语法与加载，实际启动 PowerShell 输出固定标记，验证损坏目录及解析失败分支，并调用实际注册的 read 工具验证合成拼接帧、分页及文件服务拒绝路径，最后核对核心文件哈希未变。不会启动 DSH 服务，也不代表真实主/子代理或打包应用验收。
+此脚本检查五个实际模块的特征匹配、适配后语法与加载，实际启动 PowerShell 输出固定标记，验证损坏目录及解析失败分支，并调用实际注册的 read 工具验证合成拼接帧、分页及文件服务拒绝路径；同时验证 grep 的字面量 argv、60 秒默认值、工具 schema/提示，并使用 Runtime 自带 ripgrep 完成真实字面量搜索，最后核对核心文件哈希未变。不会启动 DSH 服务，也不代表真实主/子代理或打包应用验收。
 
 冒烟还使用部署上限 20、请求 5000 的 45 行合成日志验证返回 20 行、续页从第 21 行开始、输出渲染正常及负数仍被拒绝。
 

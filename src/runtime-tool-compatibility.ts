@@ -69,7 +69,7 @@ export function adaptRuntimeToolPrompt(source: string): { source: string; change
       + '- Keep edit and delegation calls short. Use correctly quoted object keys followed by colons. Encode newlines inside ordinary quoted strings as escape sequences; never put literal newlines inside them. Check both the outer tool JSON and the inner TypeScript string escaping.\n'
       + '- On Windows use forward-slash absolute workdir paths such as E:/AI/project. Do not guess or silently repair damaged directory paths. Do not repeat a successfully completed call when correcting another call.\n'
       + '- Provide every required argument in the current schema, including description on run_code and on any subtool that requires it. An outer description does not supply an inner one. Send messages only to exact IDs confirmed by current tool results; never infer a parent ID from a tool name or another session. If a recipient is unavailable, stop retrying that ID and report the result through the normal final response.\n'
-      + '- Before edit, read the current file and copy a unique literal old_string including surrounding context, without displayed line numbers. On multiple matches, add context; on no match, reread the affected region. Do not enable replace_all unless every occurrence is intended. Serialize edits to the same file and refresh context after each change.\n'
+      + '- Before edit, read the current file and copy a unique literal old_string including surrounding context, without displayed line numbers. On multiple matches, add context or pass the verified 1-based occurrence; on no match, reread the affected region. Do not enable replace_all unless every occurrence is intended. Serialize edits to the same file and refresh context after each change.\n'
       + '- Submit a large file write separately from verification commands. Check closing brackets and quotes before submitting. String.raw does not protect backticks or interpolation expressions; do not repair source with empty-string replaceAll. Preserve source-language backslashes through both JSON and TypeScript escaping.\n'),
     changed: true,
   }
@@ -147,7 +147,138 @@ export function adaptRuntimeReadLimit(source: string): { source: string; changed
 export function adaptRuntimeFileTools(source: string): { source: string; changed: boolean } {
   const read = adaptRuntimeRead(source)
   const limit = adaptRuntimeReadLimit(read.source)
-  return { source: limit.source, changed: read.changed || limit.changed }
+  const edit = adaptRuntimeEditTool(limit.source)
+  return { source: edit.source, changed: read.changed || limit.changed || edit.changed }
+}
+
+const EDIT_PARSE_RETURN = `\treturn {
+\t\tfilePath: args.file_path,
+\t\toldString: args.old_string,
+\t\tnewString: args.new_string,
+\t\treplaceAll: args.replace_all ?? false
+\t};`
+const EDIT_SCHEMA = `\t\t\treplace_all: {
+\t\t\t\ttype: "boolean",
+\t\t\t\tdescription: "Replace all matches. Defaults to false; when false, old_string must appear exactly once."
+\t\t\t},`
+const EDIT_REQUEST = `\t\t\t\t\toldString: input.oldString,
+\t\t\t\t\tnewString: input.newString,
+\t\t\t\t\treplaceAll: input.replaceAll`
+
+export function adaptRuntimeEditTool(source: string): { source: string; changed: boolean } {
+  const prompt = 'text: "Use the edit tool for targeted changes to existing UTF-8 text files. It replaces literal old_string with new_string; by default old_string must appear exactly once. If old_string appears multiple times, provide a more specific old_string or set replace_all to true. Read the file first (the default fs-observation-policy requires it), unless you just created or edited it in this session."'
+  if (!source.includes(EDIT_PARSE_RETURN) || !source.includes(EDIT_SCHEMA) || !source.includes(EDIT_REQUEST)
+    || !source.includes(prompt)) return { source, changed: false }
+  return {
+    source: source.replace('if (args.old_string === args.new_string) throw new Error("old_string and new_string must differ");',
+      'if (args.old_string === args.new_string) throw new Error("old_string and new_string must differ");\n\tif (args.occurrence !== void 0 && (!Number.isSafeInteger(args.occurrence) || args.occurrence < 1)) throw new Error("occurrence must be a positive integer when given");\n\tif (args.occurrence !== void 0 && args.replace_all === true) throw new Error("occurrence and replace_all cannot be used together");')
+      .replace(EDIT_PARSE_RETURN, `\treturn {
+\t\tfilePath: args.file_path,
+\t\toldString: args.old_string,
+\t\tnewString: args.new_string,
+\t\treplaceAll: args.replace_all ?? false,
+\t\t...args.occurrence !== void 0 ? { occurrence: args.occurrence } : {}
+\t};`)
+      .replace(EDIT_SCHEMA, `\t\t\toccurrence: {
+\t\t\t\ttype: "number",
+\t\t\t\tdescription: "Replace only this 1-based occurrence of old_string. Use after reading the current file and identifying the intended duplicate. Cannot be combined with replace_all."
+\t\t\t},
+${EDIT_SCHEMA}`)
+      .replace(EDIT_REQUEST, `${EDIT_REQUEST},
+\t\t\t\t\t...input.occurrence !== void 0 ? { occurrence: input.occurrence } : {}`)
+      .replace(prompt, 'text: "Use the edit tool for targeted changes to existing UTF-8 text files. Read the current file first. Prefer a unique old_string with surrounding context. If the intended literal is duplicated and adding context would be noisy, pass its verified 1-based occurrence; the file version guard still applies. Use replace_all only when every match should change. After any edit, reread before another edit to the same region."'),
+    changed: true,
+  }
+}
+
+const LOCAL_LITERAL_EDIT = `function applyLiteralEdit(content, oldString, newString, replaceAll, displayPath) {
+\tconst oldNorm = normalizeLineEndings(oldString);
+\tif (oldNorm.length === 0) throw new FsError("old_string must be a non-empty string", "FS_EDIT_NOT_FOUND");
+\tconst newNorm = normalizeLineEndings(newString);
+\tconst replacements = countOccurrences(content, oldNorm);
+\tif (replacements === 0) throw new FsError(\`old_string was not found in "\${displayPath}"\`, "FS_EDIT_NOT_FOUND");
+\tif (!replaceAll && replacements > 1) throw new FsError(\`old_string matched \${replacements} times in "\${displayPath}"; provide a more specific old_string or set replace_all to true\`, "FS_AMBIGUOUS_EDIT");
+\treturn {
+\t\tcontent: content.split(oldNorm).join(newNorm),
+\t\treplacements
+\t};
+}`
+
+const LOCAL_OCCURRENCE_EDIT = `function applyLiteralEdit(content, oldString, newString, replaceAll, displayPath, occurrence) {
+\tconst oldNorm = normalizeLineEndings(oldString);
+\tif (oldNorm.length === 0) throw new FsError("old_string must be a non-empty string", "FS_EDIT_NOT_FOUND");
+\tconst newNorm = normalizeLineEndings(newString);
+\tconst replacements = countOccurrences(content, oldNorm);
+\tif (replacements === 0) throw new FsError('old_string was not found in "' + displayPath + '"', "FS_EDIT_NOT_FOUND");
+\tif (occurrence !== void 0) {
+\t\tif (!Number.isSafeInteger(occurrence) || occurrence < 1) throw new FsError("occurrence must be a positive integer", "FS_EDIT_NOT_FOUND");
+\t\tif (occurrence > replacements) throw new FsError("occurrence " + occurrence + " exceeds " + replacements + ' matches in "' + displayPath + '"', "FS_EDIT_NOT_FOUND");
+\t\tlet index = -oldNorm.length;
+\t\tfor (let current = 0; current < occurrence; current++) index = content.indexOf(oldNorm, index + oldNorm.length);
+\t\treturn {
+\t\t\tcontent: content.slice(0, index) + newNorm + content.slice(index + oldNorm.length),
+\t\t\treplacements: 1
+\t\t};
+\t}
+\tif (!replaceAll && replacements > 1) throw new FsError("old_string matched " + replacements + ' times in "' + displayPath + '"; provide a more specific old_string or set occurrence to 1..' + replacements + " after checking match locations, or set replace_all to true", "FS_AMBIGUOUS_EDIT");
+\treturn {
+\t\tcontent: content.split(oldNorm).join(newNorm),
+\t\treplacements
+\t};
+}`
+
+export function adaptRuntimeLocalEdit(source: string): { source: string; changed: boolean } {
+  const call = 'const edited = applyLiteralEdit(original.content, edit.oldString, edit.newString, edit.replaceAll, target.displayPath);'
+  if (!source.includes(LOCAL_LITERAL_EDIT) || !source.includes(call)) return { source, changed: false }
+  return {
+    source: source.replace(LOCAL_LITERAL_EDIT, LOCAL_OCCURRENCE_EDIT)
+      .replace(call, 'const edited = applyLiteralEdit(original.content, edit.oldString, edit.newString, edit.replaceAll, target.displayPath, edit.occurrence);'),
+    changed: true,
+  }
+}
+
+const GREP_PARSE_RETURN = `\treturn {
+\t\tpattern: args.pattern,
+\t\t...args.path !== void 0 ? { path: args.path } : {},
+\t\t...args.include !== void 0 ? { include: args.include } : {}
+\t};`
+const GREP_SCHEMA = `\t\t\tpattern: {
+\t\t\t\ttype: "string",
+\t\t\t\trequired: true,
+\t\t\t\tdescription: "Regular expression to search for (ripgrep syntax)."
+\t\t\t},
+\t\t\tpath: {`
+
+export function adaptRuntimeGrep(source: string): { source: string; changed: boolean } {
+  const command = 'const parts = ["--json", `--regexp=${input.pattern}`];'
+  const invalidPattern = 'return new SearchError(`${toolName} pattern rejected by ripgrep: ${stderr}`, "SEARCH_INVALID_PATTERN");'
+  const prompt = 'text: "Use the grep tool — not shell grep or rg — to search file contents. Use read on a matched file when you need surrounding context."'
+  if (!source.includes(GREP_PARSE_RETURN) || !source.includes(command) || !source.includes(GREP_SCHEMA)
+    || !source.includes(invalidPattern) || !source.includes(prompt)
+    || !source.includes('const SEARCH_TIMEOUT_MS = 3e4;')) return { source, changed: false }
+  return {
+    source: source.replace('const SEARCH_TIMEOUT_MS = 3e4;', 'const SEARCH_TIMEOUT_MS = 6e4;')
+      .replace(invalidPattern, 'return new SearchError(`${toolName} pattern rejected by ripgrep: ${stderr}\\nFor exact code text containing backslashes or parentheses, retry grep with literal: true. For alternatives, make separate literal calls or use a valid regex with each backslash escaped for both JSON/TypeScript and ripgrep. Narrow path/include before retrying.`, "SEARCH_INVALID_PATTERN");')
+      .replace(GREP_PARSE_RETURN, `\treturn {
+\t\tpattern: args.pattern,
+\t\tliteral: args.literal === true,
+\t\t...args.path !== void 0 ? { path: args.path } : {},
+\t\t...args.include !== void 0 ? { include: args.include } : {}
+\t};`)
+      .replace(command, 'const parts = ["--json", ...(input.literal ? ["--fixed-strings"] : []), `--regexp=${input.pattern}`];')
+      .replace(GREP_SCHEMA, `\t\t\tpattern: {
+\t\t\t\ttype: "string",
+\t\t\t\trequired: true,
+\t\t\t\tdescription: "Search pattern. Defaults to ripgrep regex syntax; set literal to true for exact code text containing backslashes, parentheses, brackets, or other regex punctuation."
+\t\t\t},
+\t\t\tliteral: {
+\t\t\t\ttype: "boolean",
+\t\t\t\tdescription: "Treat pattern as one exact fixed string instead of a regular expression. For multiple exact alternatives, issue separate grep calls. Defaults to false."
+\t\t\t},
+\t\t\tpath: {`)
+      .replace(prompt, 'text: "Use the grep tool — not shell grep or rg — to search file contents. Prefer literal: true for exact source text containing backslashes or parentheses. Use simple regex only when regex behavior is needed; do not copy source-code escaping directly into a regex. Narrow path and include before retrying a broad or timed-out search. Use read on a matched file when you need surrounding context."'),
+    changed: true,
+  }
 }
 
 export function installRuntimeToolCompatibility(register: typeof registerHooks = registerHooks): ModuleHooks {
@@ -160,7 +291,9 @@ export function installRuntimeToolCompatibility(register: typeof registerHooks =
         : path.endsWith('/node_modules/@deepseek-ai/dsh-code-runtime-worker-thread/lib/index.js') ? adaptRuntimeCode
           : path.endsWith('/node_modules/@deepseek-ai/dsh-tools/lib/index.js') ? adaptRuntimeToolPrompt
             : path.endsWith('/node_modules/@deepseek-ai/dsh-tool-fs/lib/index.js') ? adaptRuntimeFileTools
-              : undefined
+              : path.endsWith('/node_modules/@deepseek-ai/dsh-tool-fs-search/lib/index.js') ? adaptRuntimeGrep
+                : path.endsWith('/node_modules/@deepseek-ai/dsh-fs-local/lib/index.js') ? adaptRuntimeLocalEdit
+                  : undefined
       if (adapt === undefined) return loaded
       if (loaded.source === undefined) return loaded
       const raw = loaded.source

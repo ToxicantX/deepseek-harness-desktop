@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { stripTypeScriptTypes } from 'node:module'
 import { zstdCompressSync, zstdDecompress } from 'node:zlib'
-import { adaptRuntimeCode, adaptRuntimePwsh, adaptRuntimeRead, adaptRuntimeReadLimit, adaptRuntimeToolPrompt } from '../src/runtime-tool-compatibility.ts'
+import { adaptRuntimeCode, adaptRuntimeEditTool, adaptRuntimeGrep, adaptRuntimeLocalEdit, adaptRuntimePwsh, adaptRuntimeRead, adaptRuntimeReadLimit, adaptRuntimeToolPrompt } from '../src/runtime-tool-compatibility.ts'
 
 const fixture = `function candidateExists(candidate) {
 \ttry {
@@ -119,6 +119,7 @@ describe('code-generation diagnostics', () => {
     expect(result.source).toContain('An outer description does not supply an inner one')
     expect(result.source).toContain('stop retrying that ID')
     expect(result.source).toContain('Do not enable replace_all unless every occurrence is intended')
+    expect(result.source).toContain('verified 1-based occurrence')
     expect(result.source).toContain('empty-string replaceAll')
     expect(adaptRuntimeToolPrompt(result.source).changed).toBe(false)
   })
@@ -161,6 +162,167 @@ const description = \`Maximum number of lines to return. Defaults to \${caps.lim
   it('requires all source anchors before modifying the read contract', () => {
     const unknown = source.replace('Maximum number of lines to return.', 'Changed upstream.')
     expect(adaptRuntimeReadLimit(unknown)).toEqual({ source: unknown, changed: false })
+  })
+})
+
+const grepFixture = `
+class SearchError extends Error {}
+const SEARCH_TIMEOUT_MS = 3e4;
+function classifyRunFailure(toolName, stderr) {
+  if (/regex parse error/i.test(stderr)) return new SearchError(\`\${toolName} pattern rejected by ripgrep: \${stderr}\`, "SEARCH_INVALID_PATTERN");
+}
+function parseGrepArgs(args) {
+\treturn {
+\t\tpattern: args.pattern,
+\t\t...args.path !== void 0 ? { path: args.path } : {},
+\t\t...args.include !== void 0 ? { include: args.include } : {}
+\t};
+}
+function buildGrepCommand(input) {
+  const parts = ["--json", \`--regexp=\${input.pattern}\`];
+  if (input.include !== void 0) parts.push(\`--glob=\${input.include}\`);
+  if (input.path !== void 0) parts.push("--", input.path);
+  return parts;
+}
+function toolFixture(ctx) {
+  ctx.systemPrompt.section({
+    text: "Use the grep tool — not shell grep or rg — to search file contents. Use read on a matched file when you need surrounding context."
+  });
+  return { parameters: {
+\t\t\tpattern: {
+\t\t\t\ttype: "string",
+\t\t\t\trequired: true,
+\t\t\t\tdescription: "Regular expression to search for (ripgrep syntax)."
+\t\t\t},
+\t\t\tpath: {}
+  }};
+}
+`
+
+describe('grep compatibility', () => {
+  it('adds an explicit fixed-string route without changing regex defaults', () => {
+    const result = adaptRuntimeGrep(grepFixture)
+    expect(result.changed).toBe(true)
+    const api = new Function(result.source
+      + '; return {SEARCH_TIMEOUT_MS, classifyRunFailure, parseGrepArgs, buildGrepCommand, toolFixture};')()
+    expect(api.SEARCH_TIMEOUT_MS).toBe(60_000)
+    expect(api.parseGrepArgs({ pattern: 'RedisPool' })).toEqual({ pattern: 'RedisPool', literal: false })
+    expect(api.parseGrepArgs({ pattern: String.raw`multi(\\Redis::PIPELINE`, literal: true, path: 'src' }))
+      .toEqual({ pattern: String.raw`multi(\\Redis::PIPELINE`, literal: true, path: 'src' })
+    expect(api.buildGrepCommand({ pattern: 'a|b', literal: false })).toEqual(['--json', '--regexp=a|b'])
+    expect(api.buildGrepCommand({ pattern: String.raw`multi(\\Redis::PIPELINE`, literal: true, include: '*.php' }))
+      .toEqual(['--json', '--fixed-strings', String.raw`--regexp=multi(\\Redis::PIPELINE`, '--glob=*.php'])
+  })
+
+  it('publishes retry guidance for invalid regexes and broad searches', () => {
+    const result = adaptRuntimeGrep(grepFixture)
+    const sections: unknown[] = []
+    const api = new Function(result.source
+      + '; return {classifyRunFailure, toolFixture};')()
+    const error = api.classifyRunFailure('grep', 'regex parse error: unrecognized escape sequence')
+    expect(error.message).toContain('literal: true')
+    expect(error.message).toContain('Narrow path/include')
+    const tool = api.toolFixture({ systemPrompt: { section: (section: unknown) => sections.push(section) } })
+    expect(tool.parameters.literal.description).toContain('exact fixed string')
+    expect(JSON.stringify(sections)).toContain('Narrow path and include')
+  })
+
+  it('requires every runtime anchor and remains idempotent', () => {
+    const result = adaptRuntimeGrep(grepFixture)
+    expect(adaptRuntimeGrep(result.source).changed).toBe(false)
+    const unknown = grepFixture.replace('const SEARCH_TIMEOUT_MS = 3e4;', 'const SEARCH_TIMEOUT_MS = 4e4;')
+    expect(adaptRuntimeGrep(unknown)).toEqual({ source: unknown, changed: false })
+  })
+})
+
+const editToolFixture = `
+function parseEditArgs(args) {
+\tif (args.file_path.trim().length === 0) throw new Error("file_path must be a non-empty string");
+\tif (args.old_string.length === 0) throw new Error("old_string must be a non-empty string");
+\tif (args.old_string === args.new_string) throw new Error("old_string and new_string must differ");
+\treturn {
+\t\tfilePath: args.file_path,
+\t\toldString: args.old_string,
+\t\tnewString: args.new_string,
+\t\treplaceAll: args.replace_all ?? false
+\t};
+}
+const tool = {
+  text: "Use the edit tool for targeted changes to existing UTF-8 text files. It replaces literal old_string with new_string; by default old_string must appear exactly once. If old_string appears multiple times, provide a more specific old_string or set replace_all to true. Read the file first (the default fs-observation-policy requires it), unless you just created or edited it in this session.",
+  parameters: {
+\t\t\treplace_all: {
+\t\t\t\ttype: "boolean",
+\t\t\t\tdescription: "Replace all matches. Defaults to false; when false, old_string must appear exactly once."
+\t\t\t},
+  },
+  request(input) { return {
+\t\t\t\t\toldString: input.oldString,
+\t\t\t\t\tnewString: input.newString,
+\t\t\t\t\treplaceAll: input.replaceAll
+  }; }
+};
+`
+
+const localEditFixture = `
+class FsError extends Error { constructor(message, code) { super(message); this.code = code; } }
+function normalizeLineEndings(value) { return value.replace(/\\r\\n?/g, "\\n"); }
+function countOccurrences(content, search) { return content.split(search).length - 1; }
+function applyLiteralEdit(content, oldString, newString, replaceAll, displayPath) {
+\tconst oldNorm = normalizeLineEndings(oldString);
+\tif (oldNorm.length === 0) throw new FsError("old_string must be a non-empty string", "FS_EDIT_NOT_FOUND");
+\tconst newNorm = normalizeLineEndings(newString);
+\tconst replacements = countOccurrences(content, oldNorm);
+\tif (replacements === 0) throw new FsError(\`old_string was not found in "\${displayPath}"\`, "FS_EDIT_NOT_FOUND");
+\tif (!replaceAll && replacements > 1) throw new FsError(\`old_string matched \${replacements} times in "\${displayPath}"; provide a more specific old_string or set replace_all to true\`, "FS_AMBIGUOUS_EDIT");
+\treturn {
+\t\tcontent: content.split(oldNorm).join(newNorm),
+\t\treplacements
+\t};
+}
+function run(content, edit) {
+  const original = { content };
+  const target = { displayPath: "fixture.php" };
+  const edited = applyLiteralEdit(original.content, edit.oldString, edit.newString, edit.replaceAll, target.displayPath);
+  return edited;
+}
+`
+
+describe('duplicate edit selection', () => {
+  it('adds a validated 1-based occurrence to the edit tool contract', () => {
+    const result = adaptRuntimeEditTool(editToolFixture)
+    expect(result.changed).toBe(true)
+    const api = new Function(result.source + ';return {parseEditArgs, tool};')()
+    const input = api.parseEditArgs({ file_path: 'x.php', old_string: 'same', new_string: 'next', occurrence: 2 })
+    expect(input).toEqual({ filePath: 'x.php', oldString: 'same', newString: 'next', replaceAll: false, occurrence: 2 })
+    expect(api.tool.parameters.occurrence.description).toContain('1-based occurrence')
+    expect(api.tool.request(input).occurrence).toBe(2)
+    expect(api.tool.text).toContain('verified 1-based occurrence')
+    expect(() => api.parseEditArgs({ file_path: 'x', old_string: 'a', new_string: 'b', occurrence: 0 })).toThrow('positive integer')
+    expect(() => api.parseEditArgs({ file_path: 'x', old_string: 'a', new_string: 'b', occurrence: 1, replace_all: true })).toThrow('cannot be used together')
+  })
+
+  it('replaces only the selected duplicate and preserves existing safe modes', () => {
+    const result = adaptRuntimeLocalEdit(localEditFixture)
+    expect(result.changed).toBe(true)
+    const run = new Function(result.source + ';return run;')()
+    const content = 'first TOKEN middle TOKEN last'
+    expect(run(content, { oldString: 'TOKEN', newString: 'CHANGED', replaceAll: false, occurrence: 2 }))
+      .toEqual({ content: 'first TOKEN middle CHANGED last', replacements: 1 })
+    expect(run('only TOKEN', { oldString: 'TOKEN', newString: 'CHANGED', replaceAll: false }))
+      .toEqual({ content: 'only CHANGED', replacements: 1 })
+    expect(run(content, { oldString: 'TOKEN', newString: 'CHANGED', replaceAll: true }))
+      .toEqual({ content: 'first CHANGED middle CHANGED last', replacements: 2 })
+    expect(() => run(content, { oldString: 'TOKEN', newString: 'x', replaceAll: false })).toThrow('occurrence to 1..2')
+    expect(() => run(content, { oldString: 'TOKEN', newString: 'x', replaceAll: false, occurrence: 3 })).toThrow('exceeds 2 matches')
+  })
+
+  it('does not partially patch unknown versions or patch twice', () => {
+    const tool = adaptRuntimeEditTool(editToolFixture)
+    const local = adaptRuntimeLocalEdit(localEditFixture)
+    expect(adaptRuntimeEditTool(tool.source).changed).toBe(false)
+    expect(adaptRuntimeLocalEdit(local.source).changed).toBe(false)
+    expect(adaptRuntimeEditTool('unknown')).toEqual({ source: 'unknown', changed: false })
+    expect(adaptRuntimeLocalEdit('unknown')).toEqual({ source: 'unknown', changed: false })
   })
 })
 

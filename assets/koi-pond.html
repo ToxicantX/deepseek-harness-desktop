@@ -16,7 +16,13 @@
       <div class="seal" aria-hidden="true">庭</div>
       <div><p class="eyebrow">A LITTLE GARDEN. BETWEEN TASKS</p><h1>后院鱼塘<span>一池清澈，日月生长。</span></h1></div>
       <nav class="window-tools" aria-label="庭院视图">
-        <button id="light" title="切换日夜" aria-label="切换到夜间" aria-pressed="false">☾</button>
+        <select id="light" title="时段设置" aria-label="时段设置">
+          <option value="auto">自动时段</option>
+          <option value="dawn">手动 · 清晨</option>
+          <option value="day">手动 · 日间</option>
+          <option value="dusk">手动 · 傍晚</option>
+          <option value="night">手动 · 夜间</option>
+        </select>
         <button id="zen" title="禅模式：单击鼠标右键退出" aria-pressed="false">禅</button>
         <button id="return" title="关闭鱼塘，返回对话">‹ 返回</button>
       </nav>

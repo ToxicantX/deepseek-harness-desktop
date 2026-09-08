@@ -2,12 +2,15 @@ import { randomUUID } from 'node:crypto'
 import { readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, relative } from 'node:path'
+import { gte, valid } from 'semver'
 import { isMap, isScalar, isSeq, parseDocument, type YAMLMap } from 'yaml'
 import type { InstalledRuntime } from './runtime-store.ts'
 
 const PLUGIN_NAME = 'dsh-multi-model-orchestrator'
 const LEGACY_CLIENT = '@deepseek-ai/dsh-client-runtime'
 const PRESENTATION_NAME = '@deepseek-ai/dsh-agent-tool-presentation'
+const PERSONA_NAME = '@deepseek-ai/dsh-persona'
+const PERSONA_PREFIX_VERSION = '0.1.3-alpha.2'
 const PRESET_SOURCES = [
   ['preset', 'agent.cordis.yml'],
   ['preset-legacy', 'agent.cordis.yml'],
@@ -19,7 +22,7 @@ export interface PluginPresetCompatibilityInput {
   runtime: InstalledRuntime
 }
 
-interface ModeScalar {
+interface ScalarRange {
   value: string
   start: number
   end: number
@@ -31,11 +34,11 @@ function scalar(map: YAMLMap, key: string) {
   }
 }
 
-function presentationMode(source: string): ModeScalar | undefined {
+function presentationMode(source: string): ScalarRange | undefined {
   const document = parseDocument(source, { prettyErrors: false })
   if (document.errors.length > 0) throw document.errors[0]
   if (!isSeq(document.contents)) return undefined
-  let result: ModeScalar | undefined
+  let result: ScalarRange | undefined
   for (const item of document.contents.items) {
     if (!isMap(item)) continue
     if (scalar(item, 'id')?.value !== 'tool-presentation' || scalar(item, 'name')?.value !== PRESENTATION_NAME) continue
@@ -50,11 +53,38 @@ function presentationMode(source: string): ModeScalar | undefined {
   return result
 }
 
-function replaceMode(source: string, mode: ModeScalar, replacement: string): string {
+function legacyPersonaKey(source: string): ScalarRange | undefined {
+  const document = parseDocument(source, { prettyErrors: false })
+  if (document.errors.length > 0) throw document.errors[0]
+  if (!isSeq(document.contents)) return undefined
+  let result: ScalarRange | undefined
+  for (const item of document.contents.items) {
+    if (!isMap(item)) continue
+    if (scalar(item, 'id')?.value !== 'persona' || scalar(item, 'name')?.value !== PERSONA_NAME) continue
+    const config = item.items.find(pair => isScalar(pair.key) && pair.key.value === 'config')?.value
+    if (!isMap(config) || config.items.some(value => isScalar(value.key) && value.key.value === 'prefix')) return undefined
+    const pair = config.items.find(value => isScalar(value.key) && value.key.value === 'text')
+    const key = pair?.key
+    const range = isScalar(key) ? key.range : undefined
+    if (range === undefined || range === null) return undefined
+    if (result !== undefined) throw new Error('agent preset contains duplicate persona entries')
+    result = { value: 'text', start: range[0], end: range[1] }
+  }
+  return result
+}
+
+function replaceMode(source: string, mode: ScalarRange, replacement: string): string {
   const raw = source.slice(mode.start, mode.end)
   const next = raw.replace(mode.value, replacement)
   if (next === raw) throw new Error('agent preset tool-presentation mode range is invalid')
   return source.slice(0, mode.start) + next + source.slice(mode.end)
+}
+
+function replacePersonaKey(source: string, key: ScalarRange): string {
+  const raw = source.slice(key.start, key.end)
+  const next = raw.replace(key.value, 'prefix')
+  if (next === raw) throw new Error('agent preset persona key range is invalid')
+  return source.slice(0, key.start) + next + source.slice(key.end)
 }
 
 async function readOptional(path: string): Promise<string | undefined> {
@@ -73,6 +103,26 @@ async function isExpectedPlugin(packageRoot: string): Promise<boolean> {
     const value: unknown = JSON.parse(manifest)
     return value !== null && typeof value === 'object' && !Array.isArray(value)
       && (value as Record<string, unknown>).name === PLUGIN_NAME
+  } catch {
+    return false
+  }
+}
+
+async function personaRequiresPrefix(packageRoot: string): Promise<boolean> {
+  let manifestPath: string
+  try {
+    manifestPath = createRequire(join(packageRoot, 'package.json')).resolve(PERSONA_NAME + '/package.json')
+  } catch {
+    return false
+  }
+  const manifest = await readOptional(manifestPath)
+  if (manifest === undefined) return false
+  try {
+    const value: unknown = JSON.parse(manifest)
+    const version = value !== null && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>).version
+      : undefined
+    return typeof version === 'string' && valid(version) !== null && gte(version, PERSONA_PREFIX_VERSION)
   } catch {
     return false
   }
@@ -140,8 +190,6 @@ export async function preparePluginPresetCompatibility(input: PluginPresetCompat
     }
     if (runtimeUsesPtc) break
   }
-  if (!runtimeUsesPtc) return undefined
-
   const profileModules = join(input.home, 'profiles', 'web', 'node_modules')
   const pluginRoot = join(profileModules, PLUGIN_NAME)
   let resolvedPlugin: string
@@ -155,13 +203,18 @@ export async function preparePluginPresetCompatibility(input: PluginPresetCompat
     throw error
   }
   if (!await isExpectedPlugin(resolvedPlugin)) return undefined
+  const runtimeUsesPersonaPrefix = await personaRequiresPrefix(resolvedPlugin)
+  if (!runtimeUsesPtc && !runtimeUsesPersonaPrefix) return undefined
   for (const sourceSegments of PRESET_SOURCES) {
     const sourcePath = join(resolvedPlugin, ...sourceSegments)
     const source = await readOptional(sourcePath)
     if (source === undefined) continue
-    const mode = presentationMode(source)
-    if (mode?.value !== 'code') continue
-    await replaceFile(sourcePath, replaceMode(source, mode, 'ptc'))
+    let replacement = source
+    const mode = runtimeUsesPtc ? presentationMode(replacement) : undefined
+    if (mode?.value === 'code') replacement = replaceMode(replacement, mode, 'ptc')
+    const personaKey = runtimeUsesPersonaPrefix ? legacyPersonaKey(replacement) : undefined
+    if (personaKey !== undefined) replacement = replacePersonaKey(replacement, personaKey)
+    if (replacement !== source) await replaceFile(sourcePath, replacement)
   }
   await removeLegacyClientInjection(resolvedPlugin, input.runtime)
   return PLUGIN_NAME

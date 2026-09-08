@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { zstdCompressSync } from 'node:zlib'
 import {
-  adaptRuntimeCode, adaptRuntimePwsh, adaptRuntimeFileTools, adaptRuntimeToolPrompt,
+  adaptRuntimeCode, adaptRuntimeGrep, adaptRuntimeLocalEdit, adaptRuntimePwsh, adaptRuntimeFileTools, adaptRuntimeToolPrompt,
   installRuntimeToolCompatibility,
 } from '../src/runtime-tool-compatibility.ts'
 
@@ -20,6 +20,8 @@ const modules = [
   ['dsh-code-runtime-worker-thread', adaptRuntimeCode],
   ['dsh-tools', adaptRuntimeToolPrompt],
   ['dsh-tool-fs', adaptRuntimeFileTools],
+  ['dsh-tool-fs-search', adaptRuntimeGrep],
+  ['dsh-fs-local', adaptRuntimeLocalEdit],
 ]
 const verified = []
 for (const [name, adapt] of modules) {
@@ -116,6 +118,47 @@ try {
   ctx.fs.resolve = async () => { throw new Error('fixture denied') }
   await assert.rejects(read.execute({ file_path: 'fixture.jsonl.zstd' }, {}), /fixture denied/)
   assert.equal(byteReads, 3)
+  const edit = registered.get('edit')
+  assert.ok(edit)
+  assert.match(edit.parameters.properties.occurrence.description, /1-based occurrence/)
+  let editRequest
+  ctx.fs.resolve = async path => ({ displayPath: path })
+  ctx.fs.editText = async (_target, request) => {
+    editRequest = request
+    return { version: 'fixture-edit', before: 'TOKEN TOKEN', after: 'TOKEN CHANGED' }
+  }
+  ctx.waterfall = async () => void 0
+  await edit.execute({
+    file_path: 'fixture.php', old_string: 'TOKEN', new_string: 'CHANGED', occurrence: 2,
+  }, {})
+  assert.equal(editRequest.occurrence, 2)
+  const searchTools = await import(pathToFileURL(verified[4].file).href)
+  assert.equal(searchTools.SEARCH_TIMEOUT_MS, 60_000)
+  const literalPattern = String.raw`export function adaptRuntimeGrep(source: string)`
+  const parsedGrep = searchTools.parseGrepArgs({ pattern: literalPattern, literal: true, path: 'src' })
+  assert.equal(parsedGrep.literal, true)
+  const grepArgs = searchTools.buildGrepCommand(parsedGrep)
+  assert.deepEqual(grepArgs, ['--json', '--fixed-strings', `--regexp=${literalPattern}`, '--', 'src'])
+  const rg = spawnSync(await searchTools.resolveRgPath(), ['--no-config', ...grepArgs], {
+    cwd: process.cwd(), encoding: 'utf8', windowsHide: true, timeout: 10_000,
+  })
+  assert.equal(rg.status, 0, rg.stderr)
+  assert.match(rg.stdout, /runtime-tool-compatibility\.ts/)
+  const grepDefinitions = new Map()
+  const grepSections = []
+  searchTools.applyGrepTool({
+    systemPrompt: { section(value) { grepSections.push(value) }, getSectionOrder() { return 0 } },
+    tools: { register(tool) { grepDefinitions.set(tool.name, tool) } },
+    on() {},
+  }, {
+    maxMatches: 10, maxLineBytes: 2000, maxMetaBytes: 65536,
+    rawOutputMaxBytes: 1_000_000, graceMs: 3000, stderrMaxBytes: 65536, timeoutMs: 60_000,
+  })
+  const grep = grepDefinitions.get('grep')
+  assert.ok(grep)
+  assert.equal(grep.timeoutMs, 60_000)
+  assert.match(grep.parameters.properties.literal.description, /exact fixed string/)
+  assert.match(grepSections[0].text, /Narrow path and include/)
   for (const entry of verified) {
     assert.equal(createHash('sha256').update(await readFile(entry.file)).digest('hex'), entry.hash)
   }
@@ -125,6 +168,8 @@ try {
     parseFailure: 'diagnostic verified', coreFiles: 'unchanged',
     compressedRead: 'actual registered read: concatenated frames, pagination and access failure passed',
     oversizedRead: '5000 accepted with configured cap 20; render and invalid limit checks passed',
+    grep: 'literal route, 60s default, actual packaged rg search and model guidance passed',
+    editOccurrence: 'registered edit forwarded occurrence=2; local backend transform matched/imported and focused behavior tests passed',
     scope: 'isolated module smoke; no live agents or DSH services started',
   }, null, 2))
 } finally {

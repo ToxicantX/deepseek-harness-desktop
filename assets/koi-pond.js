@@ -9,6 +9,13 @@
   let fish = [], food = [], ripples = [], last = 0, frame = 0, noticeTimer, lastInteraction = -Infinity
   let keyboardPoint = { x: .4, y: .55 }, keyboardActive = false
   const backdrop = document.createElement('canvas')
+  const sunlight = document.createElement('canvas')
+  let period, clockMinute = -1, lastClockCheck = -Infinity
+  let timeSetting = 'auto'
+  try {
+    const saved = localStorage.getItem('koi-pond-time-setting')
+    if (['auto', 'dawn', 'day', 'dusk', 'night'].includes(saved)) timeSetting = saved
+  } catch { /* Keep the default when local storage is unavailable. */ }
   const refractionCanvas = document.createElement('canvas')
   const refractionContext = refractionCanvas.getContext('2d', { willReadFrequently: true })
   const sceneImages = { day: new Image(), night: new Image() }
@@ -75,9 +82,80 @@
       y: sceneFrame.y + sceneFrame.height * (.51 + Math.sin(angle) * radius * .35),
     }
   }
+  // Shoreline traced from the 1280 × 673 reference; mapped with the backdrop crop.
+  const shoreline = [
+    [221,290],[241,276],[245,229],[265,213],[269,195],[298,196],[335,183],
+    [372,155],[380,136],[396,129],[413,144],[431,154],[435,179],[451,190],
+    [470,177],[491,137],[497,108],[497,69],[548,53],[577,40],[597,27],
+    [640,27],[674,33],[697,49],[706,71],[738,95],[742,125],[735,174],
+    [739,186],[783,184],[810,189],[832,202],[851,199],[870,190],[886,209],
+    [915,216],[930,235],[977,254],[984,287],[993,305],[1016,315],[1038,321],
+    [1051,339],[1057,373],[1056,433],[1047,471],[1037,490],[1012,503],
+    [989,510],[965,526],[932,529],[906,528],[880,536],[855,541],[835,540],
+    [814,524],[791,544],[774,540],[743,542],[729,553],[722,579],[728,596],
+    [749,607],[772,616],[779,633],[770,650],[748,662],[730,666],[724,644],
+    [710,636],[674,637],[660,641],[649,651],[622,653],[605,647],[591,633],
+    [582,606],[570,601],[549,605],[541,614],[519,601],[496,586],[480,552],
+    [466,549],[438,552],[420,563],[410,560],[403,550],[422,532],[433,506],
+    [427,494],[401,486],[366,485],[355,478],[330,472],[303,472],[281,465],
+    [260,455],[264,439],[282,428],[316,418],[332,405],[347,382],[364,359],
+    [369,339],[359,321],[342,300],[333,279],[309,266],[285,259],[274,272],
+    [263,301],[255,316],[242,303],
+  ]
+  let outlineFrame, outlinePoints
+  function waterOutline() {
+    if (outlineFrame === sceneFrame) return outlinePoints
+    outlineFrame = sceneFrame
+    outlinePoints = shoreline.map(([x, y]) => ({
+      x: sceneFrame.x + x / 1280 * sceneFrame.width,
+      y: sceneFrame.y + y / 673 * sceneFrame.height,
+    }))
+    return outlinePoints
+  }
   function waterDistance(x, y) {
-    return Math.hypot(((x - sceneFrame.x) / sceneFrame.width - .54) / .235,
-      ((y - sceneFrame.y) / sceneFrame.height - .51) / .35)
+    const points = waterOutline()
+    let inside = false
+    for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+      const a = points[i], b = points[j]
+      if ((a.y > y) !== (b.y > y) && x < (b.x - a.x) * (y - a.y) / (b.y - a.y) + a.x) inside = !inside
+    }
+    return inside ? 0 : 2
+  }
+  function keepInWater(x, y) {
+    if (waterDistance(x, y) <= 1) return { x, y }
+    const points = waterOutline()
+    let nearest, distance = Infinity
+    for (let i = 0; i < points.length; i++) {
+      const a = points[i], b = points[(i + 1) % points.length]
+      const dx = b.x - a.x, dy = b.y - a.y
+      const t = clamp(((x - a.x) * dx + (y - a.y) * dy) / (dx * dx + dy * dy), 0, 1)
+      const p = { x: a.x + t * dx, y: a.y + t * dy }
+      const d = Math.hypot(x - p.x, y - p.y)
+      if (d < distance) { nearest = p; distance = d }
+    }
+    return nearest
+  }
+  function periodAt(hour) {
+    if (hour >= 8 && hour < 17) return 'day'
+    if (hour >= 17 && hour < 19) return 'dusk'
+    if (hour >= 5 && hour < 8) return 'dawn'
+    return 'night'
+  }
+  function syncTime() {
+    const date = new Date()
+    const minute = timeSetting === 'auto' ? date.getHours() * 60 + date.getMinutes()
+      : { dawn: 390, day: 720, dusk: 1080, night: 1320 }[timeSetting]
+    if (minute === clockMinute) return
+    clockMinute = minute
+    period = periodAt(minute / 60)
+    night = period === 'night'
+    document.body.classList.toggle('night', night)
+    document.body.dataset.period = period
+    const label = { dawn: '清晨', day: '日间', dusk: '傍晚', night: '夜间' }[period]
+    $('light').value = timeSetting
+    $('light').setAttribute('aria-label', `时段设置：${timeSetting === 'auto' ? '自动' : '手动'} · ${label}`)
+    $('light').title = timeSetting === 'auto' ? `${label} · 随本地时间自动切换` : `${label} · 手动固定时段`
+    makeBackdrop()
   }
   function makeBackdrop() {
     const dpr = Math.min(devicePixelRatio || 1, 2)
@@ -99,6 +177,44 @@
     const image = sceneImages[night ? 'night' : 'day']
     if (image.complete && image.naturalWidth) {
       b.drawImage(image, sceneFrame.x, sceneFrame.y, sceneFrame.width, sceneFrame.height)
+    }
+    if (period === 'dawn' || period === 'dusk') {
+      b.fillStyle = period === 'dawn' ? '#b8d9db30' : '#51283655'
+      b.fillRect(0, 0, width, height)
+      b.globalCompositeOperation = 'soft-light'
+      b.fillStyle = period === 'dawn' ? '#ffe8b866' : '#ed964a99'
+      b.fillRect(0, 0, width, height)
+      b.globalCompositeOperation = 'source-over'
+    }
+    // Cache soft sun shafts and leaf shadows once per clock minute, not per frame.
+    sunlight.width = width; sunlight.height = height
+    const light = sunlight.getContext('2d')
+    if (!night) {
+      const outline = waterOutline()
+      light.beginPath(); light.moveTo(outline[0].x, outline[0].y)
+      for (const p of outline.slice(1)) light.lineTo(p.x, p.y)
+      light.closePath(); light.clip()
+      const progress = clamp((clockMinute / 60 - 5) / 14, 0, 1)
+      const sunX = width * (.12 + progress * .76)
+      const warm = period === 'dusk' ? '255,174,88' : period === 'dawn' ? '255,226,174' : '255,249,207'
+      for (let i = 0; i < 5; i++) {
+        light.save()
+        light.translate(sunX + (i - 2) * width * .085, -height * .12)
+        light.rotate((progress - .5) * .65)
+        light.scale(.17 + i % 2 * .06, 1)
+        const glow = light.createRadialGradient(0, height * .3, 0, 0, height * .3, height * .8)
+        glow.addColorStop(0, `rgba(${warm},0.17)`)
+        glow.addColorStop(.5, `rgba(${warm},0.06)`)
+        glow.addColorStop(1, `rgba(${warm},0)`)
+        light.fillStyle = glow
+        light.fillRect(-height, -height, height * 2, height * 3)
+        light.restore()
+      }
+      light.filter = 'blur(9px)'
+      for (let i = 0; i < 14; i++) {
+        const p = waterPosition(i * 2.399, .75)
+        ellipse(light, p.x + (progress - .5) * 60, p.y, 24 + i % 3 * 9, 7, '#123c3520', i * 2.399)
+      }
     }
   }
   function koi(f, time) {
@@ -145,7 +261,10 @@
     if (mode === 'feed' && food.length >= 45) return
     ripples.push({ x, y, age: 0, strong: mode === 'ripple' })
     if (mode !== 'feed') return
-    for (let i = 0; i < 5; i++) food.push({ x: clamp(x + random(-13, 13), 15, width - 15), y: clamp(y + random(-13, 13), 15, height - 15), age: 0 })
+    for (let i = 0; i < 5; i++) {
+      const px = x + random(-13, 13), py = y + random(-13, 13)
+      food.push({ x: waterDistance(px, py) <= 1 ? px : x, y: waterDistance(px, py) <= 1 ? py : y, age: 0 })
+    }
   }
   function refractWater(waves) {
     const padding = 16
@@ -166,13 +285,16 @@
     })))
     refractionContext.putImageData(new ImageData(pixels, w, h), 0, 0)
     ctx.save()
-    const center = waterPosition(0, 0)
-    ctx.beginPath(); ctx.ellipse(center.x, center.y, sceneFrame.width * .235, sceneFrame.height * .35, 0, 0, Math.PI * 2)
+    const outline = waterOutline()
+    ctx.beginPath(); ctx.moveTo(outline[0].x, outline[0].y)
+    for (const p of outline.slice(1)) ctx.lineTo(p.x, p.y)
+    ctx.closePath()
     ctx.clip()
     ctx.drawImage(refractionCanvas, left, top)
     ctx.restore()
   }
   function animate(now) {
+    if (now - lastClockCheck >= 1000) { lastClockCheck = now; syncTime() }
     const dt = Math.min((now - last) / 1000 || .016, .05); last = now
     const t = now / 1000
     ctx.drawImage(backdrop, 0, 0, width, height)
@@ -180,7 +302,9 @@
       let target = food.reduce((best, pellet) => !best || Math.hypot(f.x - pellet.x, f.y - pellet.y) < Math.hypot(f.x - best.x, f.y - best.y) ? pellet : best, null)
       if (!target) {
         if (!f.target || Math.hypot(f.x - f.target.x, f.y - f.target.y) < 40) {
-          f.target = waterPosition(random(0, Math.PI * 2), random(.15, .8))
+          do {
+            f.target = { x: sceneFrame.x + random(.18, .82) * sceneFrame.width, y: sceneFrame.y + random(.05, .97) * sceneFrame.height }
+          } while (waterDistance(f.target.x, f.target.y) > 1)
         }
         target = f.target
       }
@@ -193,9 +317,9 @@
       f.y = clamp(f.y + Math.sin(f.angle) * speed * dt, 40, height - 40)
       const distanceFromWater = waterDistance(f.x, f.y)
       if (distanceFromWater > 1) {
-        const center = waterPosition(0, 0)
-        f.x = center.x + (f.x - center.x) / distanceFromWater * .99
-        f.y = center.y + (f.y - center.y) / distanceFromWater * .99
+          const edge = keepInWater(f.x, f.y)
+          f.x = edge.x; f.y = edge.y
+          f.target = null
       }
       const pellet = food.indexOf(target)
       if (pellet >= 0 && distance < size(f) + 5 && Math.abs(delta) < .7) {
@@ -206,6 +330,12 @@
     }
     for (const p of food) { p.age += dt; ellipse(ctx, p.x + 2, p.y + 3, 3, 2, '#061f2399'); ellipse(ctx, p.x, p.y, 2.5, 2, '#d4a565') }
     food = food.filter(p => p.age < 25)
+    if (!night) {
+      ctx.save()
+      ctx.globalAlpha = reduced ? .8 : .8 + Math.sin(t * .35) * .08
+      ctx.drawImage(sunlight, 0, 0)
+      ctx.restore()
+    }
     for (const r of ripples) r.age += dt
     ripples = ripples.filter(r => r.age < window.koiWater.duration)
     if (ripples.length) refractWater(ripples)
@@ -261,14 +391,6 @@
     for (const key of ['feed', 'ripple']) { $(key).classList.toggle('active', key === id); $(key).setAttribute('aria-pressed', String(key === id)) }
     $('hint').textContent = id === 'feed' ? '轻点水面，送它们一餐小欢喜' : '轻点水面，看涟漪慢慢散开'
   }
-  $('light').onclick = () => {
-    night = !night
-    document.body.classList.toggle('night', night)
-    $('light').textContent = night ? '☀' : '☾'
-    $('light').setAttribute('aria-label', night ? '切换到日间' : '切换到夜间')
-    $('light').setAttribute('aria-pressed', String(night))
-    makeBackdrop()
-  }
   $('return').onclick = () => window.close()
   $('rename-form').onsubmit = async e => {
     e.preventDefault()
@@ -278,16 +400,24 @@
     } catch { notify('名字保存失败，请稍后再试。') }
   }
   addEventListener('resize', makeBackdrop)
+  $('light').onchange = () => {
+    timeSetting = $('light').value
+    clockMinute = -1
+    syncTime()
+    try { localStorage.setItem('koi-pond-time-setting', timeSetting) }
+    catch { notify('时段已切换，本次设置未保存。') }
+  }
+  addEventListener('focus', syncTime)
   document.addEventListener('visibilitychange', () => {
     cancelAnimationFrame(frame)
-    if (!document.hidden) { last = performance.now(); frame = requestAnimationFrame(animate) }
+    if (!document.hidden) { syncTime(); last = performance.now(); frame = requestAnimationFrame(animate) }
   })
   for (const [name, image] of Object.entries(sceneImages)) {
     image.onload = () => { if ((night ? 'night' : 'day') === name) makeBackdrop() }
     image.onerror = () => notify('庭院美术资源读取失败，请检查安装文件。')
     image.src = `koi-pond-${name}.webp`
   }
-  makeBackdrop()
+  syncTime()
   frame = requestAnimationFrame(animate)
   if (!bridge) { $('journey').textContent = '请从桌面壳的「后院鱼塘」菜单进入。'; return }
   // Subscribe before reading; a late initial snapshot must not overwrite a newer event.

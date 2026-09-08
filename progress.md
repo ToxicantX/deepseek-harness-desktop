@@ -992,3 +992,166 @@ Remove-Item -LiteralPath 'src/conversation-replay-host-injector.ts','src/convers
 - docs/runtime-tool-compatibility.md：说明封顶语义、编辑及代理边界和部署验证缺口。
 - progress.md：追加本轮记录。
 - 回滚：工作区本轮开始为干净状态，可用 git restore -- src/runtime-tool-compatibility.ts tests/runtime-tool-compatibility.spec.ts scripts/smoke-runtime-tool-compatibility.mjs docs/runtime-tool-compatibility.md 恢复本轮前实现，再 pnpm run build；保留 progress.md 历史并追加回滚说明。若之后新增修改，先保存差异，勿直接覆盖。
+
+## 2026-09-08 - Task: 汉化斜杠命令说明
+### What was done
+- 复用桌面壳现有 ModuleLoader 劫持入口，在 DSH 命令 UI 工厂加载时包装候选生成方法，将 compact、export、feedback、goal、permission、plan 六条英文说明替换为中文。
+- 只按已确认的完整英文说明匹配；命令名、参数、排序、执行行为、未知说明及原本已汉化的 model 说明保持不变。
+### Testing
+- 新增专项 Vitest：3 项通过，覆盖六条说明汉化、未知/已有中文保持原样、重复工厂执行不叠加包装及共享加载钩子注册。
+- pnpm run typecheck 通过；pnpm test 全量 32 文件/232 测试通过；pnpm run build 通过，生成的 lib/preload.cjs 已包含命令说明汉化钩子。
+- 使用本机当前 DSH 0.1.3-alpha.1 的真实 @deepseek-ai/dsh-client-ui-commands 工厂完成隔离冒烟，六条说明全部得到预期中文；未重启正在运行的桌面壳，实际界面仍需重启后输入 / 确认。
+- 测试环境 Node v22.22.0 低于项目声明的 Node >=24 <25，pnpm 输出引擎警告；类型检查、全量测试与构建仍均退出码 0。
+### Notes
+- src/command-description-localizer.ts：新增命令候选说明汉化工厂包装和共享 ModuleLoader 注册入口。
+- src/preload.ts：在对话 ModuleLoader 接管完成后安装命令说明汉化钩子。
+- tests/command-description-localizer.spec.ts：新增候选汉化、幂等与注册契约测试。
+- docs/command-description-localization.md：记录汉化范围、生效方式、Runtime 升级边界和验证动作。
+- progress.md：追加本任务实现、验证与回滚记录。
+- 回滚：删除 src/command-description-localizer.ts、tests/command-description-localizer.spec.ts、docs/command-description-localization.md，并移除 src/preload.ts 中对应导入和 runIsolatedShellInjection 调用，再执行 pnpm run build；保留 progress.md 历史并追加回滚说明。
+
+## 2026-09-08 - Task: 兼容新版 persona 必填 prefix 字段
+### What was done
+- 确认换机后插件预设报错来自 DSH `0.1.3-alpha.2` 将 `@deepseek-ai/dsh-persona` 的必填配置由 `text` 改为 `prefix`，而已发布的多模型编排插件 `0.7.6` 仍携带旧字段。
+- Runtime 启动前从插件自身的 Node 解析链读取实际 `dsh-persona` 版本；仅在版本不低于 `0.1.3-alpha.2` 时，将主预设和旧 ID 兼容预设中的 persona YAML 键从 `text` 精准迁移为 `prefix`。
+- 沿用现有同目录临时文件替换，保持提示词正文、注释、换行和其他配置不变；旧 Runtime、外部 link 插件、已使用 `prefix` 的预设及无关插件保持原样。
+### Testing
+- 本机实装只读核对：`dsh-multi-model-orchestrator` 为 `0.7.6`，其模板使用 `config.text`；从该插件实际解析到的 `@deepseek-ai/dsh-persona` 为 `0.1.3-alpha.2`，与附件 `$.prefix missing required value` 一致。
+- `pnpm exec vitest run tests/plugin-preset-compatibility.spec.ts tests/runtime-controller-overlay.spec.ts --maxWorkers=1 --testTimeout=20000`：2 个测试文件、16 项通过，覆盖新版字段迁移、旧版保持、幂等、注释保留、硬链接隔离和 Runtime 启动链路。
+- `pnpm run typecheck` 通过；`pnpm test -- --maxWorkers=1 --testTimeout=20000` 全量 32 个测试文件、236 项通过；`pnpm run build` 通过；`git diff --check` 通过，仅提示已有 `progress.md` 换行规范。
+- 当前 Node.js 为 `22.22.0`，低于仓库声明的 Node.js 24，pnpm 输出 engine 警告；本轮未生成安装包，也未在附件电脑上重启 Runtime 或实际切换预设。
+### Notes
+- src/plugin-preset-compatibility.ts：按插件实际解析到的 persona 版本迁移受管预设模板字段。
+- tests/plugin-preset-compatibility.spec.ts：增加 persona `text` 到 `prefix` 的版本边界、幂等和内容保持回归。
+- docs/plugin-preset-compatibility.md：记录新版 persona schema、迁移条件和旧 Runtime 边界。
+- progress.md：追加本任务的根因、验证证据与回滚点。
+- 回滚：在这些文件没有后续修改时执行 `git restore -- src/plugin-preset-compatibility.ts tests/plugin-preset-compatibility.spec.ts docs/plugin-preset-compatibility.md`，再执行 `pnpm run build`；保留 `progress.md` 历史并追加回滚说明。
+
+## 2026-09-08 - Task: 优化 Grep 正则错误与搜索超时
+### What was done
+- 为现有 grep 增加可选 literal 字面量模式；默认正则行为保持不变，源码反斜杠、括号等精确文本可走 Runtime 自带 ripgrep 的 --fixed-strings。
+- 非法正则错误补充明确重试动作；grep 系统提示要求多个字面量分开搜索并先缩小 path/include，不自动改写含义不明的表达式。
+- 默认搜索预算从30秒提高到60秒，显式配置和主动取消仍优先，不增加无限重试。
+### Testing
+- 定向 Vitest 20/20 通过：覆盖默认正则、字面量 argv、PHP 风格反斜杠/括号、60秒默认值、错误提示、schema、幂等及未知版本保留。
+- 实际安装 DSH 0.1.3-alpha.1 隔离冒烟通过：五个 Runtime 模块特征匹配并加载；使用其 @vscode/ripgrep 完成真实字面量搜索；grep schema、提示、60秒预算与核心文件哈希检查通过。
+- 冒烟首轮模拟 ctx 缺少 applyGrepTool 所需 on 方法，补齐实际插件注册契约后重新完整通过。
+- Node 24 + pnpm test：32文件/236测试通过；pnpm run build（含 tsc --noEmit）退出码0；git diff --check通过，仅有 progress.md 既有换行提示。构建仍有原工具 CJS 与依赖打包提示。
+- 未重启当前应用、未生成安装包、未运行真实主/子代理任务；新行为需部署新版壳后验证错误率。调用方主动取消仍会返回取消结果。
+### Notes
+- src/runtime-tool-compatibility.ts：新增 grep 字面量参数、错误指导、系统提示、60秒默认预算及模块路由。
+- tests/runtime-tool-compatibility.spec.ts：新增 grep 兼容回归测试。
+- scripts/smoke-runtime-tool-compatibility.mjs：新增实际 Runtime grep schema 与自带 ripgrep 字面量搜索验证。
+- docs/runtime-tool-compatibility.md：记录 grep 使用方法、超时语义和边界。
+- progress.md：仅追加本轮记录；src/main.ts、plugin-preset、command-description 等同时存在的改动未由本任务编辑。
+- 回滚：因上述四个实现/测试/文档文件在本任务开始时为干净状态，执行 git restore -- src/runtime-tool-compatibility.ts tests/runtime-tool-compatibility.spec.ts scripts/smoke-runtime-tool-compatibility.mjs docs/runtime-tool-compatibility.md 后运行 pnpm run build；保留 progress.md 历史。若这些文件随后产生新改动，按本任务 diff 分块反向应用。
+
+## 2026-09-08 - Task: 修复命令说明汉化导致斜杠菜单卡在加载态
+### What was done
+- 根据用户实际界面复现结果撤下对 CommandUiRuntime.candidates 异步候选方法的包装；汉化不再进入命令目录请求、缓存发布或候选生成链。
+- 保留壳侧注入方式，改为受信任主页面加载后的渲染观察器；只处理 dsh-slash-option-command- 命令选项，并按完整英文说明替换对应 span 文本。
+- 观察器支持首次扫描、动态新增和文本更新，重复注入会先卸载旧观察器；命令执行、排序、选择及 model 中文说明不变。
+### Testing
+- 专项 Vitest 3/3 通过，覆盖六条映射、未知/已有中文不变、初始与动态 DOM 汉化、卸载及可信页面注入边界。
+- pnpm run typecheck 通过；pnpm test 全量 32 文件/235 测试通过；pnpm run build 通过。
+- 构建产物检查通过：lib/preload.cjs 不再包含候选方法或命令工厂汉化钩子；lib/main.js 仅包含渲染观察器及可信页面执行入口。
+- 独立隐藏 Electron 页面冒烟通过：已存在 compact 说明和动态新增 plan 说明均显示预期中文。首轮冒烟因 Electron 参数顺序未进入测试脚本而挂起，终止该隔离进程后修正调用，第二轮完整通过。
+- 未重启用户当前桌面壳；修复后的实际 / 菜单仍需重新启动后确认。测试环境 Node v22.22.0 低于项目声明的 Node >=24 <25，pnpm 输出引擎警告，但上述命令均退出码 0。
+### Notes
+- src/command-description-localizer.ts：从命令候选方法包装改为精确范围的 DOM 渲染观察器脚本。
+- src/main.ts：在受信任主页面加载后执行命令说明汉化观察器。
+- src/preload.ts：移除上一轮命令工厂汉化钩子，恢复原有 preload 模块加载链。
+- tests/command-description-localizer.spec.ts：改为映射、动态 DOM 行为及注入边界测试。
+- docs/command-description-localization.md：同步渲染层注入范围和 Runtime 升级边界。
+- progress.md：追加本次回归修复、验证与回滚记录；工作区同时出现的插件预设和 Runtime 工具兼容性文件修改未编辑、未覆盖。
+- 回滚：移除 src/main.ts 中 createCommandDescriptionLocalizerScript 的导入与 executeJavaScript 调用，并删除 src/command-description-localizer.ts、tests/command-description-localizer.spec.ts、docs/command-description-localization.md，再执行 pnpm run build；不要恢复已证实会导致菜单卡住的 CommandUiRuntime.candidates 包装。保留 progress.md 历史并追加回滚说明。
+
+## 2026-09-08 - Task: 按红框扩大鱼塘互动与游动水域
+### What was done
+- 依据用户 1280×673 参考图描绘不规则岸线，替代原中央椭圆命中区域；保留荷叶和岸边凹口，红框不作为美术叠加显示。
+- 鱼群游动目标、位置约束、投食与玩水命中、折射裁切共用轮廓；跟随背景缩放和裁切，缓存映射顶点，避免每次命中创建顶点数组。
+- 边缘投食散落保持在水域内，保留三波纹上限和点击冷却。不修改 DSH 核心及工作区其他任务改动。
+### Testing
+- node --check assets/koi-pond.js、git diff --check 通过。
+- 四组定向 Vitest 共 30 项通过，新增顶部/左右/底部扩展水域、岸边凹口排除、缩放裁切与缓存更新、越界回落岸线检查。
+- 独立隐藏 Electron 冒烟通过，覆盖投食追食、日夜折射、密集点击、禅模式、存档和小窗口。输出：C:\Users\karma617\AppData\Local\Temp\dsh-koi-smoke-yCJDWL。
+- 未构建打包或重启主壳；轮廓为参考图描点近似，鱼的位置边界按中心计算，尾鳍可伸出边界。新增区域的逐点视觉体验仍需用户在主壳确认。
+### Notes
+- assets/koi-pond.js：新增岸线映射、点内判断及最近岸线回落，接入鱼群、互动与折射。
+- tests/koi-pond-boundary.spec.mjs：新增四项不规则边界测试。
+- docs/koi-pond.md：说明共用边界、缩放和鱼身边缘表现。
+- progress.md：仅追加本轮记录。
+- 回滚：在上述鱼塘文件没有后续修改时执行 git restore --source=8f960a16388dfbb0831a2b5b967ced268af23e13 -- assets/koi-pond.js docs/koi-pond.md；执行 Remove-Item -LiteralPath tests/koi-pond-boundary.spec.mjs。保留进度日志与其他任务修改。
+
+## 2026-09-08 - Task: 支持重复 old_string 的精确单处编辑
+### What was done
+- 为现有 edit 增加可选 occurrence 参数，按读取后确认的1基序号只替换指定匹配；未提供时继续要求 old_string 唯一。
+- occurrence 与 replace_all 互斥，保留文件目标锁、已读版本守卫及原子写入；重复匹配错误新增可选范围1..N，不默认修改第一处。
+- 主/子代理共享提示与 edit 工具说明同步要求先读取、优先扩大上下文，必要时使用已核对的 occurrence，同一区域编辑后重新读取。
+### Testing
+- 定向 Vitest 23/23 通过：覆盖第二处精确替换、唯一匹配、全量替换、重复保护、越界、非法序号、互斥参数、schema/请求传递、幂等和未知版本保留。
+- 实际安装 DSH 0.1.3-alpha.1 隔离冒烟通过：六个实际 Runtime 模块匹配并导入；实际注册 edit 暴露 occurrence schema，并将 occurrence=2 完整传给文件系统请求；dsh-fs-local 特征匹配，核心文件哈希未变化。
+- Node 24 + pnpm test：33文件/243测试通过；pnpm run build（含 tsc --noEmit）退出码0；最终冒烟和 git diff --check通过，仅有 progress.md 既有换行提示。构建仍有原工具 CJS 与依赖打包提示。
+- 未重启当前应用、未生成安装包、未对附件业务文件执行编辑；部署新版壳后主/子代理才会看到 occurrence 参数。
+### Notes
+- src/runtime-tool-compatibility.ts：新增 edit 工具契约与 dsh-fs-local 第N处原子替换适配，并接入加载路由。
+- tests/runtime-tool-compatibility.spec.ts：新增重复文本精确编辑回归。
+- scripts/smoke-runtime-tool-compatibility.mjs：扩展实际 edit schema、参数传递和第六个模块匹配验证。
+- docs/runtime-tool-compatibility.md：记录 occurrence 用法、互斥关系和安全边界。
+- progress.md：仅追加本轮记录；koi-pond、plugin-preset、command-description 等同时存在的修改未由本任务编辑。
+- 回滚：本轮开始时上述四个实现/测试/文档文件已有上一任务改动，按本轮 diff 分块反向应用以只移除 occurrence 支持；随后执行 pnpm run build。保留 progress.md 历史，不使用整文件 restore 覆盖前序 grep/read 兼容。
+
+## 2026-09-08 - Task: 鱼塘按本地时间自动切换四时段与日光
+### What was done
+- 使用电脑本地时间划分清晨 05–08、日间 08–17、傍晚 17–19、夜间 19–次日05；原切换按钮变为只读时段提示。
+- 显示期间每秒校对时段，恢复显示与焦点时立即校对；按分钟更新背景及缓存光影，不联网、不获取位置、不改系统时间。
+- 清晨和傍晚以现有日间背景调色，夜间保留独立夜景；增加水域内柔光束和叶影、随时刻移动及轻微明暗变化，参与现有折射，减少动态效果时停止明暗变化。
+### Testing
+- node --check assets/koi-pond.js 通过；五组定向 Vitest 共 32 项通过，新增所有整点分界、跨午夜、本地时钟回拨与分钟去重检查。
+- 独立隐藏 Electron 使用页面内模拟时钟验证四时段和跨午夜，原有投食、折射、点击限制、禅模式、日夜资源及存档回归通过；未修改操作系统时间。
+- 首两次冒烟在大尺寸截图遇到 UnknownVizError；将调整尺寸后的等待从 250ms 增至 1000ms 后完整通过。输出 C:\Users\karma617\AppData\Local\Temp\dsh-koi-smoke-j18mTP，包含四时段截图；已检查傍晚截图。
+- 未打包、未重启主壳；日光为二维美术近似，未做全硬件帧率验证。
+### Notes
+- assets/koi-pond.js：本地时段同步、只读提示、晨昏调色、缓存日光及恢复显示同步。
+- tests/koi-pond-time.spec.mjs：新增时段边界与本地时间同步测试。
+- scripts/smoke-koi-pond.mjs：用页面模拟时钟替代手动按钮，增加四时段截图和断言，延长大尺寸截图等待。
+- docs/koi-pond.md：说明时段规则、校对机制、移除手动切换及光影近似边界。
+- progress.md：追加本轮验证与回滚记录，保留其他任务历史。
+- 回滚：按本轮 diff 反向移除 assets/koi-pond.js 的自动时段与光影修改、恢复 scripts/smoke-koi-pond.mjs 的手动日夜验证及 docs/koi-pond.md 昼夜说明；执行 Remove-Item -LiteralPath tests/koi-pond-time.spec.mjs。保留此前未提交的不规则岸线改动与进度历史，不使用整文件 git restore。
+
+## 2026-09-08 - Task: 修复新版 DSH 文件资源管理器打开返回 502
+### What was done
+- 保留新版 DSH 的“打开”菜单、应用探测与其他应用启动路径，仅将 Windows 文件资源管理器选项交给 Electron 主进程打开，绕开 Runtime 子进程内返回 `launch-failed` 的 PowerShell 启动链。
+- 新增主世界模块兼容注入和受控 IPC；请求仅接受已就绪 DSH 主窗口的主 frame，并再次校验绝对路径、NUL、目录存在性及原生打开结果。
+- 上游 open-in-app 客户端结构不匹配或桌面桥不存在时保持 DSH 原行为，不阻塞页面加载；同步补充兼容范围文档。
+### Testing
+- open-in-app 专项 Vitest 3/3 通过，覆盖 Explorer 走桌面桥、Cursor 保留原 HTTP 路由、不兼容模块不改写、路径与原生错误校验。
+- 使用本机已安装 DSH 0.1.3-alpha.2 的真实 `dsh-client-ui-open-in-app/lib/client.js` 验证：注入锚点匹配，`/open-in-app/open` 原路由仍保留。
+- `pnpm run typecheck`、`pnpm test` 全量 35 文件/248 测试、`pnpm run build` 均通过；`git diff --check` 无本轮空白错误，仅提示 progress.md 既有 CRLF/LF 转换。
+- 未生成安装包、未重启当前桌面壳，也未执行打包后真实按钮点击；最终安装态仍需在目标电脑重打包安装后确认。测试环境 Node v22.22.0 低于项目声明的 Node >=24 <25，pnpm 输出引擎警告。
+### Notes
+- src/open-in-app-compatibility.ts：新增 Explorer 目录校验、主世界客户端工厂改写及安装钩子。
+- src/preload.ts：安装 open-in-app 兼容钩子并暴露受限 Explorer IPC 桥。
+- src/main.ts：新增可信 DSH 主 frame 的 Explorer 打开处理；保留同文件既有命令说明汉化改动。
+- tests/open-in-app-compatibility.spec.ts：新增模块路由与目录打开回归测试。
+- docs/open-in-app-compatibility.md：记录 502 场景、兼容范围和请求边界。
+- progress.md：仅在末尾追加本轮记录，未改写既有历史。
+- 回滚：按本轮 diff 从 src/main.ts 与 src/preload.ts 反向移除 `open-in-app-compatibility` 导入、注入/API/IPC 块，执行 `Remove-Item -LiteralPath src/open-in-app-compatibility.ts,tests/open-in-app-compatibility.spec.ts,docs/open-in-app-compatibility.md`，再运行 `pnpm run build`；保留 progress.md 历史及其他未提交改动。
+
+## 2026-09-08 - Task: 鱼塘支持自动与手动时段设置
+### What was done
+- 右上角时段提示改为下拉选择，提供自动及手动清晨、日间、傍晚、夜间；默认自动，手动选择立即生效并锁定光照代表时刻，切回自动立即恢复本地时间。
+- 本机保存时段选择并在重开后恢复；保存失败保留当次效果并提示，不修改鱼塘存档结构或 DSH 核心。
+### Testing
+- node --check assets/koi-pond.js 与五组定向 Vitest 共 32 项通过，补充手动四时段、时钟变化不覆盖、切回自动断言。
+- 独立隐藏 Electron 冒烟通过，真实下拉 change 事件验证四时段、页面重载恢复手动设置、恢复自动及原有互动/禅模式/小窗口回归。输出 C:\Users\karma617\AppData\Local\Temp\dsh-koi-smoke-9WClVq。
+- 未打包、未重启正在运行的主壳；git diff --check 通过。
+### Notes
+- assets/koi-pond.html：时段下拉框替代只读按钮。
+- assets/koi-pond.css：新增下拉框与键盘焦点样式。
+- assets/koi-pond.js：自动/手动时刻选择与本地偏好保存、恢复。
+- tests/koi-pond-time.spec.mjs：扩展手动锁定与自动恢复断言。
+- scripts/smoke-koi-pond.mjs：新增下拉选择、重载保存与恢复自动验证。
+- docs/koi-pond.md：更新设置方式、保存及手动光照说明。
+- progress.md：仅追加本轮证据。
+- 回滚：按本轮 diff 反向还原上述鱼塘文件的下拉选择、偏好存取及新增测试，保留前序自动时段、光影与不规则边界；不要整文件 restore 覆盖未提交前序修改。浏览器 localStorage 的 koi-pond-time-setting 键可保留，旧代码不会读取。

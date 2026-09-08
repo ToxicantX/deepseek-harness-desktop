@@ -86,18 +86,53 @@ app.whenReady().then(async () => {
   win.webContents.on('console-message', (_event, level, message) => { if (level >= 3) errors.push(message); });
   const js = source => win.webContents.executeJavaScript(source);
   await delay(800);
+  await js(\`window.RealDate = Date;
+    window.setPondHour = hour => {
+      window.Date = class extends window.RealDate {
+        constructor(...args) { super(...(args.length ? args : [2026,8,8,hour,0,0])); }
+      };
+      window.dispatchEvent(new Event('focus'));
+    };
+    window.setPondHour(12);\`);
+  for (const [hour, expected] of [[5,'dawn'],[8,'day'],[17,'dusk'],[19,'night'],[0,'night']]) {
+    await js('window.setPondHour(' + hour + ')');
+    assert.equal(await js('document.body.dataset.period'), expected);
+    await delay(100);
+    await fs.writeFile(join(directory, 'pond-clock-' + hour + '.png'), (await win.webContents.capturePage()).toPNG());
+  }
+  await js('window.setPondHour(12)');
+  for (const manual of ['dawn', 'day', 'dusk', 'night']) {
+    await js("document.getElementById('light').value = '" + manual + "'; document.getElementById('light').dispatchEvent(new Event('change')); window.setPondHour(9);");
+    assert.equal(await js('document.body.dataset.period'), manual, 'Manual periods must ignore the clock');
+  }
+  win.webContents.reload();
+  await new Promise(resolve => win.webContents.once('did-finish-load', resolve));
+  await delay(500);
+  assert.equal(await js("document.getElementById('light').value"), 'night', 'Manual setting must survive reload');
+  assert.equal(await js('document.body.dataset.period'), 'night');
+  await js(\`window.RealDate = Date;
+    window.setPondHour = hour => {
+      window.Date = class extends window.RealDate {
+        constructor(...args) { super(...(args.length ? args : [2026,8,8,hour,0,0])); }
+      };
+      window.dispatchEvent(new Event('focus'));
+    };
+    document.getElementById('light').value = 'auto';
+    document.getElementById('light').dispatchEvent(new Event('change'));
+    window.setPondHour(12);\`);
+  assert.equal(await js('document.body.dataset.period'), 'day', 'Automatic mode must resume immediately');
   assert.equal(await js("document.querySelectorAll('.fish-card').length"), 4);
   // Compare at the actual design sizes, with live UI and no open fish profile.
   await js("Promise.all(['day','night'].map(name => { const image = new Image(); image.src = 'koi-pond-' + name + '.webp'; return image.decode(); }))");
   win.setContentSize(1723, 913);
-  await delay(250);
+  await delay(1000);
   await fs.writeFile(join(directory, 'pond-design-day.png'), (await win.webContents.capturePage()).toPNG());
-  await js("document.getElementById('light').click()");
+  await js("window.setPondHour(document.body.dataset.period === 'night' ? 12 : 20)");
   assert.equal(await js("document.body.classList.contains('night')"), true);
   win.setContentSize(1280, 679);
   await delay(250);
   await fs.writeFile(join(directory, 'pond-design-night.png'), (await win.webContents.capturePage()).toPNG());
-  await js("document.getElementById('light').click()");
+  await js("window.setPondHour(document.body.dataset.period === 'night' ? 12 : 20)");
   win.setContentSize(1280, 720);
   await delay(250);
   await pond.open();
@@ -147,7 +182,7 @@ app.whenReady().then(async () => {
   assert(await js('window.refractionHistory.every(sample => sample.waveCount <= 3)'), 'Feeding and eating must share the wave budget');
   await delay(2700);
   for (const theme of ['day', 'night']) {
-    if (theme === 'night') await js("document.getElementById('light').click()");
+    if (theme === 'night') await js("window.setPondHour(document.body.dataset.period === 'night' ? 12 : 20)");
     await js("document.getElementById('ripple').click(); document.getElementById('pond').dispatchEvent(new PointerEvent('pointerdown', {clientX:610,clientY:400}));");
     await delay(400);
     assert.equal(await js('window.pellets'), 0);
@@ -189,7 +224,7 @@ app.whenReady().then(async () => {
   })()\`);
   refractionTiming.overlap3KernelMs = overlapTiming;
   await fs.writeFile(join(directory, 'refraction-timing.json'), JSON.stringify(refractionTiming, null, 2));
-  await js("document.getElementById('light').click()");
+  await js("window.setPondHour(document.body.dataset.period === 'night' ? 12 : 20)");
   await js("document.getElementById('feed').click(); document.getElementById('zen').click()");
   assert.equal(await js("document.getElementById('zen').getAttribute('aria-pressed')"), 'true');
   const onlyCanvasVisible = "Array.from(document.querySelector('main').children).filter(e => getComputedStyle(e).display !== 'none').map(e => e.id)";
@@ -209,15 +244,15 @@ app.whenReady().then(async () => {
   assert.equal(await js("getComputedStyle(document.querySelector('footer')).display"), 'flex');
   assert.equal(await js("document.getElementById('notice').classList.contains('show')"), false);
   assert.equal(await js("document.querySelector('.fish-card[aria-pressed=true] .fish-copy').firstChild.textContent"), '荷风');
-  await js("document.getElementById('light').click()");
-  assert.equal(await js("document.getElementById('light').getAttribute('aria-pressed')"), 'true');
-  await js("document.getElementById('light').click()");
+  await js("window.setPondHour(document.body.dataset.period === 'night' ? 12 : 20)");
+  assert.equal(await js("document.body.dataset.period"), 'night');
+  await js("window.setPondHour(document.body.dataset.period === 'night' ? 12 : 20)");
   await pond.recordDialogue('smoke', 'one');
   await pond.recordDialogue('smoke', 'one');
   assert.equal((await js('window.koiPond.getState()')).dialogues, 1);
   await delay(350);
   await fs.writeFile(join(directory, 'pond-day.png'), (await win.webContents.capturePage()).toPNG());
-  await js("document.getElementById('light').click()");
+  await js("window.setPondHour(document.body.dataset.period === 'night' ? 12 : 20)");
   await delay(200);
   await fs.writeFile(join(directory, 'pond-night.png'), (await win.webContents.capturePage()).toPNG());
   win.setSize(680, 520);

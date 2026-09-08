@@ -20,6 +20,7 @@ import {
   type WebContents,
 } from 'electron'
 import { MINIMUM_DSH_VERSION, type RuntimePreference } from './catalog.ts'
+import { createCommandDescriptionLocalizerScript } from './command-description-localizer.ts'
 import { DesktopPetController as PetEventController, type PetRendererState as PetProtocolState, type PetWebSocket } from './desktop-pet.ts'
 import { openTerminal } from './cli-shell.ts'
 import { KoiPondWindow } from './koi-pond-window.ts'
@@ -32,6 +33,7 @@ import { PluginManager, validatePackageName } from './plugin-manager.ts'
 import { PluginIsolation, thirdParty } from './plugin-isolation.ts'
 import { loadAndValidatePlugins } from './plugin-client-health.ts'
 import { shouldRecoverModelCatalog } from './model-catalog-recovery.ts'
+import { openExplorerDirectory } from './open-in-app-compatibility.ts'
 import { readUsageSnapshot, type UsageScanProgress } from './usage-monitor.ts'
 import { PluginRestartCoordinator } from './plugin-restart.ts'
 import { RuntimeController, type RuntimeView } from './runtime-controller.ts'
@@ -146,6 +148,7 @@ function injectSkinMarket(window: BrowserWindow): void {
     return
   }
   void (async () => {
+    await window.webContents.executeJavaScript(createCommandDescriptionLocalizerScript())
     await window.webContents.executeJavaScript(createFileContextInjectorScript())
     await window.webContents.executeJavaScript(createSkinMarketInjectorScript())
     const active = await shellSkinStore?.activeClientBundle()
@@ -1016,6 +1019,13 @@ ipcMain.handle('shell-skins:uninstall', async (event, skinId: unknown) => {
   const result = await service.uninstall(String(skinId))
   if (active) await event.sender.executeJavaScript(createSkinDisposerScript())
   return result
+})
+
+ipcMain.handle('open-in-app:explorer', async (event, path: unknown) => {
+  if (!fromTrustedDshWindow(event) || event.senderFrame !== event.sender.mainFrame) {
+    throw new Error('文件资源管理器请求来源无效')
+  }
+  await openExplorerDirectory(path, value => shell.openPath(value))
 })
 
 ipcMain.handle('pet:respond', async (event, approvalId: unknown, outcome: unknown) => {

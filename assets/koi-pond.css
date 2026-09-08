@@ -43,6 +43,8 @@ button {
 button:hover { background: #274c3ddf; border-color: #d7c896; }
 button:focus-visible, summary:focus-visible, input:focus-visible { outline: 2px solid #f4dda0; outline-offset: 3px; }
 .window-tools button { height: calc(43 * var(--unit)); min-width: calc(42 * var(--unit)); padding: 0 calc(12 * var(--unit)); font-size: calc(15 * var(--unit)); }
+#light { font: inherit; font-size: calc(15 * var(--unit)); height: calc(43 * var(--unit)); padding: 0 8px; border: 1px solid #aa9f6870; border-radius: 9px; background: #052c27; color: var(--ivory); cursor: pointer; }
+#light:focus-visible { outline: 2px solid #f4dda0; outline-offset: 3px; }
 #return { min-width: calc(86 * var(--unit)); font-family: "SimSun", serif; font-weight: bold; letter-spacing: 2px; }
 aside {
   position: absolute; top: 17.2%; right: 1.75%; width: calc(260 * var(--unit));
