@@ -22,6 +22,7 @@ import {
 import { MINIMUM_DSH_VERSION, type RuntimePreference } from './catalog.ts'
 import { DesktopPetController as PetEventController, type PetRendererState as PetProtocolState, type PetWebSocket } from './desktop-pet.ts'
 import { openTerminal } from './cli-shell.ts'
+import { KoiPondWindow } from './koi-pond-window.ts'
 import { McpManager, npmGlobalRootsFromEnvironment, type McpList } from './mcp-manager.ts'
 import { mutateMcpWithRuntime } from './mcp-restart.ts'
 import { PersonalizationManager } from './personalization-manager.ts'
@@ -88,6 +89,7 @@ let mcpMutationActive = false
 const pluginRestartCoordinator = new PluginRestartCoordinator()
 let updater: ShellUpdater | undefined
 let petWindow: PetWindowController | undefined
+let koiPond: KoiPondWindow | undefined
 let petEvents: PetEventController | undefined
 let disposePetEvents: (() => void) | undefined
 let activePetSession: string | undefined
@@ -792,12 +794,21 @@ function installMenu(): void {
         { label: '关于 DeepSeek Harness', click: () => { void showAbout() } },
       ],
     },
+    { label: '后院鱼塘', click: () => { void koiPond?.open().catch(logFatalError) } },
   ]
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
   syncMainMenuVisibility()
 }
 
 async function startApplication(): Promise<void> {
+  try {
+    koiPond = new KoiPondWindow(
+      join(app.getPath('userData'), 'koi-pond.json'),
+      join(app.getAppPath(), 'assets', 'koi-pond.html'),
+      join(moduleDirectory, 'koi-pond-preload.cjs'),
+      logFatalError,
+    )
+  } catch (error) { logFatalError(error) }
   mainUiLoaded = false
   clearMainMenu()
   latestView = {
@@ -929,6 +940,12 @@ function logFatalError(error: unknown): void {
   const detail = error instanceof Error ? (error.stack ?? error.message) : String(error)
   appendFileSync(join(directory, 'desktop.log'), `[${new Date().toISOString()}] ${detail}\n`, 'utf8')
 }
+
+ipcMain.on('pond:dialogue', (event, sessionId: unknown, requestId: unknown) => {
+  if (!fromTrustedDshWindow(event) || event.senderFrame !== event.sender.mainFrame
+    || typeof sessionId !== 'string' || typeof requestId !== 'string') return
+  void koiPond?.recordDialogue(sessionId, requestId).catch(logFatalError)
+})
 
 ipcMain.on('pet:set-active-session', (event, value: unknown) => {
   if (!fromTrustedDshWindow(event)) return
@@ -1179,7 +1196,7 @@ else {
     pluginManager?.dispose()
     tray?.destroy()
     tray = undefined
-    void Promise.all([stopPet(), controller?.stop()]).finally(() => { app.quit() })
+    void Promise.all([stopPet(), controller?.stop(), koiPond?.stop()]).finally(() => { app.quit() })
   })
   app.whenReady().then(startApplication).catch((error: unknown) => {
     logFatalError(error)

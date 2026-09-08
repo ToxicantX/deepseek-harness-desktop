@@ -1,6 +1,47 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createClientBundleAdapterScript, createSkinLocaleAdapter, createSkinSessionsAdapter } from '../src/skin-market-injector.ts'
 
+describe('skin settings palette icon', () => {
+  it('keeps the settings toggle circular at its existing size', () => {
+    const script = createClientBundleAdapterScript("window.__ModuleLoader__.load({ id: 'palette-probe', factory() { return { apply() {} } } })", 'example.palette')
+    const start = script.indexOf("settingsToggle = ownHost('settings.toggle', ")
+    const end = script.indexOf(');', start)
+    const ownHost = vi.fn()
+    Function('ownHost', 'let settingsToggle; ' + script.slice(start, end + 2))(ownHost)
+    expect(ownHost).toHaveBeenCalledWith('settings.toggle', expect.objectContaining({
+      width: '38px', height: '38px', borderRadius: '50%',
+    }))
+  })
+
+  it('creates a palette and paint wells in the SVG namespace', () => {
+    const script = createClientBundleAdapterScript("window.__ModuleLoader__.load({ id: 'palette-probe', factory() { return { apply() {} } } })", 'example.palette')
+    const start = script.indexOf('const settingsNs=')
+    const end = script.indexOf('settingsToggle.appendChild(settingsIcon);', start)
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const icons: any[] = []
+    const document = {
+      createElementNS(namespace: string, tag: string) {
+        expect(namespace).toBe('http://www.w3.org/2000/svg')
+        return {
+          tag, attributes: {} as Record<string, string>, children: [] as any[],
+          setAttribute(name: string, value: string) { this.attributes[name] = value },
+          append(...children: any[]) { this.children.push(...children) },
+        }
+      },
+    }
+    Function('document', 'settingsToggle', script.slice(start, end) + 'settingsToggle.appendChild(settingsIcon);')(
+      document, { appendChild: (icon: any) => icons.push(icon) },
+    )
+    expect(icons[0].attributes).toMatchObject({
+      'data-icon': 'palette', viewBox: '0 0 24 24', width: '20', height: '20',
+      stroke: 'currentColor', 'aria-hidden': 'true',
+    })
+    expect(icons[0].children.filter((child: any) => child.tag === 'path')).toHaveLength(1)
+    expect(icons[0].children.filter((child: any) => child.tag === 'circle')).toHaveLength(4)
+  })
+})
+
 describe('shell skin locale compatibility', () => {
   it('supports namespace binding with language fallback and interpolation', () => {
     const locale = createSkinLocaleAdapter('zh-CN')

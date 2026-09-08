@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { installConversationReplayModuleHook, runIsolatedShellInjection } from './conversation-replay-injector.ts'
 import { injectDesktopReplayClient, installDesktopReplayClientHook } from './conversation-replay-client-injector.ts'
+import { injectKoiPondDialogue, installKoiPondDialogueHook } from './koi-pond-injector.ts'
 import { injectCustomProviderUserAgentFactorySource, installCustomProviderUserAgentHook } from './custom-provider-user-agent-injector.ts'
 import { installUsageMonitor } from './usage-monitor-renderer.ts'
 import type { UsageScanProgress } from './usage-monitor.ts'
@@ -29,6 +30,22 @@ runIsolatedShellInjection('桌面壳自定义提供方 User-Agent 注入启动�
 
 contextBridge.exposeInMainWorld('dshDesktopFiles', {
   getAbsolutePath: (file: File): string => webUtils.getPathForFile(file),
+})
+
+runIsolatedShellInjection('鱼塘成长观察启动失败', () => {
+  contextBridge.executeInMainWorld({
+    func: installKoiPondDialogueHook,
+    args: [injectKoiPondDialogue.toString()],
+  })
+})
+
+window.addEventListener('message', (event) => {
+  if (event.source !== window || event.origin !== window.location.origin
+    || event.data?.type !== 'dsh/pond-dialogue') return
+  const { sessionId, requestId } = event.data
+  if (typeof sessionId !== 'string' || sessionId.length === 0 || sessionId.length > 128
+    || typeof requestId !== 'string' || requestId.length === 0 || requestId.length > 128) return
+  ipcRenderer.send('pond:dialogue', sessionId, requestId)
 })
 
 contextBridge.exposeInMainWorld('dshDesktopSkins', {

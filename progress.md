@@ -721,3 +721,115 @@
 git restore --source=c51f91825029cf274b8b7f29ac9cfea747e85705 -- src/conversation-replay-injector.ts src/preload.ts src/shutdown-hook.ts tests/conversation-replay-shell-injector.spec.ts docs/conversation-edit-retry.md
 Remove-Item -LiteralPath 'src/conversation-replay-host-injector.ts','src/conversation-replay-client-injector.ts','tests/conversation-replay-adapter.spec.ts','scripts/smoke-same-session-replay.mjs','scripts/smoke-installed-session-replay.mjs'
 ```
+
+## 2026-09-08 - Task: 修复主题右下角设置入口并使用 SVG 调色盘图标
+### What was done
+- 修正错误拼接的 SVG 命名空间，解决按钮有边框但图标空白的问题。
+- 将设置齿轮替换为调色盘轮廓与四个颜料孔，维持 20×20 图标、38×38 按钮、继承主题前景色及原点击/键盘行为。
+### Testing
+- 修复前回归稳定复现命名空间实际为 http://www.w3.org://2000://svg，与标准 SVG 命名空间不一致。
+- node node_modules/vitest/vitest.mjs run tests/skin-market-injector.spec.ts：5 项通过。
+- Node 24 下 pnpm run build 通过，包含 TypeScript 检查；git diff --check 通过。
+- Chromium 实际执行同一图标创建代码，验证原生 SVGSVGElement、标准命名空间、4 个圆形与 20×20 尺寸；已检查截图 C:\Users\karma617\AppData\Local\Temp\dsh-palette-icon.png，调色盘图标正常显示。
+- 未打安装包或重启正在运行的桌面壳；主题内实际入口仍待新构建加载后验收。
+### Notes
+- src/skin-market-injector.ts：仅替换设置入口 SVG 的命名空间及图形，保留按钮交互。
+- tests/skin-market-injector.spec.ts：执行生成的图标代码并验证命名空间、属性和图元。
+- docs/shell-skin-marketplace.md：说明设置入口调色盘图标与主题颜色继承。
+- progress.md：追加本轮验证和回滚记录。
+- 回滚（保留日志）：git restore --source=f28bae342ed99250cc9d8ea8b65f0e8a2f6532ac -- src/skin-market-injector.ts tests/skin-market-injector.spec.ts docs/shell-skin-marketplace.md
+
+## 2026-09-08 - Task: 将调色盘设置按钮边框改为圆形
+### What was done
+- 仅将右下角设置按钮圆角设为 50%，保留 38×38 尺寸、调色盘图标及原交互。
+### Testing
+- tests/skin-market-injector.spec.ts：6 项通过，新增断言验证按钮尺寸与圆形圆角。
+- git diff --check 通过；未重新打包或重启当前应用。
+### Notes
+- src/skin-market-injector.ts：设置入口 borderRadius 从 9px 调整为 50%。
+- tests/skin-market-injector.spec.ts：新增圆形按钮样式回归。
+- docs/shell-skin-marketplace.md：记录圆形入口尺寸。
+- progress.md：追加本轮记录。
+- 回滚方式：只将 settings.toggle 的 borderRadius 从 50% 恢复为 9px，移除本轮新增的圆形样式测试与文档描述；保留上一轮 SVG 修复和历史日志。
+
+## 2026-09-08 - Task: 完成壳侧后院鱼塘互动与对话成长
+### What was done
+- 接续中断任务已有的鱼塘接线与存档实现，完成「帮助」右侧「后院鱼塘」独立窗口及本地绘制的日式池塘，不修改 DSH 核心或真实会话数据。
+- 完成投喂追食、抚水涟漪、昼夜切换、键盘互动、锦鲤档案与改名；对话成功发送推进等级，每 100 级舒展体型鳍尾，500 级异性配对产卵，再经 5 次对话孵化。
+- 保留每条鱼一次繁育、鱼卵合计 16 位、无离线惩罚的规则，补齐窗口关闭后成长与存档恢复验证；修复较长／转义消息 ID 写入后被存档校验错误拒绝的问题。
+- 补充使用说明、兼容边界、回滚命令与可复跑的独立 Electron 冒烟脚本，保留此前主题设置按钮相关改动。
+### Testing
+- 使用本机 Runtime 附带 Node 24.19.0。pnpm test：25 个测试文件、169 项全部通过；其中鱼塘专项 14 项覆盖成长、配对孵化、容量、去重、存档、改名、失败隔离、模块转换组合与入口资源契约。
+- pnpm run build 通过，包含 TypeScript 类型检查；git diff --check 通过。保留构建工具现有 CommonJS 提示，不将其列为产品故障。
+- 已只读核对当前安装的 Runtime 0.1.3-alpha.1：原会话重试与成长观察组合后的真实模块工厂语法通过；以模拟 API 执行真实 prompt 方法体，成功返回并只发出一次成长通知，原 Runtime 文件内容不变。
+- 独立隐藏 Electron 冒烟通过：真实 preload IPC、单窗口、改名持久化、饲料绘制与 25 秒过期前被鱼儿吃完、抚水不投食、昼夜、消息去重、关闭窗口后成长、重开、重新加载存档与 680×520 视口。
+- 冒烟结果与日间／夜间／小窗口截图：C:\Users\karma617\AppData\Local\Temp\dsh-koi-smoke-BsbTt6；已目视检查日间和小窗口截图，并降低池底石纹对比度，避免背景抢占锦鲤视觉。
+- 初次组合测试误把隔离包装函数当成原始工厂断言，已改为检查实际生成的类方法；初次隐藏窗口动画受原生后台节流影响，改为仅在临时测试副本启用 offscreen 后验证追食通过。重新打开测试补充 window-all-closed 处理，避免独立测试应用提前退出。
+- 直接调用 Vitest 的一次全量运行因已有发布脚本测试缺少 npm_execpath 失败，改用项目规定的 pnpm test 后全量通过；没有为此改动发布测试或发布脚本。
+- 未打安装包、未重启或终止当前桌面壳，未发送真实模型请求。主壳原生菜单点击、真实聊天至成长的完整桥接、安装包资源仍需新构建人工验收；独立 Electron 验证使用临时存档和临时转译窗口副本，不等同于整包验收。
+### Notes
+- src/main.ts：接续鱼塘控制器初始化、帮助右侧入口、可信主窗口成长通知转发与退出存档等待。
+- src/preload.ts：接续主页面成长观察安装与同窗口消息通知转发。
+- src/conversation-replay-injector.ts：接续模块转换按注册顺序组合，避免成长观察覆盖已有原会话重试增强。
+- src/koi-pond-injector.ts：保留壳侧成功发送观察器，按会话与请求通知成长，错误不改变聊天结果。
+- src/koi-pond-store.ts：完成独立成长、繁育和原子存档实现的验证，并修复去重键长度校验。
+- src/koi-pond-window.ts：保留独立隔离窗口、窗口来源校验、读取／改名 IPC 和状态广播。
+- src/koi-pond-preload.ts：提供独立鱼塘读取、改名和状态订阅桥接。
+- tsdown.config.ts：接续鱼塘专用 preload 的 CommonJS 构建入口。
+- assets/koi-pond.html：新增中文鱼塘结构、工具、档案和成长说明。
+- assets/koi-pond.css：新增庭院风格、浮层布局、焦点样式及小窗口适配。
+- assets/koi-pond.js：新增 Canvas 池塘、游动追食、成长形态、涟漪、昼夜、档案与键盘交互。
+- tests/koi-pond.spec.ts：新增 14 项存档、规则、观察器组合与入口打包契约测试。
+- scripts/smoke-koi-pond.mjs：新增只读 Runtime 核对与独立隐藏 Electron 互动冒烟，保留临时截图和结果。
+- docs/koi-pond.md：新增玩法、统计口径、存档、故障边界、验证及精确回滚说明。
+- progress.md：仅在末尾追加本轮结果、证据和回滚记录。
+- 回滚点：当前任务尚未提交时，可执行 git restore --source=HEAD -- src/main.ts src/preload.ts src/conversation-replay-injector.ts tsdown.config.ts，再按 docs/koi-pond.md 的 Remove-Item -LiteralPath 明确文件清单移除本功能新增文件，执行 pnpm run build；保留本日志、用户存档及已有主题设置改动。若这些文件后续又有其他修改，改用本功能提交／补丁精确回退。
+
+## 2026-09-08 - Task: 增加鱼塘禅模式与右键退出
+### What was done
+- 在鱼塘底部互动工具栏增加「禅」按钮，进入后隐藏所有池塘内文字、面板、按钮、通知及选中标记，仅显示池塘画面，保持原有游动、互动与成长。
+- 单击鼠标右键退出禅模式并恢复原界面和所选锦鲤；右键不再误触投喂，退出时拦截右键菜单，不残留禅模式期间的成长提示。
+### Testing
+- node scripts/smoke-koi-pond.mjs 通过：独立隐藏 Electron 中确认仅 Canvas 可见、成长期间通知仍隐藏、右键不投食、右键菜单事件被拦截、退出恢复全部面板与原选中锦鲤；原有投喂、昼夜、存档等冒烟检查继续通过。
+- 鱼塘专项 tests/koi-pond.spec.ts：14 项全部通过；git diff --check 通过。
+- 已目视检查 C:\Users\karma617\AppData\Local\Temp\dsh-koi-smoke-lbQDwa\pond-zen.png，画面没有文字、工具栏或选中标记。
+- 本轮仅修改页面资源、冒烟脚本与文档，未重新构建安装包，未重启或操作当前桌面壳实例；实际窗口中的鼠标操作仍可在加载新资源后人工复核。
+### Notes
+- assets/koi-pond.html：工具栏新增带退出说明的「禅」按钮。
+- assets/koi-pond.css：禅模式隐藏 Canvas 以外的界面元素及画布焦点边框。
+- assets/koi-pond.js：增加禅模式状态、进入与右键退出处理，隐藏通知和辅助标记，限制左键触发投喂。
+- scripts/smoke-koi-pond.mjs：新增禅模式隐藏、成长通知、右键退出、界面恢复断言及截图。
+- docs/koi-pond.md：补充禅模式使用方式与状态保持说明。
+- progress.md：仅追加本轮变更与验证记录。
+- 回滚方式：git restore --source=9151d32 -- assets/koi-pond.html assets/koi-pond.css assets/koi-pond.js scripts/smoke-koi-pond.mjs docs/koi-pond.md；保留本日志与用户鱼塘存档。该回滚点保留此前已完成的鱼塘功能。
+
+## 2026-09-08 - Task: 按日间和夜间设计稿重做鱼塘美术与界面
+### What was done
+- 使用用户提供的两张设计稿制作日间与夜间本地背景，分别保留碧绿水色／日照叶影和深蓝月光／暖灯，不以整体变暗代替夜景。
+- 重建朱印标题、金线花角面板、荷花冠饰、右侧真实锦鲤档案、底部投喂／玩水双按钮与返回入口；保留并移至右上角的日夜、禅模式按钮。
+- 清理原稿中烘焙的文字与面板，遮挡景物用邻近庭院纹理重建，禅模式下不残留固定文字；真实锦鲤继续独立绘制，保持成长、繁育、改名、投喂和右键退出禅模式。
+- 根据新池岸布局将游动与投喂限制在中央水域，默认独立窗口调整为 1280×720，保持小窗口可滚动档案；所有资源本地打包，不新增产品依赖或修改 DSH 核心。
+### Testing
+- Node 24.19.0 下 pnpm test：25 个文件、170 项全部通过；新增日夜 WebP、SVG 装饰及入口资源契约测试。
+- pnpm run build 通过，包括 TypeScript 类型检查；node --check assets/koi-pond.js 与 git diff --check 通过。构建工具保留现有 CommonJS 提示，未改动无关构建配置。
+- 独立隐藏 Electron 冒烟通过：两幅美术资源实际解码、日夜主题切换、投喂追食、玩水、改名、成长去重、禅模式隐藏和右键退出、返回按钮关闭独立鱼塘、关闭后成长与存档恢复、小窗口无页面横向溢出和面板隐藏横向滚动条。
+- 冒烟输出 C:\Users\karma617\AppData\Local\Temp\dsh-koi-smoke-L6fnXX，含 1723×913 日间、1280×679 夜间、普通窗口、禅模式和 680×520 小窗口截图。已目视检查日夜、禅模式及最终小窗口画面。
+- 美术迭代发现 OpenCV seamlessClone 会修改传入掩码，若事后计算羽化会导致原文字透出；已改为事前计算羽化覆盖率，重新导出并检查禅模式无文字残留。小窗口初次截图出现面板横向滚动条，已修复并复验。
+- 使用 Pillow／NumPy／OpenCV 对用户本地原稿进行确定性像素处理，未调用图像生成服务，原图未改写。背景 WebP 合计约 1.1 MiB，随已有 assets/* 规则打包。
+- 本轮未打安装包、未重启或操作当前运行的桌面壳、未发送真实模型请求；独立窗口冒烟不等于安装包或主壳整体运行验收。
+### Notes
+- assets/koi-pond-day.webp：新增清理固定 UI 后的日间背景。
+- assets/koi-pond-night.webp：新增清理固定 UI 后的夜间背景。
+- assets/koi-pond-lotus.svg：新增本地矢量荷花冠饰。
+- assets/koi-pond-frame.svg：新增本地矢量金线花角框。
+- assets/koi-pond.html：调整设计稿标题与按钮布局、增加背景预加载和返回入口，保留真实交互控件。
+- assets/koi-pond.css：按设计稿重建字号比例、面板位置、冠饰、花角、工具栏和昼夜配色，保持禅模式与小窗口适配。
+- assets/koi-pond.js：加载独立日夜背景、等比铺满，调整锦鲤与水域匹配，增加夜间微光及返回操作，保留存档桥接和成长规则。
+- src/koi-pond-window.ts：仅将默认窗口尺寸改为 1280×720。
+- scripts/prepare-koi-art.py：新增可复跑的本地原稿 UI 清理、纹理补齐与 WebP 导出脚本。
+- scripts/smoke-koi-pond.mjs：补充设计尺寸截图、美术解码、返回按钮、小窗口检查，保留已有禅模式及成长测试。
+- tests/koi-pond.spec.ts：新增日夜场景与冠饰、花角资源存在及格式检查。
+- docs/koi-pond.md：更新按钮位置、玩法范围、本地美术来源、原图遮挡重建及还原边界。
+- progress.md：仅追加本轮结果、验证证据和回滚方式。
+- 还原边界：被原面板遮住的景物属于重建，并非原始隐藏图层；本机字体、动态锦鲤及额外保留的日夜／禅入口与设计稿存在差异，不宣称像素级 100% 一致。
+- 本轮回滚补丁：C:\Users\karma617\AppData\Local\Temp\dsh-koi-art-rollback-51cois3y\revert-art-keep-zen.patch，基于 9151d32 及已有禅模式差异构造，已通过 git apply --check --ignore-space-change 验证。执行 git apply --ignore-space-change "C:\Users\karma617\AppData\Local\Temp\dsh-koi-art-rollback-51cois3y\revert-art-keep-zen.patch"，再执行 Remove-Item -LiteralPath assets/koi-pond-day.webp, assets/koi-pond-night.webp, assets/koi-pond-lotus.svg, assets/koi-pond-frame.svg, scripts/prepare-koi-art.py，最后 pnpm run build；保留此前禅模式、用户存档及本日志。该补丁保存在临时目录，长期留存请先备份，后续继续修改文件时应重新核对补丁。
