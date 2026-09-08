@@ -61,17 +61,8 @@ function feature() {
   return hook.createFeature(clientRequire().require)
 }
 
-function chat(...nodes: any[]) {
-  const byKey = new Map(nodes.map(node => [node.key, node]))
-  return { order: nodes.map(node => node.key), nodes: byKey }
-}
-
 function user(key: string, seq: number, text = key) {
   return { key, kind: 'user', data: { seq, content: [{ type: 'text', text }] } }
-}
-
-function tail(key: string, seq: number) {
-  return { key, kind: 'turn-tail', data: { seq } }
 }
 
 describe('desktop shell conversation replay injector', () => {
@@ -386,7 +377,7 @@ describe('desktop shell conversation replay injector', () => {
     await new Promise(resolve => setTimeout(resolve, 0))
 
     expect(modules.import).toHaveBeenCalledWith('react')
-    expect(injectServices).toHaveBeenCalledWith(['slots', 'sessions', 'workspaces'], expect.any(Function))
+    expect(injectServices).toHaveBeenCalledWith(['slots', 'sessions'], expect.any(Function))
     expect(injectServices).toHaveBeenCalledTimes(1)
     expect(register).toHaveBeenCalledWith(expect.objectContaining({
       name: 'conversation.chat.node',
@@ -440,20 +431,6 @@ describe('desktop shell conversation replay injector', () => {
     expect(React.createElement.mock.calls.some(([type]) => type === undefined || type === null)).toBe(false)
   })
 
-  it('finds the completed turn immediately before a user message', () => {
-    const { previousCompletedTurnSeq } = feature()
-    const target = user('user-3', 31)
-    const snapshot = chat(
-      user('user-1', 2),
-      { key: 'step-1', kind: 'assistant-step', data: { seq: 3 } },
-      tail('tail-1', 14),
-      user('user-2', 17),
-      target,
-    )
-    expect(previousCompletedTurnSeq(snapshot, target)).toBe(14)
-    expect(previousCompletedTurnSeq(chat(target), target)).toBeUndefined()
-  })
-
   it('folds only text longer than 500 characters and keeps a short label', () => {
     const { isLongTextClip, textClipLabel } = feature()
     expect(isLongTextClip('a'.repeat(500))).toBe(false)
@@ -492,61 +469,48 @@ describe('desktop shell conversation replay injector', () => {
     ])
   })
 
-  it('forks before an older user turn, sends the edited content, then opens the child', async () => {
+  it.each([2, 21])('replays message %s in the original session without opening or creating a session', async (seq) => {
     const { replayMessage } = feature()
-    const target = user('user-2', 21, 'original')
-    const sourceSnapshot = { chat: chat(user('user-1', 2), tail('tail-1', 12), target), hasMore: false }
-    const prompt = vi.fn(async () => ({ ok: true, value: { accepted: true } }))
-    const source = { getSnapshot: () => sourceSnapshot, loadOlder: vi.fn(), readAttachment: vi.fn() }
-    const child = { prompt }
-    const fork = vi.fn(async () => 'child-session')
-    const open = vi.fn()
-    const ctx = {
-      sessions: {
-        binding: (id: string) => ({ session: id === 'source-session' ? source : child }),
-        fork,
-        open,
-        list: { getSnapshot: () => ({ byId: {} }) },
-      },
-      workspaces: { list: { getSnapshot: () => ({ items: [] }) } },
-    }
+    const target = user('target', seq, 'original')
+    const replay = vi.fn(async () => ({ ok: true }))
+    const ctx = { sessions: { binding: () => ({ session: { desktopReplay: replay } }), create: vi.fn(), fork: vi.fn(), open: vi.fn() } }
     await expect(replayMessage(ctx, {
-      sessionId: 'source-session', node: target, content: target.data.content, replacementText: 'edited',
-    })).resolves.toBe('child-session')
-    expect(fork).toHaveBeenCalledWith({ sessionId: 'source-session', atSeq: 12, increaseTitle: false })
-    expect(prompt).toHaveBeenCalledWith([{ type: 'text', text: 'edited' }], 'queue')
-    expect(open).toHaveBeenCalledWith('child-session')
+      sessionId: 'original-session', node: target, content: target.data.content, replacementText: 'edited',
+    })).resolves.toBe('original-session')
+    expect(replay).toHaveBeenCalledWith(seq, [{ type: 'text', text: 'edited' }])
+    expect(ctx.sessions.create).not.toHaveBeenCalled()
+    expect(ctx.sessions.fork).not.toHaveBeenCalled()
+    expect(ctx.sessions.open).not.toHaveBeenCalled()
   })
 
-  it('creates an empty session in the same Workspace when replaying the first user turn', async () => {
+  it('reports unsupported or rejected replay without falling back to a new session', async () => {
     const { replayMessage } = feature()
-    const target = user('user-1', 2, 'first')
+    const target = user('target', 2)
+    const source: any = {}
+    const ctx = { sessions: { binding: () => ({ session: source }), create: vi.fn() } }
+    const request = { sessionId: 'original', node: target, content: target.data.content }
+    await expect(replayMessage(ctx, request)).rejects.toThrow('Runtime')
+    source.desktopReplay = vi.fn(async () => ({ ok: false, error: { message: 'busy' } }))
+    await expect(replayMessage(ctx, request)).rejects.toThrow('busy')
+    expect(ctx.sessions.create).not.toHaveBeenCalled()
+  })
+
+  it('retries the complete original text and images on the same session', async () => {
+    const { replayMessage } = feature()
+    const target = user('target', 2, 'original\n' + 'long text '.repeat(100))
+    const content = [...target.data.content, { type: 'image', attachment: { attachmentId: 'image-1' } }]
+    const replay = vi.fn(async () => ({ ok: true }))
     const source = {
-      getSnapshot: () => ({ chat: chat(target), hasMore: false }),
-      loadOlder: vi.fn(),
-      readAttachment: vi.fn(),
+      desktopReplay: replay,
+      readAttachment: vi.fn(async () => ({ ok: true, value: {
+        attachment: { mediaType: 'image/png', name: 'image.png' }, data: new Uint8Array([65, 66, 67]),
+      } })),
     }
-    const prompt = vi.fn(async () => ({ ok: true, value: { accepted: true } }))
-    const child = { prompt }
-    const create = vi.fn(async () => 'fresh-session')
-    const open = vi.fn()
-    const ctx = {
-      sessions: {
-        binding: (id: string) => ({ session: id === 'source-session' ? source : child }),
-        create,
-        open,
-        list: { getSnapshot: () => ({ byId: { 'source-session': { cwd: 'D:\\project' } } }) },
-      },
-      workspaces: {
-        list: { getSnapshot: () => ({ items: [{ workspaceId: 'workspace-1', path: 'D:\\project', sessionIds: ['source-session'] }] }) },
-      },
-    }
-    await replayMessage(ctx, {
-      sessionId: 'source-session', node: target, content: target.data.content, replacementText: undefined,
-    })
-    expect(create).toHaveBeenCalledWith({ workspaceId: 'workspace-1' })
-    expect(prompt).toHaveBeenCalledWith([{ type: 'text', text: 'first' }], 'queue')
-    expect(open).toHaveBeenCalledWith('fresh-session')
+    const ctx = { sessions: { binding: () => ({ session: source }) } }
+    await expect(replayMessage(ctx, { sessionId: 'original', node: target, content })).resolves.toBe('original')
+    expect(replay).toHaveBeenCalledWith(2, [
+      ...target.data.content, { type: 'image', mediaType: 'image/png', name: 'image.png', data: 'QUJD' },
+    ])
   })
 
   it('ships the injector in preload and removes the Runtime plugin wiring', () => {

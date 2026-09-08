@@ -229,19 +229,6 @@ export function installConversationReplayModuleHook(): string {
       return { text: texts.join(''), images, rest }
     }
 
-    function previousCompletedTurnSeq(chat, node) {
-      if (chat === undefined || node === undefined) return undefined
-      const index = chat.order.indexOf(node.key)
-      if (index < 0) return undefined
-      for (let position = index - 1; position >= 0; position -= 1) {
-        const candidate = chat.nodes.get(chat.order[position])
-        if (candidate?.kind === 'turn-tail'
-          && Number.isSafeInteger(candidate.data?.seq)
-          && candidate.data.seq < node.data.seq) return candidate.data.seq
-      }
-      return undefined
-    }
-
     function bytesToBase64(bytes) {
       let binary = ''
       const step = 0x8000
@@ -285,45 +272,19 @@ export function installConversationReplayModuleHook(): string {
       return result
     }
 
-    function workspaceFor(ctx, sessionId, cwd) {
-      const items = ctx.workspaces.list.getSnapshot().items ?? []
-      return items.find(item => item.sessionIds?.includes(sessionId))
-        ?? items.find(item => cwd !== undefined && item.path === cwd)
-    }
-
     async function replayMessage(ctx, { sessionId, node, content, replacementText }) {
       const source = ctx.sessions.binding(sessionId)?.session
       if (source === undefined) throw new Error('当前会话尚未就绪')
+      if (typeof source.desktopReplay !== 'function') throw new Error('当前 Runtime 与壳侧原会话重试适配尚未就绪')
+      if (!Number.isSafeInteger(node?.data?.seq)) throw new Error('消息序号无效')
       const prompt = await promptContent(source, content, replacementText)
       if (prompt.length === 0) throw new Error('消息内容不能为空')
-
-      let snapshot = source.getSnapshot()
-      let boundary = previousCompletedTurnSeq(snapshot.chat, node)
-      while (boundary === undefined && snapshot.hasMore) {
-        const before = snapshot.chat.order.length
-        await source.loadOlder()
-        snapshot = source.getSnapshot()
-        boundary = previousCompletedTurnSeq(snapshot.chat, node)
-        if (snapshot.chat.order.length === before) break
+      const sent = await source.desktopReplay(node.data.seq, prompt)
+      if (!sent?.ok) {
+        const reason = sent?.error?.details?.reason
+        throw new Error(typeof reason === 'string' ? reason : sent?.error?.message ?? '重新发送失败')
       }
-
-      let childId
-      if (boundary === undefined) {
-        const summary = ctx.sessions.list.getSnapshot().byId[sessionId]
-        const workspace = workspaceFor(ctx, sessionId, summary?.cwd)
-        childId = await ctx.sessions.create(workspace === undefined
-          ? (summary?.cwd === undefined ? {} : { cwd: summary.cwd })
-          : { workspaceId: workspace.workspaceId })
-      } else {
-        childId = await ctx.sessions.fork({ sessionId, atSeq: boundary, increaseTitle: false })
-      }
-
-      const target = ctx.sessions.binding(childId)?.session
-      if (target === undefined) throw new Error('新的会话分支尚未就绪')
-      const sent = await target.prompt(prompt, 'queue')
-      if (!sent?.ok) throw new Error(sent?.error?.message ?? '重新发送失败')
-      ctx.sessions.open(childId)
-      return childId
+      return sessionId
     }
 
     function projectUserText(text) {
@@ -405,6 +366,7 @@ export function installConversationReplayModuleHook(): string {
       return React.memo(function UserMessageNodeView({ node, loadImage, renderMessageImages, sessionId, useSession }) {
         const data = node.data
         const removed = useSession(snapshot => snapshot.removed)
+        const running = useSession(snapshot => snapshot.running)
         const { text, images, rest } = React.useMemo(() => contentParts(data.content), [data.content])
         const longTextClip = React.useMemo(() => isLongTextClip(text), [text])
         const [editing, setEditing] = React.useState(false)
@@ -413,7 +375,7 @@ export function installConversationReplayModuleHook(): string {
         const [copied, setCopied] = React.useState(false)
         const [error, setError] = React.useState('')
         const replayable = rest.length === 0
-        const disabled = busy || removed || !replayable
+        const disabled = busy || running || removed || !replayable
 
         React.useEffect(() => { if (!editing) setDraft(text) }, [editing, text])
         React.useEffect(() => {
@@ -428,8 +390,10 @@ export function installConversationReplayModuleHook(): string {
           setError('')
           try {
             await replayMessage(ctx, { sessionId, node, content: data.content, replacementText })
+            setEditing(false)
           } catch (reason) {
             setError(reason instanceof Error ? reason.message : String(reason))
+          } finally {
             setBusy(false)
           }
         }, [busy, ctx, data.content, data.seq, node, sessionId])
@@ -484,7 +448,7 @@ export function installConversationReplayModuleHook(): string {
               }, '取消'),
               React.createElement('button', {
                 type: 'button',
-                disabled: busy || (draft.trim() === '' && images.length === 0),
+                disabled: disabled || (draft.trim() === '' && images.length === 0),
                 'data-dsh-conversation-replay-editor-button': 'confirm',
                 onClick: submitEdit,
               }, busy ? '正在重新发送…' : '确认并重新发送'),
@@ -557,11 +521,9 @@ export function installConversationReplayModuleHook(): string {
       apply,
       contentParts,
       isLongTextClip,
-      previousCompletedTurnSeq,
       textClipLabel,
       promptContent,
       replayMessage,
-      workspaceFor,
     }
   }
 
@@ -575,7 +537,7 @@ export function installConversationReplayModuleHook(): string {
     '@deepseek-ai/dsh-client-ui-primitives',
   ]
   const optionalFeatureDependencyIds = ['@deepseek-ai/dsh-client-ui-attachment']
-  const featureServiceIds = ['slots', 'sessions', 'workspaces']
+  const featureServiceIds = ['slots', 'sessions']
   let legacySuppressions = 0
   let targetRegistrations = 0
   let targetFactories = 0

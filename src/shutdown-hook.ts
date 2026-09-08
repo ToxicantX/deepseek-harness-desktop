@@ -1,4 +1,5 @@
 import { installCustomProviderImageHook } from './custom-provider-image-injector.ts'
+import { installDesktopReplayHostHook } from './conversation-replay-host-injector.ts'
 import type { Serializable } from 'node:child_process'
 
 const SHUTDOWN_MESSAGE = 'dsh/shutdown'
@@ -37,4 +38,5 @@ export function installShutdownHook(target: ShutdownProcess): void {
 }
 
 installCustomProviderImageHook()
+installDesktopReplayHostHook()
 if (process.send !== undefined) installShutdownHook(process)

@@ -6,11 +6,31 @@
 
 - **编辑**：进入内联编辑状态；确认后以修改后的文本重新发起该问题。
 - **重试**：不修改原文本，直接重新发起该问题。
-- 两种操作都会从目标消息之前的最后一个完整轮次创建会话分支。新分支只保留该边界之前的内容，因此目标消息及其后续对话不会继续显示。
-- 如果目标是会话首条用户消息，则在相同工作区中创建空会话后重新发送；无法匹配工作区时沿用原会话的工作目录。
-- 原会话历史保留在父分支中，便于回看；只有重新发送成功后才切换到新分支。
+- 两种操作均保留原会话 ID，不创建会话、不创建分支，也不切换当前会话。
+- 壳侧适配在原智能体空闲维护阶段排入替换消息；消息真正进入执行轮次时，使用核心既有的 surface replacement 替换目标及后续上下文。首条消息也使用相同路径。
+- 原始事件日志仅追加、不删除；重新加载与向前翻页仍按回退记录展示当前有效历史。
+- 运行中、存在排队或注入待处理内容、目标已被重试或压缩移出当前上下文时，操作会返回错误并保留历史。
+- 重试不撤销已经执行的文件修改、命令或其他工具副作用；模型设置、目标及其他插件状态也不回滚。
+
+## Runtime 适配与更新
+
+实现代码全部位于桌面壳仓库，不要求修改、发布或安装定制 DSH 核心。壳启动后端时通过现有 Node 加载钩子在内存中适配宿主模块；preload 在浏览器模块执行前适配客户端。核心源码、官方安装文件及日志格式均不改写，壳重启时会对选中的 Runtime 重新尝试适配。
+
+壳使用独立的 `desktop-replay-v1` 请求模式。宿主未匹配适配时，原版 schema 会拒绝该模式，不会把编辑内容作为普通消息发送。客户端未匹配时，操作显示适配未就绪；两端均保留原始模块，不回退到创建新会话。
+
+持久化使用原版核心已经支持的 `user/message` replacement 与完整 `sourceEventSeqs`；`source.desktopReplay` 只记录壳展示所需的回退范围，不新增必需事件类型。原版核心可重载并恢复有效模型上下文；脱离桌面壳使用原版界面时，历史展示仍遵循该界面自己的规则。
+
+这是有明确检测条件的版本适配，不保证未来每个核心版本自动兼容。核心加载结构、空闲维护阶段或 replacement 行为变化时，需要更新壳侧适配；适配失效只影响编辑与重试，普通发送和新建会话继续走原版路径。
+
+可对已构建、未经定制的核心执行独立验证：`node scripts/smoke-same-session-replay.mjs D:\work\ai\deepseek-harness`。验证仅创建临时会话库，通过真实 Loader、请求入口、模型输入、JSONL 重载及实际客户端模块检查原会话语义，不打开用户会话库。
+
+适配覆盖旧式 `host-apiproxy/client-runtime` 与拆分后的 `api-session-controller/api-gateway` 两种结构。拆分结构只有控制器和宿主参数校验代码同时匹配才启用后端适配；浏览器仅对原会话重试扩展输入校验，普通输入继续使用原校验。
+
+对本机安装的 `0.1.3-alpha.1` 可使用 Node 24 执行：`node scripts/smoke-installed-session-replay.mjs "$env:LOCALAPPDATA\DeepSeek Harness\runtime-manager\runtimes\0.1.3-alpha.1"`。该检查使用真实控制器、参数校验、智能体循环、临时 JSONL 存储和客户端历史投影；仅模型与无文件上传的外围服务使用测试替身。设置 `DSH_REPLAY_BUILT_HOOK=1` 可验证已构建的壳后端钩子。此检查不替代打包后 Electron 的按钮、窗口和图片上传验收。
 
 ## 内容处理
+
+- 支持每轮首条用户消息的编辑和重试；同轮运行中追加的 steering 消息暂不支持原地回退。
 
 - 文本编辑会替换原消息中的文本内容。
 - 原消息中的图片会读取并随新请求重新上传。
@@ -39,11 +59,11 @@
 
 1. `src/preload.ts` 在页面脚本执行前，通过 `contextBridge.executeInMainWorld` 安装主世界注入。
 2. 注入逻辑提前接管 `window.__ModuleLoader__` 的赋值，并只包装 `@deepseek-ai/dsh-client-ui-conversation` 模块的工厂函数。
-3. 上游对话模块执行原始 `apply(ctx)` 后，桌面壳使用同一个真实 `ctx` 注册用户消息渲染覆盖，因此可直接使用 `slots`、`sessions` 和 `workspaces`。
-4. 样式、消息分支、附件重传和长文本折叠代码随桌面壳的 `preload.cjs` 一起打包；`runtime/desktop.patch.yml` 和 Runtime 构建不再包含 conversation-replay 插件。
+3. 上游对话模块执行原始 `apply(ctx)` 后，桌面壳使用同一个真实 `ctx` 注册用户消息渲染覆盖，并只声明编辑与重试需要的 `slots` 和 `sessions` 服务。
+4. 样式、原会话重试调用、附件重传、后端与客户端适配、长文本折叠代码随桌面壳一起打包；`runtime/desktop.patch.yml` 不包含 conversation-replay 插件。
 5. 如果用户本机仍保留旧 Runtime 产物中的 conversation-replay 插件，桌面壳会在模块注册阶段将旧客户端入口替换为空实现，避免旧插件与壳侧实现重复注册。
 
-注入器会复用同一个 `ModuleLoader` 代理，主题适配器临时接管并恢复加载器时不会叠加代理；页面启动阶段若加载器属性被重新定义，桌面壳会在微任务、`DOMContentLoaded` 和 `pageshow` 时机自动恢复接管，避免按钮因加载时序丢失。注入器同时捕获 `dsh-client-modules` 创建出的真实模块系统和根 `Context`；即使对话模块已经进入 live/materialized 状态，仍可通过捕获的模块导入能力补齐 React/UI 依赖，并通过 Cordis 的依赖注入子上下文取得 `slots`、`sessions` 和 `workspaces`，兼容核心启用严格服务访问校验后的运行方式。
+注入器会复用同一个 `ModuleLoader` 代理，主题适配器临时接管并恢复加载器时不会叠加代理；页面启动阶段若加载器属性被重新定义，桌面壳会在微任务、`DOMContentLoaded` 和 `pageshow` 时机自动恢复接管，避免按钮因加载时序丢失。注入器同时捕获 `dsh-client-modules` 创建出的真实模块系统和根 `Context`；即使对话模块已经进入 live/materialized 状态，仍可通过捕获的模块导入能力补齐 React/UI 依赖，并通过 Cordis 的依赖注入子上下文取得 `slots` 和 `sessions`，兼容核心启用严格服务访问校验后的运行方式。
 
 附件渲染优先使用 `conversation.chat.node` 提供的 `renderMessageImages`。旧版核心仍可使用附件模块导出的 `ImageGallery`；新版核心移除该导出或其他非关键 UI 组件改名时，桌面壳会使用内置的最小展示组件，不再把 `undefined` 组件交给 React。可选模块缺失只降级对应展示，不阻断编辑和重试功能整体注入；同一上下文的失败安装也不会被轮询任务重复执行并持续刷屏。
 

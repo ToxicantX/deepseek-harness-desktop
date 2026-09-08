@@ -668,3 +668,56 @@
 - `docs/windows-build.md`：记录对子进程的 PATH 继承规则与验证范围。
 - `progress.md`：追加本轮记录。
 - 回滚：`git restore --source=85db8e5fa0eb77ada5580fa48bcbcbc9e4808d3d -- build-windows.bat tests/runtime-release-scripts.spec.mjs docs/windows-build.md`；保留进度历史。
+
+## 2026-09-08 - Task: 保留原会话 ID 的编辑与重试
+### What was done
+- 编辑和重试统一调用原会话 replay，不再创建、分叉或打开其他会话；首条和后续轮次使用同一路径。
+- 保留完整长文本与图片，运行中禁用操作，旧 Runtime 明确提示升级且不静默追加或创建会话。
+- 同步配套核心能力要求、有效历史语义及不撤销工具副作用的限制。
+### Testing
+- `node node_modules/vitest/vitest.mjs run tests/conversation-replay-shell-injector.spec.ts`：18 项通过，覆盖同 ID、完整文本及图片、旧 Runtime 和错误路径。
+- `node node_modules/typescript/bin/tsc --noEmit` 与 `node node_modules/tsdown/dist/run.mjs` 通过。
+- 配套核心 179 项定向测试、1 项真实 Loader/fetch/JSONL snapshot、1 项 Python SDK 测试及 host/client/web 构建通过，详见核心 progress.md。
+- 两仓 `git diff --check` 通过。尚未打安装包或更新已安装 Runtime，真实 Electron 操作仍待配套部署后验收。
+### Notes
+- `src/conversation-replay-injector.ts`：在原会话调用 replay，去除分支创建路径并保护运行状态。
+- `tests/conversation-replay-shell-injector.spec.ts`：断言原会话 ID、不创建或切换会话及完整内容重传。
+- `docs/conversation-edit-retry.md`：说明配套部署、历史回退及同轮 steering 限制。
+- `progress.md`：追加本轮实施、验证与回滚记录。
+- 配套核心改动位于 `D:\work\ai\deepseek-harness`；既有 build-runtime.ps1 从官方 tag 构建，不能用于交付本地未提交核心改动。须从本轮修改后的核心构建并配套部署；仅执行 build-windows.bat 不会更新 Runtime。
+- 回滚（壳根目录执行，保留日志）：`git restore --source=c51f91825029cf274b8b7f29ac9cfea747e85705 -- src/conversation-replay-injector.ts tests/conversation-replay-shell-injector.spec.ts docs/conversation-edit-retry.md`。核心按对应 progress.md 独立回滚；不要以源码回滚代替会话数据备份。
+
+## 2026-09-08 - Task: 仅由桌面壳实现保留原会话 ID 的编辑和重试
+### What was done
+- 撤回上一轮核心源码、协议与 SDK 改动；核心仓库只保留历史进度日志。当前交付不要求定制核心，取代上一轮“必须同时发布核心”的方案。
+- 壳后端加载钩子仅在内存中适配普通发送的重试分支；在原智能体维护阶段验证目标，真正提交替换消息时调用核心既有 replacement 校验，完整保留原始审计日志和会话 ID。
+- 覆盖旧式 host-apiproxy/client-runtime 与本机 0.1.3-alpha.1 的拆分控制器结构；新结构同时检查控制器和宿主参数校验，避免只放宽校验却仍执行普通追加。
+- 壳客户端适配原会话调用、历史投影和独立请求模式；实时、重载与翻页均排除被替换历史，普通事件保持原路径，展示适配异常保留核心历史。
+- 模型上下文保留目标前有效前缀，原文本与图片重传逻辑保留；排队、运行中、失效目标等错误不创建会话。
+### Testing
+- Node 24.19.0 / pnpm 11.7.0 执行 pnpm test：24 个文件、153 个测试通过。
+- 初次直接运行 vitest 时，已有发布脚本测试因缺少 npm_execpath 失败；使用项目规定的 pnpm test 后全量通过，未修改该测试。
+- pnpm run build 通过，包含 TypeScript 检查及壳后端/preload 构建。
+- node scripts/smoke-same-session-replay.mjs D:\work\ai\deepseek-harness：在恢复的原版核心上通过真实 Loader、fetch、JSONL 和实际客户端模块验证首轮/后续轮次同 ID 重试及重载。
+- Node 24 执行 scripts/smoke-installed-session-replay.mjs 指向本机官方 0.1.3-alpha.1：实际控制器/输入校验/智能体循环/JSONL、客户端实时/重载/分页验证通过；同一检查设置 DSH_REPLAY_BUILT_HOOK=1 后再次通过，验证实际构建的后端钩子。
+- 安装版 smoke 中仅外部模型、无文件上传场景的外围服务与浏览器连接使用测试替身；未执行真实模型请求、真实图片存储或 Electron 窗口交互。
+- 核心 git status --short 仅剩 progress.md；安装版 smoke 校验核心控制器文件字节未变；两仓 git diff --check 通过。
+### Notes
+- src/conversation-replay-host-injector.ts：提供两种后端适配、版本形态检查及一次性 replacement 提交与清理。
+- src/conversation-replay-client-injector.ts：提供两种客户端历史投影、原会话调用及重试专用输入适配。
+- src/shutdown-hook.ts：在现有后端启动入口安装壳侧可选加载钩子。
+- src/preload.ts：隔离安装客户端适配，保留其余基础桥接初始化。
+- src/conversation-replay-injector.ts：调用壳提供的 desktopReplay 并展示后端具体错误，不依赖核心新增接口。
+- tests/conversation-replay-adapter.spec.ts：验证持久化兼容、同 ID、清理、错误隔离及各类转换匹配。
+- tests/conversation-replay-shell-injector.spec.ts：使用壳侧能力并验证不创建或切换会话和完整内容重传。
+- scripts/smoke-same-session-replay.mjs：只读使用已构建核心，运行独立临时会话组合验证。
+- scripts/smoke-installed-session-replay.mjs：只读使用已安装的新结构 Runtime，验证实际控制器及客户端并支持构建后钩子验证。
+- docs/conversation-edit-retry.md：更新仅壳部署方式、版本适配与验证边界。
+- progress.md：追加本轮实施、验证、限制及回滚记录。
+- 每轮首条用户消息可编辑/重试；同轮 steering、子智能体和未知内容块暂不支持。外部文件/命令/设置副作用不撤销，未来核心变更仍可能需要壳适配，不承诺永久兼容。
+- 未覆盖已安装 Runtime、未重启用户应用、未生成安装包；打包后窗口与图片交互仍需验收。
+- 回滚至本系列修改前（壳根目录执行，保留日志）：
+```powershell
+git restore --source=c51f91825029cf274b8b7f29ac9cfea747e85705 -- src/conversation-replay-injector.ts src/preload.ts src/shutdown-hook.ts tests/conversation-replay-shell-injector.spec.ts docs/conversation-edit-retry.md
+Remove-Item -LiteralPath 'src/conversation-replay-host-injector.ts','src/conversation-replay-client-injector.ts','tests/conversation-replay-adapter.spec.ts','scripts/smoke-same-session-replay.mjs','scripts/smoke-installed-session-replay.mjs'
+```

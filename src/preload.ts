@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { installConversationReplayModuleHook, runIsolatedShellInjection } from './conversation-replay-injector.ts'
+import { injectDesktopReplayClient, installDesktopReplayClientHook } from './conversation-replay-client-injector.ts'
 import { injectCustomProviderUserAgentFactorySource, installCustomProviderUserAgentHook } from './custom-provider-user-agent-injector.ts'
 import type { RuntimePreference } from './catalog.ts'
 import type { McpEndpointView, McpEntryView, McpList } from './mcp-manager.ts'
@@ -10,6 +11,12 @@ import type { ShellUpdateProgress } from './shell-updater.ts'
 
 runIsolatedShellInjection('桌面壳对话编辑与重试注入启动失败', () => {
   contextBridge.executeInMainWorld({ func: installConversationReplayModuleHook })
+})
+runIsolatedShellInjection('桌面壳原会话重试客户端适配启动失败', () => {
+  contextBridge.executeInMainWorld({
+    func: installDesktopReplayClientHook,
+    args: [injectDesktopReplayClient.toString()],
+  })
 })
 runIsolatedShellInjection('桌面壳自定义提供方 User-Agent 注入启动失败', () => {
   contextBridge.executeInMainWorld({
