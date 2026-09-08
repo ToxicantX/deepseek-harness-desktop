@@ -3,6 +3,8 @@ import { installConversationReplayModuleHook, runIsolatedShellInjection } from '
 import { injectDesktopReplayClient, installDesktopReplayClientHook } from './conversation-replay-client-injector.ts'
 import { injectKoiPondDialogue, installKoiPondDialogueHook } from './koi-pond-injector.ts'
 import { injectCustomProviderUserAgentFactorySource, installCustomProviderUserAgentHook } from './custom-provider-user-agent-injector.ts'
+import { installUsageMonitor } from './usage-monitor-renderer.ts'
+import type { UsageScanProgress } from './usage-monitor.ts'
 import type { RuntimePreference } from './catalog.ts'
 import type { McpEndpointView, McpEntryView, McpList } from './mcp-manager.ts'
 import type { PluginEntry, PluginList, PluginOperationStatus, PluginStartInput, PluginUpdateList } from './plugin-manager.ts'
@@ -1344,7 +1346,14 @@ function initializeRepairPage(): void {
 }
 
 window.addEventListener('DOMContentLoaded', () => {
-  if (document.querySelector('#shell-update-page') !== null) initializeShellUpdatePage()
+  if (document.body.dataset.page === 'usage-monitor') {
+    installUsageMonitor(() => ipcRenderer.invoke('usage-monitor:read'), listener => {
+      const receive = (_event: Electron.IpcRendererEvent, progress: UsageScanProgress): void => listener(progress)
+      ipcRenderer.on('usage-monitor:progress', receive)
+      return () => { ipcRenderer.removeListener('usage-monitor:progress', receive) }
+    })
+  }
+  else if (document.querySelector('#shell-update-page') !== null) initializeShellUpdatePage()
   else if (document.querySelector('#personalization-page') !== null) initializePersonalizationPage()
   else if (document.querySelector('#mcp-manager-page') !== null) initializeMcpManagerPage()
   else if (document.querySelector('#plugin-manager-page') !== null) initializePluginManagerPage()

@@ -32,6 +32,7 @@ import { PluginManager, validatePackageName } from './plugin-manager.ts'
 import { PluginIsolation, thirdParty } from './plugin-isolation.ts'
 import { loadAndValidatePlugins } from './plugin-client-health.ts'
 import { shouldRecoverModelCatalog } from './model-catalog-recovery.ts'
+import { readUsageSnapshot, type UsageScanProgress } from './usage-monitor.ts'
 import { PluginRestartCoordinator } from './plugin-restart.ts'
 import { RuntimeController, type RuntimeView } from './runtime-controller.ts'
 import { SessionRepairClient } from './session-repair.ts'
@@ -54,7 +55,8 @@ const mcpManagerPage = join(app.getAppPath(), 'assets', 'mcp-manager.html')
 const personalizationPage = join(app.getAppPath(), 'assets', 'personalization.html')
 const shellUpdatePage = join(app.getAppPath(), 'assets', 'shell-update.html')
 const petPage = join(app.getAppPath(), 'assets', 'pet.html')
-const allowedLocalPages = new Set([setupPage, repairPage, pluginManagerPage, mcpManagerPage, personalizationPage, shellUpdatePage, petPage])
+const usageMonitorPage = join(app.getAppPath(), 'assets', 'usage-monitor.html')
+const allowedLocalPages = new Set([setupPage, repairPage, pluginManagerPage, mcpManagerPage, personalizationPage, shellUpdatePage, petPage, usageMonitorPage])
 const preload = join(moduleDirectory, 'preload.cjs')
 const petPreload = join(moduleDirectory, 'pet-preload.cjs')
 const shutdownHook = app.isPackaged
@@ -72,6 +74,7 @@ let pluginWindow: BrowserWindow | undefined
 let mcpWindow: BrowserWindow | undefined
 let personalizationWindow: BrowserWindow | undefined
 let updateWindow: BrowserWindow | undefined
+let usageMonitorWindow: BrowserWindow | undefined
 let latestUpdateProgress: ShellUpdateProgress | undefined
 let controller: RuntimeController | undefined
 let pluginManager: PluginManager | undefined
@@ -271,7 +274,7 @@ function syncMainMenuVisibility(): void {
   window.setMenuBarVisibility(trustedPageLoaded)
 }
 
-function createWindow(options: { utility?: 'manager' | 'repair' | 'plugin' | 'mcp' | 'personalization' | 'update' } = {}): BrowserWindow {
+function createWindow(options: { utility?: 'manager' | 'repair' | 'plugin' | 'mcp' | 'personalization' | 'update' | 'usage' } = {}): BrowserWindow {
   const utility = options.utility
   const manager = utility === 'manager'
   const repair = utility === 'repair'
@@ -279,11 +282,12 @@ function createWindow(options: { utility?: 'manager' | 'repair' | 'plugin' | 'mc
   const mcp = utility === 'mcp'
   const personalization = utility === 'personalization'
   const update = utility === 'update'
+  const usage = utility === 'usage'
   const window = new BrowserWindow({
     ...(update && mainWindow !== undefined ? { parent: mainWindow, modal: true } : {}),
-    width: manager ? 700 : repair ? 760 : plugin ? 740 : mcp ? 860 : personalization ? 800 : update ? 480 : 1240,
-    height: manager ? 720 : repair ? 780 : plugin ? 700 : mcp ? 760 : personalization ? 720 : update ? 250 : 820,
-    minWidth: manager || repair ? 480 : plugin ? 420 : mcp ? 600 : personalization ? 520 : update ? 420 : 820,
+    width: manager ? 700 : repair ? 760 : plugin ? 740 : mcp ? 860 : personalization ? 800 : update ? 480 : usage ? 1000 : 1240,
+    height: manager ? 720 : repair ? 780 : plugin ? 700 : mcp ? 760 : personalization ? 720 : update ? 250 : usage ? 780 : 820,
+    minWidth: manager || repair ? 480 : plugin ? 420 : mcp ? 600 : personalization ? 520 : update ? 420 : usage ? 640 : 820,
     minHeight: manager ? 560 : plugin ? 520 : mcp || personalization ? 560 : update ? 220 : 600,
     ...(update ? { closable: false, minimizable: false, maximizable: false, resizable: false } : {}),
     show: false,
@@ -512,6 +516,23 @@ async function openMcpManager(): Promise<void> {
   await mcpWindow.loadFile(mcpManagerPage)
 }
 
+async function openUsageMonitor(): Promise<void> {
+  if (usageMonitorWindow !== undefined && !usageMonitorWindow.isDestroyed()) {
+    if (usageMonitorWindow.isMinimized()) usageMonitorWindow.restore()
+    usageMonitorWindow.show()
+    usageMonitorWindow.focus()
+    return
+  }
+  const window = createWindow({ utility: 'usage' })
+  usageMonitorWindow = window
+  window.on('closed', () => { if (usageMonitorWindow === window) usageMonitorWindow = undefined })
+  try { await window.loadFile(usageMonitorPage) }
+  catch (error: unknown) {
+    if (!window.isDestroyed()) window.destroy()
+    dialog.showErrorBox('无法打开用量监控', error instanceof Error ? error.message : String(error))
+  }
+}
+
 async function openPersonalization(): Promise<void> {
   if (personalizationWindow !== undefined && !personalizationWindow.isDestroyed()) {
     personalizationWindow.focus()
@@ -644,6 +665,12 @@ function mcpService(event: IpcMainInvokeEvent): McpManager {
   return mcpManager
 }
 
+function usageMonitorClient(event: IpcMainInvokeEvent): void {
+  if (usageMonitorWindow === undefined || usageMonitorWindow.isDestroyed() || event.sender !== usageMonitorWindow.webContents || event.senderFrame !== event.sender.mainFrame) throw new Error('用量监控请求来源无效')
+  const url = new URL(event.sender.getURL())
+  if (url.protocol !== 'file:' || url.search !== '' || url.hash !== '' || resolve(fileURLToPath(url)) !== resolve(usageMonitorPage)) throw new Error('用量监控请求页面无效')
+}
+
 function personalizationService(event: IpcMainInvokeEvent): PersonalizationManager {
   if (personalizationWindow === undefined || personalizationWindow.isDestroyed() || event.sender !== personalizationWindow.webContents) {
     throw new Error('个性化设置请求来源无效')
@@ -762,6 +789,7 @@ function installMenu(): void {
       label: '帮助',
       submenu: [
         { label: '修复历史会话', click: () => { void openSessionRepair() } },
+        { label: '用量监控', click: () => { void openUsageMonitor() } },
         { type: 'separator' },
         { label: '关于 DeepSeek Harness', click: () => { void showAbout() } },
       ],
@@ -1030,6 +1058,20 @@ ipcMain.handle('runtime:recover-plugin-preset', async (event) => {
   if (mainWindow !== undefined) await showSetup(mainWindow)
   await runtimeController.recoverPluginPreset()
 })
+ipcMain.handle('usage-monitor:read', async event => {
+  usageMonitorClient(event)
+  const window = usageMonitorWindow
+  const home = process.env.DSH_HOME ?? join(homedir(), '.dsh')
+  const onProgress = (progress: UsageScanProgress): void => {
+    if (window === undefined || window.isDestroyed() || window.webContents !== event.sender) return
+    try {
+      usageMonitorClient(event)
+      event.senderFrame?.send('usage-monitor:progress', progress)
+    } catch { /* The original frame may have closed or navigated during scanning. */ }
+  }
+  return readUsageSnapshot(home, onProgress)
+})
+
 ipcMain.handle('personalization:read', async (event) => {
   return personalizationService(event).read()
 })
