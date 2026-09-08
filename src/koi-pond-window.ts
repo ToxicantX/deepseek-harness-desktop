@@ -40,7 +40,7 @@ export class KoiPondWindow {
       return
     }
     const window = new BrowserWindow({
-      title: '后院鱼塘', width: 1100, height: 780, minWidth: 680, minHeight: 520,
+      title: '后院鱼塘', width: 1280, height: 720, minWidth: 680, minHeight: 520,
       show: false, autoHideMenuBar: true, backgroundColor: '#102d2c',
       webPreferences: {
         preload: this.preload, nodeIntegration: false, contextIsolation: true, sandbox: true,

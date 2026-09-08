@@ -125,6 +125,25 @@ describe('shell koi persistence and growth', () => {
 })
 
 describe('koi dialogue observer', () => {
+  it('ships both painted scenes and the ornamental UI as local packaged assets', async () => {
+    const html = await readFile(new URL('../assets/koi-pond.html', import.meta.url), 'utf8')
+    const css = await readFile(new URL('../assets/koi-pond.css', import.meta.url), 'utf8')
+    for (const theme of ['day', 'night']) {
+      const image = await readFile(new URL(`../assets/koi-pond-${theme}.webp`, import.meta.url))
+      expect(image.toString('ascii', 0, 4)).toBe('RIFF')
+      expect(image.toString('ascii', 8, 12)).toBe('WEBP')
+      expect(html).toContain(`href="koi-pond-${theme}.webp"`)
+    }
+    for (const decoration of ['lotus', 'frame']) {
+      const name = `koi-pond-${decoration}.svg`
+      expect(css).toContain(name)
+      expect(await readFile(new URL(`../assets/${name}`, import.meta.url), 'utf8')).toContain('<svg')
+    }
+    expect(html).toContain('id="return"')
+    expect(html).toContain('id="zen"')
+    expect(html).toContain('id="light"')
+  })
+
   it('places the direct entry after Help and includes the local page and preload in packaging', async () => {
     const main = await readFile(new URL('../src/main.ts', import.meta.url), 'utf8')
     expect(main).toMatch(/label: '帮助'[\s\S]*?label: '后院鱼塘', click: \(\) => \{ void koiPond\?\.open\(\)/)

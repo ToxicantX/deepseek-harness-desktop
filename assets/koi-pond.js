@@ -5,21 +5,24 @@
   const canvas = $('pond'), ctx = canvas.getContext('2d')
   const bridge = window.koiPond
   const patterns = { kohaku: ['红白', '#eee6ce', '#c44c32'], sanke: ['大正三色', '#e8e4d2', '#b74731'], ogon: ['黄金', '#e3bf63', '#ba8638'], shusui: ['秋翠', '#bacfd0', '#d77947'] }
-  let state, selected, width = 0, height = 0, mode = 'feed', night = false
+  let state, selected, width = 0, height = 0, mode = 'feed', night = false, zen = false
   let fish = [], food = [], ripples = [], last = 0, frame = 0, noticeTimer, lastFeed = 0
   let keyboardPoint = { x: .4, y: .55 }, keyboardActive = false
   const backdrop = document.createElement('canvas')
+  const sceneImages = { day: new Image(), night: new Image() }
+  let sceneFrame = { x: 0, y: 0, width: 1723, height: 913 }
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches
   const random = (min, max) => min + Math.random() * (max - min)
   const clamp = (v, min, max) => Math.max(min, Math.min(max, v))
   function notify(text) {
+    if (zen) return
     $('notice').textContent = text
     $('notice').classList.add('show')
     clearTimeout(noticeTimer)
     noticeTimer = setTimeout(() => $('notice').classList.remove('show'), 3500)
   }
   function stage(level) { return Math.min(10, Math.floor(level / 100)) }
-  function size(f) { return 26 + stage(f.level) * 3 }
+  function size(f) { return (18 + stage(f.level) * 3) * clamp(width / 1280, .8, 1.35) }
   function update(next) {
     const previous = state
     state = next
@@ -64,59 +67,42 @@
     c.fillStyle = color
     c.beginPath(); c.ellipse(x, y, rx, ry, rotation, 0, Math.PI * 2); c.fill()
   }
+  function waterPosition(angle, radius) {
+    return {
+      x: sceneFrame.x + sceneFrame.width * (.54 + Math.cos(angle) * radius * .235),
+      y: sceneFrame.y + sceneFrame.height * (.51 + Math.sin(angle) * radius * .35),
+    }
+  }
+  function waterDistance(x, y) {
+    return Math.hypot(((x - sceneFrame.x) / sceneFrame.width - .54) / .235,
+      ((y - sceneFrame.y) / sceneFrame.height - .51) / .35)
+  }
   function makeBackdrop() {
     const dpr = Math.min(devicePixelRatio || 1, 2)
     const oldWidth = width, oldHeight = height
     width = innerWidth; height = innerHeight
-    for (const f of fish) { f.x *= width / (oldWidth || width); f.y *= height / (oldHeight || height) }
+    for (const f of fish) {
+      f.x *= width / (oldWidth || width); f.y *= height / (oldHeight || height)
+      f.target = null
+    }
     canvas.width = width * dpr; canvas.height = height * dpr
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     backdrop.width = width * dpr; backdrop.height = height * dpr
     const b = backdrop.getContext('2d'); b.scale(dpr, dpr)
-    const water = b.createRadialGradient(width * .4, height * .5, 10, width * .45, height * .5, width * .8)
-    water.addColorStop(0, night ? '#163a40' : '#285753')
-    water.addColorStop(.6, night ? '#0a222e' : '#123b39')
-    water.addColorStop(1, '#061d21')
-    b.fillStyle = water; b.fillRect(0, 0, width, height)
-    // Fixed seed keeps the submerged stones in place between day/night changes.
-    let seed = 7103
-    const rand = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296 }
-    for (let i = 0; i < 1600; i++) {
-      const x = rand() * width, y = rand() * height, r = 3 + rand() * 15, rotation = rand() * 3
-      ellipse(b, x, y, r, r * .65, `rgba(3,20,23,${.04 + rand() * .09})`, rotation)
-      ellipse(b, x - 1, y - 2, r * .78, r * .48, `rgba(122,147,123,${night ? .02 : .035})`, rotation)
+    const scale = Math.max(width / 1723, height / 913)
+    sceneFrame = { x: (width - 1723 * scale) / 2, y: (height - 913 * scale) / 2,
+      width: 1723 * scale, height: 913 * scale }
+    b.fillStyle = night ? '#062339' : '#123f39'
+    b.fillRect(0, 0, width, height)
+    const image = sceneImages[night ? 'night' : 'day']
+    if (image.complete && image.naturalWidth) {
+      b.drawImage(image, sceneFrame.x, sceneFrame.y, sceneFrame.width, sceneFrame.height)
     }
-    for (let i = 0; i < 19; i++) {
-      const x = i < 10 ? -15 + i * 17 : width - (i - 10) * 17
-      const y = i < 10 ? height - (i % 4) * 24 : 10 + (i % 4) * 20
-      ellipse(b, x + 7, y + 12, 48, 33, '#051a1ca0', i)
-      const rock = b.createRadialGradient(x - 12, y - 12, 2, x, y, 45)
-      rock.addColorStop(0, night ? '#34463e' : '#65735a'); rock.addColorStop(1, '#192d2a')
-      ellipse(b, x, y, 43, 29, rock, i)
-      for (let j = 0; j < 15; j++) ellipse(b, x - 26 + rand() * 48, y - 18 + rand() * 27, 3 + rand() * 5, 2, '#71834d30')
-    }
-    for (let i = 0; i < 12; i++) {
-      const x = i < 7 ? 70 + i * 27 : width - 80 - (i - 7) * 32
-      const y = i < 7 ? height - 125 - Math.sin(i * 2) * 35 : 72 + Math.sin(i * 2) * 34
-      const r = 20 + rand() * 15
-      b.save(); b.translate(x, y); b.rotate(i * 2.3)
-      ellipse(b, 5, 9, r, r * .76, '#021e2270')
-      b.scale(1, .76)
-      b.fillStyle = night ? '#2b5148' : '#547654'
-      b.beginPath(); b.moveTo(0, 0); b.arc(0, 0, r, .2, Math.PI * 2 - .12); b.closePath(); b.fill()
-      b.strokeStyle = '#b0c08a24'; b.lineWidth = 1
-      for (let a = .3; a < 6.1; a += .45) { b.beginPath(); b.moveTo(0, 0); b.lineTo(Math.cos(a) * r * .92, Math.sin(a) * r * .92); b.stroke() }
-      b.restore()
-    }
-    for (let i = 0; i < 9; i++) {
-      b.save(); b.translate(128, height - 132); b.rotate(i * Math.PI * 2 / 9)
-      ellipse(b, 0, -10, 7, 18, night ? '#a8a9ad' : '#e3ccbf'); b.restore()
-    }
-    ellipse(b, 128, height - 132, 7, 7, '#d6b56c')
   }
   function koi(f, time) {
     const s = size(f), wag = Math.sin(time * 5 + f.phase), palette = patterns[f.pattern]
     ctx.save(); ctx.translate(f.x, f.y); ctx.rotate(f.angle)
+    if (night) ctx.globalAlpha = .82
     ellipse(ctx, -3, 9, s * .92, s * .31, '#00191c66')
     ctx.save(); ctx.translate(-s * .69, 0); ctx.rotate(wag * .22)
     ctx.fillStyle = palette[1] + 'aa'
@@ -144,11 +130,11 @@
     ellipse(ctx, s * .7, -s * .14, 2, 2, '#162a29'); ellipse(ctx, s * .7, s * .14, 2, 2, '#162a29')
     ctx.strokeStyle = '#f1eed680'; ctx.lineWidth = .8
     for (const side of [-1, 1]) { ctx.beginPath(); ctx.moveTo(s * .9, side * s * .05); ctx.quadraticCurveTo(s * 1.12, side * s * .05, s * 1.1, side * s * .15); ctx.stroke() }
-    if (f.id === selected) { ctx.strokeStyle = '#e6ce8a90'; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(0, 0, s * 1.32, s * .62, 0, 0, Math.PI * 2); ctx.stroke() }
+    if (!zen && f.id === selected) { ctx.strokeStyle = '#e6ce8a90'; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(0, 0, s * 1.32, s * .62, 0, 0, Math.PI * 2); ctx.stroke() }
     ctx.restore()
   }
   function interact(x, y) {
-    if (!state) return
+    if (!state || waterDistance(x, y) > 1) return
     ripples.push({ x, y, age: 0 })
     ripples = ripples.slice(-24)
     if (mode !== 'feed') return
@@ -163,7 +149,9 @@
     for (const f of fish) {
       let target = food.reduce((best, pellet) => !best || Math.hypot(f.x - pellet.x, f.y - pellet.y) < Math.hypot(f.x - best.x, f.y - best.y) ? pellet : best, null)
       if (!target) {
-        if (!f.target || Math.hypot(f.x - f.target.x, f.y - f.target.y) < 40) f.target = { x: random(65, width - 290), y: random(160, height - 120) }
+        if (!f.target || Math.hypot(f.x - f.target.x, f.y - f.target.y) < 40) {
+          f.target = waterPosition(random(0, Math.PI * 2), random(.15, .8))
+        }
         target = f.target
       }
       const distance = Math.hypot(target.x - f.x, target.y - f.y)
@@ -173,6 +161,12 @@
       const speed = (food.length ? 65 : reduced ? 12 : 25) * Math.min(1, distance / 35 + .15)
       f.x = clamp(f.x + Math.cos(f.angle) * speed * dt, 40, width - 40)
       f.y = clamp(f.y + Math.sin(f.angle) * speed * dt, 40, height - 40)
+      const distanceFromWater = waterDistance(f.x, f.y)
+      if (distanceFromWater > 1) {
+        const center = waterPosition(0, 0)
+        f.x = center.x + (f.x - center.x) / distanceFromWater * .99
+        f.y = center.y + (f.y - center.y) / distanceFromWater * .99
+      }
       const pellet = food.indexOf(target)
       if (pellet >= 0 && distance < size(f) + 5 && Math.abs(delta) < .7) {
         food.splice(pellet, 1); ripples.push({ x: target.x, y: target.y, age: 0 }); ripples = ripples.slice(-24)
@@ -187,27 +181,46 @@
       for (let i = 0; i < 2; i++) { ctx.beginPath(); ctx.ellipse(r.x, r.y, 5 + r.age * 26 + i * 8, 3 + r.age * 20 + i * 6, 0, 0, Math.PI * 2); ctx.stroke() }
     }
     ripples = ripples.filter(r => r.age < 2.5)
-    // Broad, soft surface reflections, kept deliberately faint over the koi.
-    ctx.lineWidth = 1
-    for (let i = 0; i < 18; i++) {
-      ctx.strokeStyle = night ? '#bad9de08' : '#c2e4ce0b'
-      ctx.beginPath()
-      for (let x = 0; x <= width; x += 20) {
-        const y = i * height / 18 + Math.sin(x / 95 + (reduced ? 0 : t * .22) + i) * 13
-        if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y)
+    if (night) {
+      for (let i = 0; i < 12; i++) {
+        const p = waterPosition(i * 2.399, .86)
+        const glow = reduced ? .45 : .35 + Math.sin(t * .7 + i * 3) * .25
+        ctx.shadowColor = '#efe7a2'; ctx.shadowBlur = 9
+        ellipse(ctx, p.x + Math.sin(t * .2 + i) * (reduced ? 0 : 4), p.y, 1.3, 1.3, `rgba(246,236,163,${glow})`)
       }
-      ctx.stroke()
+      ctx.shadowBlur = 0
     }
     if (state) state.eggs.forEach((e, i) => {
-      ellipse(ctx, 182 + i * 15, height - 153, 5, 6, '#e6d9a9')
-      ellipse(ctx, 182 + i * 15, height - 153, 2, 2, '#907b55')
+      const p = waterPosition(1.2, .72)
+      ellipse(ctx, p.x + i * 12, p.y, 5, 6, '#e6d9a9')
+      ellipse(ctx, p.x + i * 12, p.y, 2, 2, '#907b55')
     })
-    if (keyboardActive) {
+    if (!zen && keyboardActive) {
       ctx.strokeStyle = '#efdd9b'; ctx.beginPath(); ctx.arc(keyboardPoint.x * width, keyboardPoint.y * height, 12, 0, Math.PI * 2); ctx.stroke()
     }
     frame = requestAnimationFrame(animate)
   }
-  canvas.addEventListener('pointerdown', e => { keyboardActive = false; interact(e.offsetX, e.offsetY) })
+  canvas.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return
+    keyboardActive = false; interact(e.offsetX, e.offsetY)
+  })
+  $('zen').onclick = () => {
+    zen = true
+    document.querySelector('main').classList.add('zen')
+    $('zen').setAttribute('aria-pressed', 'true')
+    clearTimeout(noticeTimer)
+    $('notice').classList.remove('show')
+    keyboardActive = false
+    canvas.focus({ preventScroll: true })
+  }
+  canvas.addEventListener('contextmenu', e => {
+    if (!zen) return
+    e.preventDefault()
+    zen = false
+    document.querySelector('main').classList.remove('zen')
+    $('zen').setAttribute('aria-pressed', 'false')
+    $('zen').focus({ preventScroll: true })
+  })
   canvas.addEventListener('keydown', e => {
     if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' ', 'Enter'].includes(e.key)) return
     e.preventDefault(); keyboardActive = true
@@ -220,7 +233,15 @@
     for (const key of ['feed', 'ripple']) { $(key).classList.toggle('active', key === id); $(key).setAttribute('aria-pressed', String(key === id)) }
     $('hint').textContent = id === 'feed' ? '轻点水面，送它们一餐小欢喜' : '轻点水面，看涟漪慢慢散开'
   }
-  $('light').onclick = () => { night = !night; $('light').textContent = night ? '☀ 天明' : '☾ 入夜'; $('light').setAttribute('aria-pressed', String(night)); makeBackdrop() }
+  $('light').onclick = () => {
+    night = !night
+    document.body.classList.toggle('night', night)
+    $('light').textContent = night ? '☀' : '☾'
+    $('light').setAttribute('aria-label', night ? '切换到日间' : '切换到夜间')
+    $('light').setAttribute('aria-pressed', String(night))
+    makeBackdrop()
+  }
+  $('return').onclick = () => window.close()
   $('rename-form').onsubmit = async e => {
     e.preventDefault()
     try {
@@ -233,6 +254,11 @@
     cancelAnimationFrame(frame)
     if (!document.hidden) { last = performance.now(); frame = requestAnimationFrame(animate) }
   })
+  for (const [name, image] of Object.entries(sceneImages)) {
+    image.onload = () => { if ((night ? 'night' : 'day') === name) makeBackdrop() }
+    image.onerror = () => notify('庭院美术资源读取失败，请检查安装文件。')
+    image.src = `koi-pond-${name}.webp`
+  }
   makeBackdrop()
   frame = requestAnimationFrame(animate)
   if (!bridge) { $('journey').textContent = '请从桌面壳的「后院鱼塘」菜单进入。'; return }

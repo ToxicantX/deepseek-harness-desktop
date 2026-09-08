@@ -6,14 +6,20 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'">
   <title>后院鱼塘</title>
   <link rel="stylesheet" href="koi-pond.css">
+  <link rel="preload" as="image" href="koi-pond-day.webp">
+  <link rel="preload" as="image" href="koi-pond-night.webp">
 </head>
 <body>
   <main>
     <canvas id="pond" tabindex="0" aria-label="锦鲤池塘：点击水面投喂；方向键移动投喂点，空格投喂"></canvas>
     <header>
       <div class="seal" aria-hidden="true">庭</div>
-      <div><p class="eyebrow">A LITTLE GARDEN, BETWEEN TASKS</p><h1>后院鱼塘<span>一池闲趣，日日生长。</span></h1></div>
-      <button id="light" aria-pressed="false">☾ 入夜</button>
+      <div><p class="eyebrow">A LITTLE GARDEN. BETWEEN TASKS</p><h1>后院鱼塘<span>一池清澈，日月生长。</span></h1></div>
+      <nav class="window-tools" aria-label="庭院视图">
+        <button id="light" title="切换日夜" aria-label="切换到夜间" aria-pressed="false">☾</button>
+        <button id="zen" title="禅模式：单击鼠标右键退出" aria-pressed="false">禅</button>
+        <button id="return" title="关闭鱼塘，返回对话">‹ 返回</button>
+      </nav>
     </header>
     <aside>
       <p class="eyebrow">池中小住客 <span id="count">—</span></p>
@@ -28,16 +34,16 @@
         <p id="lineage"></p>
       </div>
       <p id="eggs"></p>
-      <details><summary>庭院手记 · 成长规则</summary>
+      <details><summary>继续守望 · 成长周期</summary>
         <p>成功发送一条主会话消息，每条锦鲤升 1 级。失败、历史加载、助手回复与原会话重试不计入。</p>
         <p>每 100 级渐长体型、舒展鳍尾；500 级异性配对产卵，再聊 5 次迎来新鱼。每条鱼一生繁育一次，鱼与卵合计最多 16 位。</p>
-        <p>点击水面投喂，切换「抚水」轻点泛起涟漪。投喂不刷等级，没有饥饿、死亡或离线惩罚。关掉庭院也会随对话成长。</p>
+        <p>点击水面投喂，切换「玩水」轻点泛起涟漪。投喂不刷等级，没有饥饿、死亡或离线惩罚。关掉庭院也会随对话成长。</p>
       </details>
     </aside>
     <footer>
       <div class="tools" aria-label="互动方式">
-        <button id="feed" class="active" aria-pressed="true">◌ 投喂</button>
-        <button id="ripple" aria-pressed="false">≈ 抚水</button>
+        <button id="feed" class="active" aria-pressed="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12 8 7l7 1 4-3M3 12l5 5 7-1 4 3M2 12h4m14-4 2-2m-2 10 2 2"/></svg>投喂</button>
+        <button id="ripple" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 8q5-5 10 0t10 0M2 12q5-5 10 0t10 0M2 16q5-5 10 0t10 0"/></svg>玩水</button>
       </div>
       <p id="hint">轻点水面，送它们一餐小欢喜</p>
       <span class="garden-label">日々是好日 <i>／</i> KOI GARDEN</span>

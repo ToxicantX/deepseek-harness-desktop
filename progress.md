@@ -784,3 +784,52 @@ Remove-Item -LiteralPath 'src/conversation-replay-host-injector.ts','src/convers
 - docs/koi-pond.md：新增玩法、统计口径、存档、故障边界、验证及精确回滚说明。
 - progress.md：仅在末尾追加本轮结果、证据和回滚记录。
 - 回滚点：当前任务尚未提交时，可执行 git restore --source=HEAD -- src/main.ts src/preload.ts src/conversation-replay-injector.ts tsdown.config.ts，再按 docs/koi-pond.md 的 Remove-Item -LiteralPath 明确文件清单移除本功能新增文件，执行 pnpm run build；保留本日志、用户存档及已有主题设置改动。若这些文件后续又有其他修改，改用本功能提交／补丁精确回退。
+
+## 2026-09-08 - Task: 增加鱼塘禅模式与右键退出
+### What was done
+- 在鱼塘底部互动工具栏增加「禅」按钮，进入后隐藏所有池塘内文字、面板、按钮、通知及选中标记，仅显示池塘画面，保持原有游动、互动与成长。
+- 单击鼠标右键退出禅模式并恢复原界面和所选锦鲤；右键不再误触投喂，退出时拦截右键菜单，不残留禅模式期间的成长提示。
+### Testing
+- node scripts/smoke-koi-pond.mjs 通过：独立隐藏 Electron 中确认仅 Canvas 可见、成长期间通知仍隐藏、右键不投食、右键菜单事件被拦截、退出恢复全部面板与原选中锦鲤；原有投喂、昼夜、存档等冒烟检查继续通过。
+- 鱼塘专项 tests/koi-pond.spec.ts：14 项全部通过；git diff --check 通过。
+- 已目视检查 C:\Users\karma617\AppData\Local\Temp\dsh-koi-smoke-lbQDwa\pond-zen.png，画面没有文字、工具栏或选中标记。
+- 本轮仅修改页面资源、冒烟脚本与文档，未重新构建安装包，未重启或操作当前桌面壳实例；实际窗口中的鼠标操作仍可在加载新资源后人工复核。
+### Notes
+- assets/koi-pond.html：工具栏新增带退出说明的「禅」按钮。
+- assets/koi-pond.css：禅模式隐藏 Canvas 以外的界面元素及画布焦点边框。
+- assets/koi-pond.js：增加禅模式状态、进入与右键退出处理，隐藏通知和辅助标记，限制左键触发投喂。
+- scripts/smoke-koi-pond.mjs：新增禅模式隐藏、成长通知、右键退出、界面恢复断言及截图。
+- docs/koi-pond.md：补充禅模式使用方式与状态保持说明。
+- progress.md：仅追加本轮变更与验证记录。
+- 回滚方式：git restore --source=9151d32 -- assets/koi-pond.html assets/koi-pond.css assets/koi-pond.js scripts/smoke-koi-pond.mjs docs/koi-pond.md；保留本日志与用户鱼塘存档。该回滚点保留此前已完成的鱼塘功能。
+
+## 2026-09-08 - Task: 按日间和夜间设计稿重做鱼塘美术与界面
+### What was done
+- 使用用户提供的两张设计稿制作日间与夜间本地背景，分别保留碧绿水色／日照叶影和深蓝月光／暖灯，不以整体变暗代替夜景。
+- 重建朱印标题、金线花角面板、荷花冠饰、右侧真实锦鲤档案、底部投喂／玩水双按钮与返回入口；保留并移至右上角的日夜、禅模式按钮。
+- 清理原稿中烘焙的文字与面板，遮挡景物用邻近庭院纹理重建，禅模式下不残留固定文字；真实锦鲤继续独立绘制，保持成长、繁育、改名、投喂和右键退出禅模式。
+- 根据新池岸布局将游动与投喂限制在中央水域，默认独立窗口调整为 1280×720，保持小窗口可滚动档案；所有资源本地打包，不新增产品依赖或修改 DSH 核心。
+### Testing
+- Node 24.19.0 下 pnpm test：25 个文件、170 项全部通过；新增日夜 WebP、SVG 装饰及入口资源契约测试。
+- pnpm run build 通过，包括 TypeScript 类型检查；node --check assets/koi-pond.js 与 git diff --check 通过。构建工具保留现有 CommonJS 提示，未改动无关构建配置。
+- 独立隐藏 Electron 冒烟通过：两幅美术资源实际解码、日夜主题切换、投喂追食、玩水、改名、成长去重、禅模式隐藏和右键退出、返回按钮关闭独立鱼塘、关闭后成长与存档恢复、小窗口无页面横向溢出和面板隐藏横向滚动条。
+- 冒烟输出 C:\Users\karma617\AppData\Local\Temp\dsh-koi-smoke-L6fnXX，含 1723×913 日间、1280×679 夜间、普通窗口、禅模式和 680×520 小窗口截图。已目视检查日夜、禅模式及最终小窗口画面。
+- 美术迭代发现 OpenCV seamlessClone 会修改传入掩码，若事后计算羽化会导致原文字透出；已改为事前计算羽化覆盖率，重新导出并检查禅模式无文字残留。小窗口初次截图出现面板横向滚动条，已修复并复验。
+- 使用 Pillow／NumPy／OpenCV 对用户本地原稿进行确定性像素处理，未调用图像生成服务，原图未改写。背景 WebP 合计约 1.1 MiB，随已有 assets/* 规则打包。
+- 本轮未打安装包、未重启或操作当前运行的桌面壳、未发送真实模型请求；独立窗口冒烟不等于安装包或主壳整体运行验收。
+### Notes
+- assets/koi-pond-day.webp：新增清理固定 UI 后的日间背景。
+- assets/koi-pond-night.webp：新增清理固定 UI 后的夜间背景。
+- assets/koi-pond-lotus.svg：新增本地矢量荷花冠饰。
+- assets/koi-pond-frame.svg：新增本地矢量金线花角框。
+- assets/koi-pond.html：调整设计稿标题与按钮布局、增加背景预加载和返回入口，保留真实交互控件。
+- assets/koi-pond.css：按设计稿重建字号比例、面板位置、冠饰、花角、工具栏和昼夜配色，保持禅模式与小窗口适配。
+- assets/koi-pond.js：加载独立日夜背景、等比铺满，调整锦鲤与水域匹配，增加夜间微光及返回操作，保留存档桥接和成长规则。
+- src/koi-pond-window.ts：仅将默认窗口尺寸改为 1280×720。
+- scripts/prepare-koi-art.py：新增可复跑的本地原稿 UI 清理、纹理补齐与 WebP 导出脚本。
+- scripts/smoke-koi-pond.mjs：补充设计尺寸截图、美术解码、返回按钮、小窗口检查，保留已有禅模式及成长测试。
+- tests/koi-pond.spec.ts：新增日夜场景与冠饰、花角资源存在及格式检查。
+- docs/koi-pond.md：更新按钮位置、玩法范围、本地美术来源、原图遮挡重建及还原边界。
+- progress.md：仅追加本轮结果、验证证据和回滚方式。
+- 还原边界：被原面板遮住的景物属于重建，并非原始隐藏图层；本机字体、动态锦鲤及额外保留的日夜／禅入口与设计稿存在差异，不宣称像素级 100% 一致。
+- 本轮回滚补丁：C:\Users\karma617\AppData\Local\Temp\dsh-koi-art-rollback-51cois3y\revert-art-keep-zen.patch，基于 9151d32 及已有禅模式差异构造，已通过 git apply --check --ignore-space-change 验证。执行 git apply --ignore-space-change "C:\Users\karma617\AppData\Local\Temp\dsh-koi-art-rollback-51cois3y\revert-art-keep-zen.patch"，再执行 Remove-Item -LiteralPath assets/koi-pond-day.webp, assets/koi-pond-night.webp, assets/koi-pond-lotus.svg, assets/koi-pond-frame.svg, scripts/prepare-koi-art.py，最后 pnpm run build；保留此前禅模式、用户存档及本日志。该补丁保存在临时目录，长期留存请先备份，后续继续修改文件时应重新核对补丁。

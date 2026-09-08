@@ -87,6 +87,19 @@ app.whenReady().then(async () => {
   const js = source => win.webContents.executeJavaScript(source);
   await delay(800);
   assert.equal(await js("document.querySelectorAll('.fish-card').length"), 4);
+  // Compare at the actual design sizes, with live UI and no open fish profile.
+  await js("Promise.all(['day','night'].map(name => { const image = new Image(); image.src = 'koi-pond-' + name + '.webp'; return image.decode(); }))");
+  win.setContentSize(1723, 913);
+  await delay(250);
+  await fs.writeFile(join(directory, 'pond-design-day.png'), (await win.webContents.capturePage()).toPNG());
+  await js("document.getElementById('light').click()");
+  assert.equal(await js("document.body.classList.contains('night')"), true);
+  win.setContentSize(1280, 679);
+  await delay(250);
+  await fs.writeFile(join(directory, 'pond-design-night.png'), (await win.webContents.capturePage()).toPNG());
+  await js("document.getElementById('light').click()");
+  win.setContentSize(1280, 720);
+  await delay(250);
   await pond.open();
   assert.equal(BrowserWindow.getAllWindows().length, 1);
   await js(\`document.querySelector('.fish-card').click();
@@ -103,11 +116,30 @@ app.whenReady().then(async () => {
     document.getElementById('pond').dispatchEvent(new PointerEvent('pointerdown', { clientX: 410, clientY: 400 }));\`);
   await delay(150);
   assert((await js('window.pellets')) > 0, 'Feed must create rendered pellets');
-  await delay(7500);
+  for (let attempt = 0; attempt < 60 && await js('window.pellets') > 0; attempt++) await delay(250);
   assert.equal(await js('window.pellets'), 0, 'Fish must eat pellets before their 25-second expiry');
   await js("document.getElementById('ripple').click(); document.getElementById('pond').dispatchEvent(new PointerEvent('pointerdown', {clientX:350,clientY:400}));");
   await delay(100);
   assert.equal(await js('window.pellets'), 0);
+  await js("document.getElementById('feed').click(); document.getElementById('zen').click()");
+  assert.equal(await js("document.getElementById('zen').getAttribute('aria-pressed')"), 'true');
+  const onlyCanvasVisible = "Array.from(document.querySelector('main').children).filter(e => getComputedStyle(e).display !== 'none').map(e => e.id)";
+  assert.deepEqual(await js(onlyCanvasVisible), ['pond']);
+  await pond.recordDialogue('smoke', 'one');
+  await delay(200);
+  assert.deepEqual(await js(onlyCanvasVisible), ['pond'], 'Growth notifications must stay hidden in zen mode');
+  assert.equal((await js('window.koiPond.getState()')).dialogues, 1);
+  await fs.writeFile(join(directory, 'pond-zen.png'), (await win.webContents.capturePage()).toPNG());
+  await js("document.getElementById('pond').dispatchEvent(new PointerEvent('pointerdown', {button:2,clientX:350,clientY:400}))");
+  await delay(100);
+  assert.equal(await js('window.pellets'), 0, 'Right-click must not feed the fish');
+  assert.equal(await js("document.getElementById('pond').dispatchEvent(new MouseEvent('contextmenu', {button:2,bubbles:true,cancelable:true}))"), false);
+  assert.equal(await js("document.getElementById('zen').getAttribute('aria-pressed')"), 'false');
+  assert.equal(await js("getComputedStyle(document.querySelector('header')).display"), 'flex');
+  assert.equal(await js("getComputedStyle(document.querySelector('aside')).display"), 'block');
+  assert.equal(await js("getComputedStyle(document.querySelector('footer')).display"), 'flex');
+  assert.equal(await js("document.getElementById('notice').classList.contains('show')"), false);
+  assert.equal(await js("document.querySelector('.fish-card[aria-pressed=true] .fish-copy').firstChild.textContent"), '荷风');
   await js("document.getElementById('light').click()");
   assert.equal(await js("document.getElementById('light').getAttribute('aria-pressed')"), 'true');
   await js("document.getElementById('light').click()");
@@ -122,8 +154,11 @@ app.whenReady().then(async () => {
   win.setSize(680, 520);
   await delay(200);
   assert.equal(await js("document.documentElement.scrollWidth > innerWidth"), false);
+  assert.equal(await js("getComputedStyle(document.querySelector('aside')).overflowX"), 'hidden');
   await fs.writeFile(join(directory, 'pond-small.png'), (await win.webContents.capturePage()).toPNG());
-  win.destroy();
+  await js("document.getElementById('return').click()").catch(() => {});
+  await delay(150);
+  assert.equal(win.isDestroyed(), true, 'Return must close only the pond window');
   await pond.recordDialogue('smoke', 'closed-window');
   await pond.open();
   win = BrowserWindow.getAllWindows()[0];
@@ -139,7 +174,9 @@ app.whenReady().then(async () => {
   assert.deepEqual(errors, []);
   await fs.writeFile(join(directory, 'result.json'), JSON.stringify({
     passed: true, checks: ['preload IPC', 'singleton window', 'rename', 'feeding and eating',
-      'ripples', 'day/night', 'deduplication', 'closed-window growth', 'reopen', 'save reload', 'small viewport'],
+      'ripples', 'zen hides UI and notifications', 'right-click exits without feeding', 'zen restores UI',
+      'day/night artwork decoded', 'design-size screenshots', 'return button',
+      'day/night', 'deduplication', 'closed-window growth', 'reopen', 'save reload', 'small viewport'],
     directory,
   }, null, 2));
   app.quit();
