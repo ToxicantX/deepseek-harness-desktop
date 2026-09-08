@@ -121,7 +121,7 @@ app.whenReady().then(async () => {
         if (!output[i + 3]) transparent++;
         else if (output[i] !== source.data[i] || output[i + 1] !== source.data[i + 1] || output[i + 2] !== source.data[i + 2]) changed++;
       }
-      window.latestRefraction = { changed, transparent, duration, width: source.width, height: source.height };
+      window.latestRefraction = { changed, transparent, duration, waveCount: waves.length, width: source.width, height: source.height };
       window.refractionHistory.push(window.latestRefraction);
       return output;
     };
@@ -140,10 +140,12 @@ app.whenReady().then(async () => {
   await delay(150);
   assert((await js('window.pellets')) > 0, 'Feed must create rendered pellets');
   const feedRings = await js('window.feedRings');
-  assert.equal(feedRings.length, 2);
-  assert(feedRings.every(ring => ring.width === 1 && ring.color.startsWith('rgba(190, 218, 194,')), 'Feeding must keep its original gentle waves');
+  assert.equal(feedRings.length, 0, 'Feeding must not draw the old ellipse outlines');
+  assert((await js('window.latestRefraction.changed')) > 0, 'Feeding must refract actual scene pixels');
   for (let attempt = 0; attempt < 60 && await js('window.pellets') > 0; attempt++) await delay(250);
   assert.equal(await js('window.pellets'), 0, 'Fish must eat pellets before their 25-second expiry');
+  assert(await js('window.refractionHistory.every(sample => sample.waveCount <= 3)'), 'Feeding and eating must share the wave budget');
+  await delay(2700);
   for (const theme of ['day', 'night']) {
     if (theme === 'night') await js("document.getElementById('light').click()");
     await js("document.getElementById('ripple').click(); document.getElementById('pond').dispatchEvent(new PointerEvent('pointerdown', {clientX:610,clientY:400}));");
@@ -162,16 +164,30 @@ app.whenReady().then(async () => {
     await delay(2300);
     assert.equal(await js('window.latestRefraction'), null, 'Waves must still expire');
   }
+  await js("for (let i = 0; i < 200; i++) document.getElementById('pond').dispatchEvent(new PointerEvent('pointerdown', {clientX:610,clientY:400}));");
+  await delay(100);
+  assert.equal(await js('window.latestRefraction.waveCount'), 1, 'Burst clicks must create only one wave');
+  for (let i = 0; i < 3; i++) {
+    await delay(510);
+    await js("document.getElementById('pond').dispatchEvent(new PointerEvent('pointerdown', {clientX:610,clientY:400}));");
+  }
+  await delay(100);
+  assert.equal(await js('window.latestRefraction.waveCount'), 3, 'Spaced clicks must respect the active wave cap');
+  await delay(2600);
+  await js("document.getElementById('pond').dispatchEvent(new PointerEvent('pointerdown', {clientX:610,clientY:400}));");
+  await delay(100);
+  assert.equal(await js('window.latestRefraction.waveCount'), 1, 'Input must resume after waves expire');
+  await delay(2600);
   const timings = await js('window.refractionHistory.map(sample => sample.duration).sort((a,b) => a-b)');
   const refractionTiming = { samples: timings.length, medianMs: timings[Math.floor(timings.length / 2)], p95Ms: timings[Math.floor(timings.length * .95)] };
   const overlapTiming = await js(\`(() => {
     const source = document.getElementById('pond').getContext('2d').getImageData(430, 250, 360, 320);
-    const waves = Array.from({length:24}, (_,i) => ({x:180+(i%4)*5,y:160+Math.floor(i/4)*5,age:1.2}));
+    const waves = Array.from({length:3}, (_,i) => ({x:180+(i%4)*5,y:160+Math.floor(i/4)*5,age:1.2}));
     const start = performance.now();
     window.koiWater.refract(source, waves);
     return performance.now() - start;
   })()\`);
-  refractionTiming.overlap24KernelMs = overlapTiming;
+  refractionTiming.overlap3KernelMs = overlapTiming;
   await fs.writeFile(join(directory, 'refraction-timing.json'), JSON.stringify(refractionTiming, null, 2));
   await js("document.getElementById('light').click()");
   await js("document.getElementById('feed').click(); document.getElementById('zen').click()");

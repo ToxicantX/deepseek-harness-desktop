@@ -940,3 +940,36 @@ Remove-Item -LiteralPath 'src/conversation-replay-host-injector.ts','src/convers
 - docs/koi-pond.md：更新玩法表现、公式与采样步骤、CPU 开销和二维近似边界。
 - progress.md：仅追加本轮证据与回滚记录，保留其他任务新增历史。
 - 回滚点：C:\Users\karma617\AppData\Local\Temp\dsh-refraction-before-9cab16e152ab40a699eb52c9ca3d4193。用 Copy-Item -LiteralPath 将该目录的 koi-pond.js、koi-pond.html 分别复制回 assets/ 对应文件，smoke-koi-pond.mjs 复制回 scripts/，koi-pond.md 复制回 docs/；执行 Remove-Item -LiteralPath assets/koi-pond-refraction.js, tests/koi-pond-refraction.spec.mjs。保留本日志、存档及 Runtime 并行改动。临时备份包含上一轮自然轮廓波纹，长期需要回滚时请另行备份该目录。
+
+## 2026-09-08 - Task: 限制鱼塘密集连续点击
+### What was done
+- 投喂和玩水共用 500 毫秒互动冷却，活动玩水折射波最多 3 个；鼠标、键盘和禅模式共用入口，模式切换保留冷却。
+- 超限输入直接丢弃，不排队、不生成额外特效、不重复刷新提示；投喂满额检查提前到创建波纹之前，活动波纹到期后恢复互动。
+### Testing
+- node --check assets/koi-pond.js 与 node --check scripts/smoke-koi-pond.mjs 通过。
+- 三组定向 Vitest 测试共 25 项通过，含新加的千次密集输入、冷却边界、活动波纹上限、到期恢复、模式切换、饲料满额和无效水域检查。
+- node scripts/smoke-koi-pond.mjs 独立隐藏 Electron 冒烟通过，真实页面验证 200 次密集点击仅产生一个波纹、间隔点击最多三个波纹、到期后恢复，以及原有投喂、日夜、禅模式、存档等回归。输出：C:\Users\karma617\AppData\Local\Temp\dsh-koi-smoke-v3kaA7。
+- 未构建或打包，未操作正在运行的主壳；检查结论不代表所有硬件的帧率保证。
+### Notes
+- assets/koi-pond.js：入口冷却及活动折射波上限，提前执行投喂满额判断。
+- tests/koi-pond-interaction.spec.mjs：新增四项互动预算测试。
+- scripts/smoke-koi-pond.mjs：新增实际页面密集点击、上限和恢复断言，人工重叠采样调整为三个波纹。
+- docs/koi-pond.md：同步互动限制和性能边界。
+- progress.md：追加本轮记录。
+- 回滚：执行 git restore --source=ca32fbe579fc864f141888a3091184a58d56bc00 -- assets/koi-pond.js scripts/smoke-koi-pond.mjs docs/koi-pond.md；执行 Remove-Item -LiteralPath tests/koi-pond-interaction.spec.mjs。仅在这些文件没有后续修改时使用；保留本日志与鱼塘存档。
+
+## 2026-09-08 - Task: 统一投食与进食水波折射效果
+### What was done
+- 投食与鱼儿进食改用玩水同款正弦衰减、双线性采样折射，振幅取玩水的 45%，移除旧椭圆轮廓。
+- 三类波纹共用最多三个活动折射波的额度，保留 500 毫秒点击冷却；特效满额时鱼儿照常进食，仅跳过新增波纹。
+### Testing
+- node --check assets/koi-pond.js 通过；三组定向 Vitest 测试共 26 项通过，新增投食波纹占用额度及模式切换检查。
+- 独立隐藏 Electron 冒烟通过：投食实际像素折射、旧描边消失、投食与进食波纹不超过三个，以及既有密集点击、到期恢复、日夜、禅模式、存档回归。输出目录 C:\Users\karma617\AppData\Local\Temp\dsh-koi-smoke-Qoy8nV。
+- git diff --check 通过；未打包、未重启主壳。性能限制不等同于所有硬件帧率保证。
+### Notes
+- assets/koi-pond.js：统一折射渲染及额度，移除旧描边。
+- tests/koi-pond-interaction.spec.mjs：追加投食共享额度测试。
+- scripts/smoke-koi-pond.mjs：验证真实投食像素折射和进食额度，隔离残留波纹后测试玩水。
+- docs/koi-pond.md：同步效果、振幅与共享额度说明。
+- progress.md：仅追加本轮记录，保留上一轮未提交改动。
+- 回滚：从 C:\Users\karma617\AppData\Local\Temp\dsh-feed-before-98d1eee6ded34433a13984d2f9bd68b3 使用 Copy-Item -LiteralPath 复制 koi-pond.js 至 assets/koi-pond.js、smoke-koi-pond.mjs 至 scripts/smoke-koi-pond.mjs、koi-pond-interaction.spec.mjs 至 tests/koi-pond-interaction.spec.mjs、koi-pond.md 至 docs/koi-pond.md，均加 -Force；保留本日志。备份包含上一轮连续点击限制。

@@ -6,7 +6,7 @@
   const bridge = window.koiPond
   const patterns = { kohaku: ['红白', '#eee6ce', '#c44c32'], sanke: ['大正三色', '#e8e4d2', '#b74731'], ogon: ['黄金', '#e3bf63', '#ba8638'], shusui: ['秋翠', '#bacfd0', '#d77947'] }
   let state, selected, width = 0, height = 0, mode = 'feed', night = false, zen = false
-  let fish = [], food = [], ripples = [], last = 0, frame = 0, noticeTimer, lastFeed = 0
+  let fish = [], food = [], ripples = [], last = 0, frame = 0, noticeTimer, lastInteraction = -Infinity
   let keyboardPoint = { x: .4, y: .55 }, keyboardActive = false
   const backdrop = document.createElement('canvas')
   const refractionCanvas = document.createElement('canvas')
@@ -137,11 +137,14 @@
   }
   function interact(x, y) {
     if (!state || waterDistance(x, y) > 1) return
+    const now = performance.now()
+    // All input paths share the cooldown; rejected clicks never queue effects.
+    if (now - lastInteraction < 500) return
+    if (ripples.filter(r => r.age < window.koiWater.duration).length >= 3) return
+    lastInteraction = now
+    if (mode === 'feed' && food.length >= 45) return
     ripples.push({ x, y, age: 0, strong: mode === 'ripple' })
-    ripples = ripples.slice(-24)
     if (mode !== 'feed') return
-    if (performance.now() - lastFeed < 250 || food.length >= 45) { notify('饲料够啦，等它们慢慢吃。'); return }
-    lastFeed = performance.now()
     for (let i = 0; i < 5; i++) food.push({ x: clamp(x + random(-13, 13), 15, width - 15), y: clamp(y + random(-13, 13), 15, height - 15), age: 0 })
   }
   function refractWater(waves) {
@@ -159,7 +162,7 @@
     refractionContext.drawImage(canvas, left * dpr, top * dpr, w * dpr, h * dpr, 0, 0, w, h)
     const source = refractionContext.getImageData(0, 0, w, h)
     const pixels = window.koiWater.refract(source, waves.map(r => ({
-      x: r.x - left, y: r.y - top, age: r.age, strength: reduced ? .4 : 1,
+      x: r.x - left, y: r.y - top, age: r.age, strength: (r.strong ? 1 : .45) * (reduced ? .4 : 1),
     })))
     refractionContext.putImageData(new ImageData(pixels, w, h), 0, 0)
     ctx.save()
@@ -196,7 +199,8 @@
       }
       const pellet = food.indexOf(target)
       if (pellet >= 0 && distance < size(f) + 5 && Math.abs(delta) < .7) {
-        food.splice(pellet, 1); ripples.push({ x: target.x, y: target.y, age: 0 }); ripples = ripples.slice(-24)
+        food.splice(pellet, 1)
+        if (ripples.filter(r => r.age < window.koiWater.duration).length < 3) ripples.push({ x: target.x, y: target.y, age: 0 })
       }
       koi(f, reduced ? t * .4 : t)
     }
@@ -204,19 +208,7 @@
     food = food.filter(p => p.age < 25)
     for (const r of ripples) r.age += dt
     ripples = ripples.filter(r => r.age < window.koiWater.duration)
-    const waves = ripples.filter(r => r.strong)
-    if (waves.length) refractWater(waves)
-    for (const r of ripples) {
-      if (r.strong) continue
-      const opacity = .3 * Math.max(0, 1 - r.age / 2.5)
-      ctx.strokeStyle = `rgba(190,218,194,${opacity})`
-      ctx.lineWidth = 1
-      for (let i = 0; i < 2; i++) {
-        ctx.beginPath()
-        ctx.ellipse(r.x, r.y, 5 + r.age * 26 + i * 8, 3 + r.age * 20 + i * 6, 0, 0, Math.PI * 2)
-        ctx.stroke()
-      }
-    }
+    if (ripples.length) refractWater(ripples)
     if (night) {
       for (let i = 0; i < 12; i++) {
         const p = waterPosition(i * 2.399, .86)
