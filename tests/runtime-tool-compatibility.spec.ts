@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { stripTypeScriptTypes } from 'node:module'
 import { zstdCompressSync, zstdDecompress } from 'node:zlib'
-import { adaptRuntimeCode, adaptRuntimePwsh, adaptRuntimeRead, adaptRuntimeToolPrompt } from '../src/runtime-tool-compatibility.ts'
+import { adaptRuntimeCode, adaptRuntimePwsh, adaptRuntimeRead, adaptRuntimeReadLimit, adaptRuntimeToolPrompt } from '../src/runtime-tool-compatibility.ts'
 
 const fixture = `function candidateExists(candidate) {
 \ttry {
@@ -75,6 +75,8 @@ describe('code-generation diagnostics', () => {
     const programs = [
       "await tools.edit({prompt:'first\nsecond'});",
       'await tools.edit({old_string:"old","new_string:"async function next() {}"});',
+      'console.log(await tools.pwsh({command:',
+      "await tools.write({content: String.raw`source`.replaceAll('','\\')});",
     ]
     for (const program of programs) {
       expect(() => stripTypeScriptTypes('async function __dsh_program__() {\n' + program + '\n}')).toThrow()
@@ -114,7 +116,51 @@ describe('code-generation diagnostics', () => {
     const result = adaptRuntimeToolPrompt(source)
     expect(result.source).toContain('E:/AI/project')
     expect(result.source).toContain('original')
+    expect(result.source).toContain('An outer description does not supply an inner one')
+    expect(result.source).toContain('stop retrying that ID')
+    expect(result.source).toContain('Do not enable replace_all unless every occurrence is intended')
+    expect(result.source).toContain('empty-string replaceAll')
     expect(adaptRuntimeToolPrompt(result.source).changed).toBe(false)
+  })
+})
+
+describe('read limit normalization', () => {
+  const source = `
+function parsePositiveInteger(value) {
+  if (!Number.isFinite(value) || !Number.isInteger(value) || value < 1) throw new Error("invalid limit");
+  return value;
+}
+function parseReadArgs(args, maxLimit) {
+  const limit = args.limit === void 0 ? maxLimit : parsePositiveInteger(args.limit, "limit");
+  if (limit > maxLimit) throw new Error(\`limit must be less than or equal to \${maxLimit}\`);
+  return { offset: args.offset ?? 1, limit };
+}
+const description = \`Maximum number of lines to return. Defaults to \${caps.limit}.\`;
+`
+  const parse = (text: string) => new Function('caps', text + ';return parseReadArgs;')({ limit: 2000 })
+
+  it('reproduces the failure then caps valid requests without increasing the configured budget', () => {
+    expect(() => parse(source)({ limit: 5000 }, 2000)).toThrow('2000')
+    const result = adaptRuntimeReadLimit(source)
+    const run = parse(result.source)
+    expect(run({ offset: 31, limit: 5000 }, 2000)).toEqual({ offset: 31, limit: 2000 })
+    expect(run({ limit: 5000 }, 20).limit).toBe(20)
+    expect(run({ limit: 2 }, 20).limit).toBe(2)
+    expect(run({}, 20).limit).toBe(20)
+    expect(result.source).toContain('last returned line number + 1')
+    expect(adaptRuntimeReadLimit(result.source).changed).toBe(false)
+  })
+
+  it('keeps malformed values rejected', () => {
+    const run = parse(adaptRuntimeReadLimit(source).source)
+    for (const limit of [0, -1, 1.5, NaN, Infinity, '5000', null]) {
+      expect(() => run({ limit }, 2000)).toThrow('invalid limit')
+    }
+  })
+
+  it('requires all source anchors before modifying the read contract', () => {
+    const unknown = source.replace('Maximum number of lines to return.', 'Changed upstream.')
+    expect(adaptRuntimeReadLimit(unknown)).toEqual({ source: unknown, changed: false })
   })
 })
 

@@ -56,7 +56,7 @@ export function adaptRuntimeCode(source: string): { source: string; changed: boo
   if (!source.includes(PARSE_FAILURE) || source.includes('代码在解析阶段失败')) return { source, changed: false }
   return {
     source: source.replace(PARSE_FAILURE, PARSE_FAILURE
-      + ' + "\\n代码在解析阶段失败，本次调用中的工具均尚未执行。请检查字符串引号和对象字段冒号；普通引号字符串内的换行应写成转义序列。将本次失败代码缩短后重新提交，不要重放此前成功的调用。"'),
+      + ' + "\\n代码在解析阶段失败，本次调用中的工具均尚未执行。请检查字符串引号和对象字段冒号；普通引号字符串内的换行应写成转义序列。若出现 eof，检查代码是否被截断、括号或模板字符串是否闭合。String.raw 仍需正确处理反引号和插值；不要用空字符串 replaceAll 修复路径或源码。将长文件写入与后续命令分开提交，不要重放此前成功的调用。"'),
     changed: true,
   }
 }
@@ -67,7 +67,10 @@ export function adaptRuntimeToolPrompt(source: string): { source: string; change
   return {
     source: source.replace(anchor, anchor
       + '- Keep edit and delegation calls short. Use correctly quoted object keys followed by colons. Encode newlines inside ordinary quoted strings as escape sequences; never put literal newlines inside them. Check both the outer tool JSON and the inner TypeScript string escaping.\n'
-      + '- On Windows use forward-slash absolute workdir paths such as E:/AI/project. Do not guess or silently repair damaged directory paths. Do not repeat a successfully completed call when correcting another call.\n'),
+      + '- On Windows use forward-slash absolute workdir paths such as E:/AI/project. Do not guess or silently repair damaged directory paths. Do not repeat a successfully completed call when correcting another call.\n'
+      + '- Provide every required argument in the current schema, including description on run_code and on any subtool that requires it. An outer description does not supply an inner one. Send messages only to exact IDs confirmed by current tool results; never infer a parent ID from a tool name or another session. If a recipient is unavailable, stop retrying that ID and report the result through the normal final response.\n'
+      + '- Before edit, read the current file and copy a unique literal old_string including surrounding context, without displayed line numbers. On multiple matches, add context; on no match, reread the affected region. Do not enable replace_all unless every occurrence is intended. Serialize edits to the same file and refresh context after each change.\n'
+      + '- Submit a large file write separately from verification commands. Check closing brackets and quotes before submitting. String.raw does not protect backticks or interpolation expressions; do not repair source with empty-string replaceAll. Preserve source-language backslashes through both JSON and TypeScript escaping.\n'),
     changed: true,
   }
 }
@@ -122,6 +125,31 @@ export function adaptRuntimeRead(source: string): { source: string; changed: boo
   }
 }
 
+export function adaptRuntimeReadLimit(source: string): { source: string; changed: boolean } {
+  const declaration = 'const limit = args.limit === void 0 ? maxLimit : parsePositiveInteger(args.limit, "limit");'
+  const rejection = 'if (limit > maxLimit) throw new Error(`limit must be less than or equal to ${maxLimit}`);'
+  const description = 'Maximum number of lines to return. Defaults to ${caps.limit}.'
+  if (!source.includes(declaration) || !source.includes(rejection) || !source.includes(description)) {
+    return { source, changed: false }
+  }
+  return {
+    source: source.replace(declaration,
+      'const limit = args.limit === void 0 ? maxLimit : Math.min(parsePositiveInteger(args.limit, "limit"), maxLimit);')
+      .replace(rejection, '// Desktop: cap valid oversized requests; keep invalid values rejected.')
+      .replace(description,
+        'Maximum number of lines to return. Defaults to ${caps.limit}; larger positive integers are capped to ${caps.limit}. Continue from the last returned line number + 1, not from the requested limit; totalLines indicates remaining content.')
+      .replace('Use offset and limit to continue reading large files.',
+        'Use offset and limit to continue reading large files. Oversized positive limits are capped to the configured maximum; continue from the last returned line number + 1 until totalLines is reached.'),
+    changed: true,
+  }
+}
+
+export function adaptRuntimeFileTools(source: string): { source: string; changed: boolean } {
+  const read = adaptRuntimeRead(source)
+  const limit = adaptRuntimeReadLimit(read.source)
+  return { source: limit.source, changed: read.changed || limit.changed }
+}
+
 export function installRuntimeToolCompatibility(register: typeof registerHooks = registerHooks): ModuleHooks {
   return register({
     load(url, context, nextLoad) {
@@ -131,7 +159,7 @@ export function installRuntimeToolCompatibility(register: typeof registerHooks =
       const adapt = path.endsWith('/node_modules/@deepseek-ai/dsh-pwsh-local/lib/index.js') ? adaptRuntimePwsh
         : path.endsWith('/node_modules/@deepseek-ai/dsh-code-runtime-worker-thread/lib/index.js') ? adaptRuntimeCode
           : path.endsWith('/node_modules/@deepseek-ai/dsh-tools/lib/index.js') ? adaptRuntimeToolPrompt
-            : path.endsWith('/node_modules/@deepseek-ai/dsh-tool-fs/lib/index.js') ? adaptRuntimeRead
+            : path.endsWith('/node_modules/@deepseek-ai/dsh-tool-fs/lib/index.js') ? adaptRuntimeFileTools
               : undefined
       if (adapt === undefined) return loaded
       if (loaded.source === undefined) return loaded

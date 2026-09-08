@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { zstdCompressSync } from 'node:zlib'
 import {
-  adaptRuntimeCode, adaptRuntimePwsh, adaptRuntimeRead, adaptRuntimeToolPrompt,
+  adaptRuntimeCode, adaptRuntimePwsh, adaptRuntimeFileTools, adaptRuntimeToolPrompt,
   installRuntimeToolCompatibility,
 } from '../src/runtime-tool-compatibility.ts'
 
@@ -19,7 +19,7 @@ const modules = [
   ['dsh-pwsh-local', adaptRuntimePwsh],
   ['dsh-code-runtime-worker-thread', adaptRuntimeCode],
   ['dsh-tools', adaptRuntimeToolPrompt],
-  ['dsh-tool-fs', adaptRuntimeRead],
+  ['dsh-tool-fs', adaptRuntimeFileTools],
 ]
 const verified = []
 for (const [name, adapt] of modules) {
@@ -73,7 +73,7 @@ try {
   for (const entry of verified.slice(2)) await import(pathToFileURL(entry.file).href)
   const fsTools = await import(pathToFileURL(verified[3].file).href)
   const registered = new Map()
-  const compressed = Buffer.concat([
+  let compressed = Buffer.concat([
     zstdCompressSync(Buffer.from('{"frame":1}\n')),
     zstdCompressSync(Buffer.from('{"frame":2,"label":"中文"}\n')),
   ])
@@ -100,9 +100,22 @@ try {
   const log = await read.execute({ file_path: 'fixture.jsonl.zstd', offset: 2, limit: 1 }, {})
   assert.deepEqual(log.lines, [{ number: 2, text: '{"frame":2,"label":"中文"}' }])
   assert.equal(log.totalLines, 2)
+  compressed = zstdCompressSync(Buffer.from(Array.from({ length: 45 }, (_, i) => `line ${i + 1}`).join('\n')))
+  const oversized = await read.execute({ file_path: 'fixture.jsonl.zstd', limit: 5000 }, {})
+  assert.equal(oversized.lines.length, 20)
+  assert.equal(oversized.totalLines, 45)
+  const next = await read.execute({
+    file_path: 'fixture.jsonl.zstd', offset: oversized.lines.at(-1).number + 1, limit: 5000,
+  }, {})
+  assert.equal(next.lines[0].number, 21)
+  assert.equal(next.lines.at(-1).number, 40)
+  assert.match(read.parameters.properties.limit.description, /capped to 20/)
+  const rendered = read.output.render({ file_path: 'fixture.jsonl.zstd', limit: 5000 }, oversized)
+  assert.ok(rendered.length > 0)
+  await assert.rejects(read.execute({ file_path: 'fixture.jsonl.zstd', limit: -1 }, {}))
   ctx.fs.resolve = async () => { throw new Error('fixture denied') }
   await assert.rejects(read.execute({ file_path: 'fixture.jsonl.zstd' }, {}), /fixture denied/)
-  assert.equal(byteReads, 1)
+  assert.equal(byteReads, 3)
   for (const entry of verified) {
     assert.equal(createHash('sha256').update(await readFile(entry.file)).digest('hex'), entry.hash)
   }
@@ -111,6 +124,7 @@ try {
     powershell: 'passed', damagedWorkdir: 'rejected before execution',
     parseFailure: 'diagnostic verified', coreFiles: 'unchanged',
     compressedRead: 'actual registered read: concatenated frames, pagination and access failure passed',
+    oversizedRead: '5000 accepted with configured cap 20; render and invalid limit checks passed',
     scope: 'isolated module smoke; no live agents or DSH services started',
   }, null, 2))
 } finally {

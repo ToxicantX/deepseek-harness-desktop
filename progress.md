@@ -973,3 +973,22 @@ Remove-Item -LiteralPath 'src/conversation-replay-host-injector.ts','src/convers
 - docs/koi-pond.md：同步效果、振幅与共享额度说明。
 - progress.md：仅追加本轮记录，保留上一轮未提交改动。
 - 回滚：从 C:\Users\karma617\AppData\Local\Temp\dsh-feed-before-98d1eee6ded34433a13984d2f9bd68b3 使用 Copy-Item -LiteralPath 复制 koi-pond.js 至 assets/koi-pond.js、smoke-koi-pond.mjs 至 scripts/smoke-koi-pond.mjs、koi-pond-interaction.spec.mjs 至 tests/koi-pond-interaction.spec.mjs、koi-pond.md 至 docs/koi-pond.md，均加 -Force；保留本日志。备份包含上一轮连续点击限制。
+
+## 2026-09-08 - Task: 缓解超量读取、编辑冲突和子代理工具误用
+### What was done
+- read 的有效超量 limit 按部署上限返回一页，统一执行与渲染参数解析；工具说明明确最后实际行号续页规则，保留非法值拒绝和输出预算。
+- 扩充共享 TypeScript SDK 指引：分别满足外层/内层必填参数、使用已确认代理 ID、失效 ID 停止重试、唯一上下文编辑及同文件串行操作。
+- 扩充解析失败提示，针对 EOF 截断、String.raw 及空字符串 replaceAll；不自动修补或执行不完整代码，不改业务项目，不自动 replace_all，不伪造代理。
+### Testing
+- 定向 Vitest 17/17 通过：先复现 limit=5000 上限2000的原始异常，再验证封顶、自定义上限、原 offset、非法值、幂等与未知版本保留；新增截断及反斜杠语法复现。
+- 实际安装 DSH 0.1.3-alpha.1 隔离模块冒烟通过：四模块匹配/加载、PowerShell、解析失败诊断和核心文件哈希未变；实际 read 对45行合成日志请求5000、上限20时返回20行，下一页21至40，渲染正常，负数拒绝。
+- 冒烟首轮检查 schema 的路径用错（parameters.limit），已按实际 defineTool 转换结果修正为 parameters.properties.limit，重新完整通过。
+- Node 24 + pnpm test：31文件/229测试通过；pnpm run build（含 tsc --noEmit）退出码0；git diff --check 通过。构建仍有原工具 CJS 与依赖打包提示。
+- 未运行真实主/子代理、未重新部署报错机器、未生成安装包或重启现有应用；语法/参数/收件人/编辑指引的在线错误率尚未验证。附件缺少版本及适配日志，不能据此断言旧修复已加载。
+### Notes
+- src/runtime-tool-compatibility.ts：新增独立读取限额适配及文件工具组合入口，补强共享SDK指引和解析提示。
+- tests/runtime-tool-compatibility.spec.ts：新增超量读取及错误代码回归。
+- scripts/smoke-runtime-tool-compatibility.mjs：验证实际工具的封顶、续页、schema和渲染。
+- docs/runtime-tool-compatibility.md：说明封顶语义、编辑及代理边界和部署验证缺口。
+- progress.md：追加本轮记录。
+- 回滚：工作区本轮开始为干净状态，可用 git restore -- src/runtime-tool-compatibility.ts tests/runtime-tool-compatibility.spec.ts scripts/smoke-runtime-tool-compatibility.mjs docs/runtime-tool-compatibility.md 恢复本轮前实现，再 pnpm run build；保留 progress.md 历史并追加回滚说明。若之后新增修改，先保存差异，勿直接覆盖。
