@@ -8,10 +8,16 @@ export function injectKoiPondDialogue(source: string): { source: string; changed
     changed: true,
     source: source.replace(anchor, `
       async prompt(...args) {
-        const result = await this.__dshPondOriginalPrompt(...args);
+        const sessionId = this.sessionId;
+        const requestId = typeof args[3] === "string" ? args[3] : crypto.randomUUID();
+        try { window.postMessage({ type: "dsh/session-running", sessionId, requestId, running: true }, window.location.origin); } catch {}
+        let result;
+        try { result = await this.__dshPondOriginalPrompt(...args); }
+        finally {
+          try { window.postMessage({ type: "dsh/session-running", sessionId, requestId, running: false }, window.location.origin); } catch {}
+        }
         try {
           if (result?.ok === true && this.address === void 0) {
-            const requestId = typeof args[3] === "string" ? args[3] : crypto.randomUUID();
             window.postMessage({
               type: "dsh/pond-dialogue", sessionId: this.sessionId, requestId
             }, window.location.origin);

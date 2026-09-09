@@ -5,6 +5,7 @@ import { injectKoiPondDialogue, installKoiPondDialogueHook } from './koi-pond-in
 import { injectCustomProviderUserAgentFactorySource, installCustomProviderUserAgentHook } from './custom-provider-user-agent-injector.ts'
 import { injectOpenInAppFactorySource, installOpenInAppCompatibilityHook } from './open-in-app-compatibility.ts'
 import { installUsageMonitor } from './usage-monitor-renderer.ts'
+import { installKoiPondToggle } from './koi-pond-toggle.ts'
 import type { UsageScanProgress } from './usage-monitor.ts'
 import type { RuntimePreference } from './catalog.ts'
 import type { McpEndpointView, McpEntryView, McpList } from './mcp-manager.ts'
@@ -57,6 +58,13 @@ window.addEventListener('message', (event) => {
   if (typeof sessionId !== 'string' || sessionId.length === 0 || sessionId.length > 128
     || typeof requestId !== 'string' || requestId.length === 0 || requestId.length > 128) return
   ipcRenderer.send('pond:dialogue', sessionId, requestId)
+})
+
+window.addEventListener('message', (event) => {
+  if (event.source !== window || event.origin !== window.location.origin || event.data?.type !== 'dsh/session-running') return
+  const value = event.data as Record<string, unknown>
+  if (typeof value.sessionId !== 'string' || typeof value.requestId !== 'string' || typeof value.running !== 'boolean') return
+  ipcRenderer.send('pond:session-running', value.sessionId, value.requestId, value.running)
 })
 
 contextBridge.exposeInMainWorld('dshDesktopSkins', {
@@ -1357,8 +1365,16 @@ function initializeRepairPage(): void {
 }
 
 window.addEventListener('DOMContentLoaded', () => {
+  if (window.top === window && /^https?:$/.test(window.location.protocol)) {
+    installKoiPondToggle(() => ipcRenderer.invoke('pond:toggle'))
+  }
   if (document.body.dataset.page === 'usage-monitor') {
-    installUsageMonitor(() => ipcRenderer.invoke('usage-monitor:read'), listener => {
+    let firstRead = true
+    installUsageMonitor(() => {
+      const initialize = firstRead
+      firstRead = false
+      return ipcRenderer.invoke('usage-monitor:read', initialize)
+    }, listener => {
       const receive = (_event: Electron.IpcRendererEvent, progress: UsageScanProgress): void => listener(progress)
       ipcRenderer.on('usage-monitor:progress', receive)
       return () => { ipcRenderer.removeListener('usage-monitor:progress', receive) }

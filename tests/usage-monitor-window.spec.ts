@@ -28,7 +28,8 @@ describe('usage monitor window integration', () => {
     expect(main).toContain("ipcMain.handle('usage-monitor:read'")
     expect(main).toContain("event.senderFrame !== event.sender.mainFrame")
     expect(main).toContain("resolve(fileURLToPath(url)) !== resolve(usageMonitorPage)")
-    expect(main).toContain("readUsageSnapshot(home, onProgress)")
+    expect(main).toContain("usageMonitor.initialize(onProgress) : usageMonitor.read(onProgress)")
+    expect(main).toContain("void usageMonitor.initialize().catch(logFatalError)")
     expect(main).toContain("usage-monitor:progress")
   })
 
@@ -57,7 +58,7 @@ describe('usage monitor window integration', () => {
     expect(preload).toContain("document.body.dataset.page === 'usage-monitor'")
     expect(preload).toContain("ipcRenderer.on('usage-monitor:progress', receive)")
     expect(preload).toContain("ipcRenderer.removeListener('usage-monitor:progress', receive)")
-    expect(preload).toContain("ipcRenderer.invoke('usage-monitor:read')")
+    expect(preload).toContain("ipcRenderer.invoke('usage-monitor:read', initialize)")
     expect(main).toContain("event.senderFrame?.send('usage-monitor:progress', progress)")
   })
 })

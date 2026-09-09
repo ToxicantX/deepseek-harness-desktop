@@ -19,6 +19,10 @@
 <body>
   <main>
     <canvas id="pond" tabindex="0" aria-label="锦鲤池塘：点击水面投喂；方向键移动投喂点，空格投喂"></canvas>
+    <section id="running-sessions" class="running-sessions" aria-live="polite" aria-label="正在执行的会话" hidden>
+      <p class="eyebrow">正在执行 <span id="running-count">0</span></p>
+      <div id="running-list"></div>
+    </section>
     <header>
       <div class="seal" aria-hidden="true">庭</div>
       <div><p class="eyebrow">A LITTLE GARDEN. BETWEEN TASKS</p><h1>后院鱼塘<span>一池清澈，日月生长。</span></h1></div>
@@ -31,7 +35,6 @@
           <option value="night">手动 · 夜间</option>
         </select>
         <button id="zen" title="禅模式：单击鼠标右键退出" aria-pressed="false">禅</button>
-        <button id="return" title="关闭鱼塘，返回对话">‹ 返回</button>
       </nav>
     </header>
     <aside>

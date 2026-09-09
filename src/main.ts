@@ -34,7 +34,8 @@ import { PluginIsolation, thirdParty } from './plugin-isolation.ts'
 import { loadAndValidatePlugins } from './plugin-client-health.ts'
 import { shouldRecoverModelCatalog } from './model-catalog-recovery.ts'
 import { openExplorerDirectory } from './open-in-app-compatibility.ts'
-import { readUsageSnapshot, type UsageScanProgress } from './usage-monitor.ts'
+import type { UsageScanProgress } from './usage-monitor.ts'
+import { UsageMonitorService } from './usage-monitor-service.ts'
 import { PluginRestartCoordinator } from './plugin-restart.ts'
 import { RuntimeController, type RuntimeView } from './runtime-controller.ts'
 import { SessionRepairClient } from './session-repair.ts'
@@ -77,6 +78,8 @@ let mcpWindow: BrowserWindow | undefined
 let personalizationWindow: BrowserWindow | undefined
 let updateWindow: BrowserWindow | undefined
 let usageMonitorWindow: BrowserWindow | undefined
+let usageMonitor: UsageMonitorService | undefined
+const runningSessions = new Map<string, { id: string; startedAt: number; requests: Set<string> }>()
 let latestUpdateProgress: ShellUpdateProgress | undefined
 let controller: RuntimeController | undefined
 let pluginManager: PluginManager | undefined
@@ -797,7 +800,6 @@ function installMenu(): void {
         { label: '关于 DeepSeek Harness', click: () => { void showAbout() } },
       ],
     },
-    { label: '后院鱼塘', click: () => { void koiPond?.open().catch(logFatalError) } },
   ]
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
   syncMainMenuVisibility()
@@ -810,6 +812,7 @@ async function startApplication(): Promise<void> {
       join(app.getAppPath(), 'assets', 'koi-pond.html'),
       join(moduleDirectory, 'koi-pond-preload.cjs'),
       logFatalError,
+      () => mainWindow,
     )
   } catch (error) { logFatalError(error) }
   mainUiLoaded = false
@@ -868,6 +871,8 @@ async function startApplication(): Promise<void> {
   })
   const home = process.env.DSH_HOME ?? join(homedir(), '.dsh')
   await mkdir(home, { recursive: true })
+  usageMonitor ??= new UsageMonitorService(home)
+  void usageMonitor.initialize().catch(logFatalError)
   pluginIsolation = new PluginIsolation({ home, directory: join(app.getPath('userData'), 'plugin-isolation') })
   controller = new RuntimeController({
     shellVersion: app.getVersion(),
@@ -948,6 +953,23 @@ ipcMain.on('pond:dialogue', (event, sessionId: unknown, requestId: unknown) => {
   if (!fromTrustedDshWindow(event) || event.senderFrame !== event.sender.mainFrame
     || typeof sessionId !== 'string' || typeof requestId !== 'string') return
   void koiPond?.recordDialogue(sessionId, requestId).catch(logFatalError)
+})
+
+ipcMain.on('pond:session-running', (event, sessionId: unknown, requestId: unknown, running: unknown) => {
+  if (!fromTrustedDshWindow(event) || event.senderFrame !== event.sender.mainFrame
+    || typeof sessionId !== 'string' || !/^[0-9A-Za-z._~-]{1,128}$/u.test(sessionId)
+    || typeof requestId !== 'string' || !/^[0-9A-Za-z._~-]{1,128}$/u.test(requestId)
+    || typeof running !== 'boolean') return
+  const current = runningSessions.get(sessionId)
+  if (running) {
+    const next = current ?? { id: sessionId, startedAt: Date.now(), requests: new Set<string>() }
+    next.requests.add(requestId)
+    runningSessions.set(sessionId, next)
+  } else if (current !== undefined) {
+    current.requests.delete(requestId)
+    if (current.requests.size === 0) runningSessions.delete(sessionId)
+  }
+  koiPond?.setRunningSessions([...runningSessions.values()].map(({ id, startedAt }) => ({ id, startedAt })))
 })
 
 ipcMain.on('pet:set-active-session', (event, value: unknown) => {
@@ -1068,10 +1090,13 @@ ipcMain.handle('runtime:recover-plugin-preset', async (event) => {
   if (mainWindow !== undefined) await showSetup(mainWindow)
   await runtimeController.recoverPluginPreset()
 })
-ipcMain.handle('usage-monitor:read', async event => {
+ipcMain.handle('pond:toggle', async event => {
+  if (!fromTrustedDshWindow(event) || event.senderFrame !== event.sender.mainFrame) throw new Error('鱼塘切换来源无效')
+  await koiPond?.open()
+})
+ipcMain.handle('usage-monitor:read', async (event, initialize: unknown) => {
   usageMonitorClient(event)
   const window = usageMonitorWindow
-  const home = process.env.DSH_HOME ?? join(homedir(), '.dsh')
   const onProgress = (progress: UsageScanProgress): void => {
     if (window === undefined || window.isDestroyed() || window.webContents !== event.sender) return
     try {
@@ -1079,7 +1104,8 @@ ipcMain.handle('usage-monitor:read', async event => {
       event.senderFrame?.send('usage-monitor:progress', progress)
     } catch { /* The original frame may have closed or navigated during scanning. */ }
   }
-  return readUsageSnapshot(home, onProgress)
+  if (!usageMonitor) throw new Error('用量监控尚未就绪')
+  return initialize === true ? usageMonitor.initialize(onProgress) : usageMonitor.read(onProgress)
 })
 
 ipcMain.handle('personalization:read', async (event) => {

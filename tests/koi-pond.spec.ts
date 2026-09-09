@@ -139,16 +139,21 @@ describe('koi dialogue observer', () => {
       expect(css).toContain(name)
       expect(await readFile(new URL(`../assets/${name}`, import.meta.url), 'utf8')).toContain('<svg')
     }
-    expect(html).toContain('id="return"')
+    expect(html).not.toContain('id="return"')
+    expect(html).toContain('id="running-sessions"')
     expect(html).toContain('id="zen"')
     expect(html).toContain('id="light"')
     const windowSource = await readFile(new URL('../src/koi-pond-window.ts', import.meta.url), 'utf8')
     expect(windowSource).toContain("partition: 'persist:koi-pond'")
   })
 
-  it('places the direct entry after Help and includes the local page and preload in packaging', async () => {
+  it('uses a trusted floating entry and includes the local page and preload in packaging', async () => {
     const main = await readFile(new URL('../src/main.ts', import.meta.url), 'utf8')
-    expect(main).toMatch(/label: '帮助'[\s\S]*?label: '后院鱼塘', click: \(\) => \{ void koiPond\?\.open\(\)/)
+    expect(main).not.toContain("{ label: '后院鱼塘', click:")
+    expect(main).toContain("ipcMain.handle('pond:toggle'")
+    expect(main).toContain("if (!fromTrustedDshWindow(event) || event.senderFrame !== event.sender.mainFrame) throw new Error('鱼塘切换来源无效')")
+    const preload = await readFile(new URL('../src/preload.ts', import.meta.url), 'utf8')
+    expect(preload).toContain("installKoiPondToggle(() => ipcRenderer.invoke('pond:toggle'))")
     const config = await readFile(new URL('../tsdown.config.ts', import.meta.url), 'utf8')
     expect(config).toContain("'src/koi-pond-preload.ts'")
     const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
@@ -157,6 +162,9 @@ describe('koi dialogue observer', () => {
     const html = await readFile(new URL('../assets/koi-pond.html', import.meta.url), 'utf8')
     expect(html).toContain('src="koi-pond.js"')
     expect(html).toContain('href="koi-pond.css"')
+    expect(html).toContain('id="running-sessions"')
+    expect(html).not.toContain('id="return"')
+    expect(main).toContain("ipcMain.on('pond:session-running'")
   })
 
   function client(body = 'return { ok: true };', signature = 'content, mode, signal, requestId') {
@@ -173,6 +181,8 @@ describe('koi dialogue observer', () => {
     session.sessionId = 'main'
     expect(await session.prompt('hello', 'queue', undefined, 'request')).toEqual({ ok: true })
     expect(postMessage).toHaveBeenCalledWith({ type: 'dsh/pond-dialogue', sessionId: 'main', requestId: 'request' }, 'https://fixture.invalid')
+    expect(postMessage).toHaveBeenCalledWith({ type: 'dsh/session-running', sessionId: 'main', requestId: 'request', running: true }, 'https://fixture.invalid')
+    expect(postMessage).toHaveBeenCalledWith({ type: 'dsh/session-running', sessionId: 'main', requestId: 'request', running: false }, 'https://fixture.invalid')
   })
 
   it('does not count failed or child-session prompts; preserves errors and arguments', async () => {
@@ -183,7 +193,8 @@ describe('koi dialogue observer', () => {
     const child = client(); child.address = 'child'
     await child.prompt('hello')
     await expect(client('throw new Error("send failed");').prompt('hello')).rejects.toThrow('send failed')
-    expect(postMessage).not.toHaveBeenCalled()
+    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'dsh/session-running', running: true }), 'https://fixture.invalid')
+    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'dsh/session-running', running: false }), 'https://fixture.invalid')
   })
 
   it('keeps accepted messages successful if the pond observer breaks', async () => {

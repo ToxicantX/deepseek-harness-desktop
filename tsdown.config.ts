@@ -19,13 +19,14 @@ export default defineConfig([
     fixedExtension: false,
     clean: true,
   },
-  {
+  // Sandboxed preloads cannot require shared chunks from the filesystem.
+  ...['src/preload.ts', 'src/pet-preload.ts', 'src/koi-pond-preload.ts'].map(entry => ({
     ...common,
-    entry: ['src/preload.ts', 'src/pet-preload.ts', 'src/koi-pond-preload.ts'],
-    format: 'cjs',
+    entry: [entry],
+    format: 'cjs' as const,
     outExtensions: () => ({ js: '.cjs' }),
     clean: false,
-  },
+  })),
   {
     outDir: 'lib',
     entry: { 'skin-react-runtime.global': 'src/skin-react-runtime.ts' },

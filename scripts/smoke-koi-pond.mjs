@@ -78,10 +78,13 @@ BrowserWindow.prototype.show = function() {};
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 app.whenReady().then(async () => {
   const errors = [];
+  const owner = new BrowserWindow({ width: 1280, height: 720, show: false });
+  await owner.loadURL('data:text/html,<textarea>draft retained</textarea>');
   const pond = new KoiPondWindow(join(directory, 'pond.json'), join(root, 'assets/koi-pond.html'),
-    join(root, 'lib/koi-pond-preload.cjs'), error => errors.push(String(error)));
+    join(root, 'lib/koi-pond-preload.cjs'), error => errors.push(String(error)), () => owner);
   await pond.open();
-  let win = BrowserWindow.getAllWindows()[0];
+  const view = owner.contentView.children.find(child => child.webContents !== owner.webContents);
+  const win = { webContents: view.webContents, setSize: (...args) => owner.setSize(...args), setContentSize: (...args) => owner.setContentSize(...args) };
   win.webContents.setBackgroundThrottling(false);
   win.webContents.on('console-message', (_event, level, message) => { if (level >= 3) errors.push(message); });
   const js = source => win.webContents.executeJavaScript(source);
@@ -147,6 +150,9 @@ app.whenReady().then(async () => {
   win.setContentSize(1280, 720);
   await delay(250);
   await pond.open();
+  assert.equal(view.getVisible(), false);
+  await pond.open();
+  assert.equal(view.getVisible(), true);
   assert.equal(BrowserWindow.getAllWindows().length, 1);
   await js(\`document.querySelector('.fish-card').click();
     document.getElementById('fish-name').value = '荷风';
@@ -274,12 +280,14 @@ app.whenReady().then(async () => {
   assert.equal(await js("document.documentElement.scrollWidth > innerWidth"), false);
   assert.equal(await js("getComputedStyle(document.querySelector('aside')).overflowX"), 'hidden');
   await fs.writeFile(join(directory, 'pond-small.png'), (await win.webContents.capturePage()).toPNG());
-  await js("document.getElementById('return').click()").catch(() => {});
+  await js("window.koiPond.close()").catch(() => {});
   await delay(150);
-  assert.equal(win.isDestroyed(), true, 'Return must close only the pond window');
+  assert.equal(owner.isDestroyed(), false, 'Return must preserve the main window');
+  assert.equal(view.getVisible(), false, 'Return must hide the pond view');
+  assert.equal(await owner.webContents.executeJavaScript('document.querySelector("textarea").value'), 'draft retained');
   await pond.recordDialogue('smoke', 'closed-window');
   await pond.open();
-  win = BrowserWindow.getAllWindows()[0];
+  assert.equal(owner.contentView.children.includes(view), true);
   win.webContents.setBackgroundThrottling(false);
   await delay(400);
   assert.equal((await js('window.koiPond.getState()')).dialogues, 2);
@@ -329,12 +337,13 @@ app.whenReady().then(async () => {
   assert.equal(restored.fish[0].level, 9);
   assert.deepEqual(errors, []);
   await fs.writeFile(join(directory, 'result.json'), JSON.stringify({
-    passed: true, checks: ['preload IPC', 'singleton window', 'rename', 'personalities and persistent affinity', 'bounded ambient art and washi UI', 'feeding and eating',
+    passed: true, checks: ['preload IPC', 'embedded view toggle', 'main window draft retained', 'rename', 'personalities and persistent affinity', 'bounded ambient art and washi UI', 'feeding and eating',
       'day/night sine refraction changes pixels locally and decays', 'zen hides UI and notifications', 'right-click exits without feeding', 'zen restores UI',
-      'day/night, event, and seasonal artwork decoded', 'local-date spring/summer/autumn/winter switching', 'design-size screenshots', 'dialogue garden event image sprite', 'random firefly flight', 'return button',
+      'day/night, event, and seasonal artwork decoded', 'local-date spring/summer/autumn/winter switching', 'design-size screenshots', 'dialogue garden event image sprite', 'random firefly flight', 'floating toggle',
       'day/night', 'deduplication', 'closed-window growth', 'reopen', 'save reload', 'small viewport'],
     directory,
   }, null, 2));
+  owner.destroy();
   app.quit();
 }).catch(error => { console.error(error); app.exit(1); });
 `

@@ -44,7 +44,12 @@ header {
 header .eyebrow { font-size: calc(9 * var(--unit)); line-height: 1.2; margin-bottom: calc(8 * var(--unit)); }
 h1 { margin: 0; font: calc(34 * var(--unit))/1.05 "SimSun", serif; letter-spacing: calc(6 * var(--unit)); text-shadow: 0 2px 2px #001d1d, 0 0 18px #e8d79820; }
 h1 span { display: block; font: calc(13 * var(--unit)) "Microsoft YaHei", sans-serif; letter-spacing: 2px; margin-top: calc(10 * var(--unit)); }
-.window-tools { display: flex; align-items: center; gap: calc(8 * var(--unit)); margin-left: auto; align-self: flex-start; padding-top: calc(9 * var(--unit)); pointer-events: auto; }
+.window-tools { display: flex; align-items: center; gap: calc(8 * var(--unit)); margin-left: auto; margin-right: 0; align-self: flex-start; padding-top: calc(9 * var(--unit)); pointer-events: auto; }
+.running-sessions { position: absolute; z-index: 4; top: 18%; left: 2%; width: min(280px, 25vw); max-height: 48%; overflow: auto; padding: calc(16 * var(--unit)); background: #052e29a8; border: 1px solid #c3ae7566; border-radius: 10px; backdrop-filter: blur(8px); box-shadow: 0 8px 24px #00191555; }
+.running-sessions .eyebrow { margin: 0 0 calc(10 * var(--unit)); }
+.running-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: calc(9 * var(--unit)) 0; border-top: 1px solid #c3ae7538; font-size: calc(13 * var(--unit)); }
+.running-item strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.running-item span { flex: none; color: #b9e6c0; font-size: calc(11 * var(--unit)); }
 button {
   border: 1px solid #aa9f6870; background: linear-gradient(145deg, #0d4038ed, #031e1de8); color: var(--ivory);
   border-radius: 9px; padding: calc(10 * var(--unit)) calc(16 * var(--unit));

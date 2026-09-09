@@ -4,6 +4,7 @@
   const $ = id => document.getElementById(id)
   const canvas = $('pond'), ctx = canvas.getContext('2d')
   const bridge = window.koiPond
+  const runningList = $('running-list'), runningPanel = $('running-sessions')
   const patterns = { kohaku: ['红白', '#eee6ce', '#c44c32'], sanke: ['大正三色', '#e8e4d2', '#b74731'], ogon: ['黄金', '#e3bf63', '#ba8638'], shusui: ['秋翠', '#bacfd0', '#d77947'] }
   const personalities = {
     curious: ['好奇', '会靠近缓慢移动的指针'], timid: ['胆小', '玩水时会迅速躲开'],
@@ -20,7 +21,7 @@
   let state, selected, width = 0, height = 0, mode = 'feed', night = false, zen = false
   let fish = [], food = [], ripples = [], last = 0, frame = 0, noticeTimer, lastInteraction = -Infinity
   let feedBatch = 0, pointer = { x: 0, y: 0, active: false, movedAt: 0 }
-  let gardenEvent
+  let gardenEvent, viewVisible = true
   let bonds = { dialogues: null, fish: {} }
   try {
     const saved = JSON.parse(localStorage.getItem('koi-pond-bonds') || 'null')
@@ -137,7 +138,7 @@
     if (previous && next.fish.length > previous.fish.length) notify('新生命抵达庭院，一条小锦鲤破壳了。')
     else if (previous && next.eggs.length > previous.eggs.length) notify('荷叶下藏着新期待：锦鲤产卵了。')
     else if (previous && next.dialogues > previous.dialogues) notify('又一段对话，池中锦鲤各长大 1 级。')
-    if (previous && next.dialogues > previous.dialogues && !gardenEvent) {
+    if (viewVisible && !document.hidden && previous && next.dialogues > previous.dialogues && !gardenEvent) {
       const kind = gardenEventFor(next.dialogues, period)
       if (kind) startGardenEvent(kind)
     }
@@ -797,7 +798,17 @@
     for (const key of ['feed', 'ripple']) { $(key).classList.toggle('active', key === id); $(key).setAttribute('aria-pressed', String(key === id)) }
     $('hint').textContent = id === 'feed' ? '轻点水面，送它们一餐小欢喜' : '轻点水面，看涟漪慢慢散开'
   }
-  $('return').onclick = () => window.close()
+  function renderRunningSessions(sessions) {
+    const valid = Array.isArray(sessions) ? sessions.filter(item => item && typeof item.id === 'string') : []
+    runningPanel.hidden = valid.length === 0
+    $('running-count').textContent = String(valid.length)
+    runningList.replaceChildren(...valid.map(item => {
+      const row = document.createElement('div'); row.className = 'running-item'
+      const name = document.createElement('strong'); name.textContent = '会话 ' + item.id.slice(0, 8)
+      const state = document.createElement('span'); state.textContent = '执行中'
+      row.append(name, state); return row
+    }))
+  }
   $('rename-form').onsubmit = async e => {
     e.preventDefault()
     try {
@@ -814,10 +825,11 @@
     catch { notify('时段已切换，本次设置未保存。') }
   }
   addEventListener('focus', syncTime)
-  document.addEventListener('visibilitychange', () => {
+  const syncVisibility = () => {
     cancelAnimationFrame(frame)
-    if (!document.hidden) { syncTime(); last = performance.now(); frame = requestAnimationFrame(animate) }
-  })
+    if (viewVisible && !document.hidden) { syncTime(); last = performance.now(); frame = requestAnimationFrame(animate) }
+  }
+  document.addEventListener('visibilitychange', syncVisibility)
   for (const [name, image] of Object.entries(sceneImages)) {
     image.onload = () => { if ((night ? 'night' : 'day') === name) makeBackdrop() }
     image.onerror = () => notify('庭院美术资源读取失败，请检查安装文件。')
@@ -825,13 +837,19 @@
   }
   syncTime()
   frame = requestAnimationFrame(animate)
-  if (!bridge) { $('journey').textContent = '请从桌面壳的「后院鱼塘」菜单进入。'; return }
+  if (!bridge) { $('journey').textContent = '鱼塘连接不可用'; return }
   // Subscribe before reading; a late initial snapshot must not overwrite a newer event.
   let received = false
+  const unsubscribeVisibility = bridge.onVisibility(visible => {
+    viewVisible = visible
+    if (!visible) { gardenEvent = undefined; $('notice').classList.remove('show'); clearTimeout(noticeTimer) }
+    syncVisibility()
+  })
+  const unsubscribeRunning = bridge.onRunningSessions(renderRunningSessions)
   const unsubscribe = bridge.onState(next => { received = true; update(next) })
   bridge.getState().then(next => { if (!received) update(next) }).catch(() => {
     $('journey').textContent = '庭院存档读取失败，原存档已保留。请检查桌面日志。'
     notify('鱼塘暂未就绪，不影响继续聊天。')
   })
-  addEventListener('pagehide', () => { unsubscribe(); cancelAnimationFrame(frame); clearTimeout(noticeTimer) }, { once: true })
+  addEventListener('pagehide', () => { unsubscribe(); unsubscribeVisibility(); unsubscribeRunning(); cancelAnimationFrame(frame); clearTimeout(noticeTimer) }, { once: true })
 })()
