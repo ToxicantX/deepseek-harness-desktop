@@ -87,12 +87,13 @@ app.whenReady().then(async () => {
   const js = source => win.webContents.executeJavaScript(source);
   await delay(800);
   await js(\`window.RealDate = Date;
-    window.setPondHour = hour => {
+    window.setPondDate = (month, hour) => {
       window.Date = class extends window.RealDate {
-        constructor(...args) { super(...(args.length ? args : [2026,8,8,hour,0,0])); }
+        constructor(...args) { super(...(args.length ? args : [2026,month,8,hour,0,0])); }
       };
       window.dispatchEvent(new Event('focus'));
     };
+    window.setPondHour = hour => window.setPondDate(8, hour);
     window.setPondHour(12);\`);
   for (const [hour, expected] of [[5,'dawn'],[8,'day'],[17,'dusk'],[19,'night'],[0,'night']]) {
     await js('window.setPondHour(' + hour + ')');
@@ -100,6 +101,15 @@ app.whenReady().then(async () => {
     await delay(100);
     await fs.writeFile(join(directory, 'pond-clock-' + hour + '.png'), (await win.webContents.capturePage()).toPNG());
   }
+  await js("Promise.all(['koi-event-petals.webp','koi-event-firefly.webp','koi-season-autumn-leaf.webp','koi-season-winter-mist.webp'].map(source => { const image = new Image(); image.src = source; return image.decode(); }))");
+  for (const [month, hour, expected, label] of [[2,12,'spring','春景'],[5,20,'summer','夏景'],[8,12,'autumn','秋景'],[11,12,'winter','冬景']]) {
+    await js('window.setPondDate(' + month + ',' + hour + ')');
+    assert.equal(await js('document.body.dataset.season'), expected);
+    assert.equal(await js("document.getElementById('season-name').textContent"), label);
+    await delay(350);
+    await fs.writeFile(join(directory, 'pond-season-' + expected + '.png'), (await win.webContents.capturePage()).toPNG());
+  }
+  await js('window.setPondDate(8,12)');
   await js('window.setPondHour(12)');
   for (const manual of ['dawn', 'day', 'dusk', 'night']) {
     await js("document.getElementById('light').value = '" + manual + "'; document.getElementById('light').dispatchEvent(new Event('change')); window.setPondHour(9);");
@@ -122,8 +132,9 @@ app.whenReady().then(async () => {
     window.setPondHour(12);\`);
   assert.equal(await js('document.body.dataset.period'), 'day', 'Automatic mode must resume immediately');
   assert.equal(await js("document.querySelectorAll('.fish-card').length"), 4);
+  assert.deepEqual(await js("Array.from(document.querySelectorAll('.fish-card small'), node => node.textContent.match(/好奇|胆小|贪吃|安静/)?.[0])"), ['好奇', '胆小', '贪吃', '安静']);
   // Compare at the actual design sizes, with live UI and no open fish profile.
-  await js("Promise.all(['day','night'].map(name => { const image = new Image(); image.src = 'koi-pond-' + name + '.webp'; return image.decode(); }))");
+  await js("Promise.all(['koi-pond-day.webp','koi-pond-night.webp','koi-event-petals.webp','koi-event-dragonfly.webp','koi-event-frog.webp','koi-event-firefly.webp','koi-event-splash.webp','koi-season-autumn-leaf.webp','koi-season-winter-mist.webp'].map(source => { const image = new Image(); image.src = source; return image.decode(); }))");
   win.setContentSize(1723, 913);
   await delay(1000);
   await fs.writeFile(join(directory, 'pond-design-day.png'), (await win.webContents.capturePage()).toPNG());
@@ -142,10 +153,12 @@ app.whenReady().then(async () => {
     document.getElementById('rename-form').requestSubmit();\`);
   await delay(200);
   assert.equal((await js('window.koiPond.getState()')).fish[0].name, '荷风');
+  assert((await js("document.getElementById('lineage').textContent")).includes('好奇：会靠近缓慢移动的指针 · 亲密度 0/100'));
   // Count actual rendered pellets per frame, rather than inferring feeding from a button click.
   await js(\`window.pellets = 0;
     const c = document.getElementById('pond').getContext('2d');
     const draw = c.drawImage.bind(c), ellipse = c.ellipse.bind(c);
+    const raf = window.requestAnimationFrame.bind(window);
     const refract = window.koiWater.refract;
     window.refractionHistory = [];
     window.koiWater.refract = (source, waves) => {
@@ -160,12 +173,11 @@ app.whenReady().then(async () => {
       window.refractionHistory.push(window.latestRefraction);
       return output;
     };
-    c.drawImage = (...args) => {
-      if (args.length === 5 && args[1] === 0 && args[2] === 0) {
-        window.pellets = 0; window.feedRings = []; window.latestRefraction = null;
-      }
-      return draw(...args);
-    };
+    window.requestAnimationFrame = callback => raf(time => {
+      window.pellets = 0; window.feedRings = []; window.latestRefraction = null;
+      callback(time);
+    });
+    c.drawImage = (...args) => draw(...args);
     c.ellipse = (...args) => {
       if (args[2] === 2.5) window.pellets++;
       if (args[0] === 410 && args[1] === 400) window.feedRings.push({ width: c.lineWidth, color: c.strokeStyle });
@@ -179,6 +191,7 @@ app.whenReady().then(async () => {
   assert((await js('window.latestRefraction.changed')) > 0, 'Feeding must refract actual scene pixels');
   for (let attempt = 0; attempt < 60 && await js('window.pellets') > 0; attempt++) await delay(250);
   assert.equal(await js('window.pellets'), 0, 'Fish must eat pellets before their 25-second expiry');
+  assert((await js("Math.max(0, ...Object.values(JSON.parse(localStorage.getItem('koi-pond-bonds')).fish))")) >= 2, 'Eating one feeding batch must raise affinity once');
   assert(await js('window.refractionHistory.every(sample => sample.waveCount <= 3)'), 'Feeding and eating must share the wave budget');
   await delay(2700);
   for (const theme of ['day', 'night']) {
@@ -231,6 +244,7 @@ app.whenReady().then(async () => {
   assert.deepEqual(await js(onlyCanvasVisible), ['pond']);
   await pond.recordDialogue('smoke', 'one');
   await delay(200);
+  assert(await js("Array.from(document.querySelectorAll('.fish-card small'), node => Number(node.textContent.split('亲密 ')[1])).every(value => value >= 1)"), 'One dialogue must raise every koi affinity');
   assert.deepEqual(await js(onlyCanvasVisible), ['pond'], 'Growth notifications must stay hidden in zen mode');
   assert.equal((await js('window.koiPond.getState()')).dialogues, 1);
   await fs.writeFile(join(directory, 'pond-zen.png'), (await win.webContents.capturePage()).toPNG());
@@ -270,16 +284,54 @@ app.whenReady().then(async () => {
   await delay(400);
   assert.equal((await js('window.koiPond.getState()')).dialogues, 2);
   assert.equal((await js('window.koiPond.getState()')).fish[0].name, '荷风');
+  await js("Promise.all(['koi-event-petals.webp','koi-event-dragonfly.webp','koi-event-frog.webp','koi-event-firefly.webp','koi-event-splash.webp'].map(source => { const image = new Image(); image.src = source; return image.decode(); })); window.eventSpriteDraws = 0; const eventContext = document.getElementById('pond').getContext('2d'); const eventDrawImage = eventContext.drawImage.bind(eventContext); eventContext.drawImage = (...args) => { if (String(args[0]?.src || '').includes('koi-event-')) window.eventSpriteDraws++; return eventDrawImage(...args); }; true;");
+  await pond.recordDialogue('smoke', 'garden-event');
+  await delay(350);
+  assert.equal(await js('document.body.dataset.event'), 'petals', 'The third dialogue must trigger the deterministic petal event');
+  assert((await js("document.getElementById('notice').textContent")).includes('花信入池'));
+  assert((await js('window.eventSpriteDraws')) > 0, 'The garden event must draw its generated image sprite');
+  await fs.writeFile(join(directory, 'pond-event-petals.png'), (await win.webContents.capturePage()).toPNG());
+  assert(await js("Object.values(JSON.parse(localStorage.getItem('koi-pond-bonds')).fish).every(value => value >= 2)"), 'Affinity must include dialogue growth while the pond was closed');
+  const reloadAtNight = async () => {
+    const loaded = new Promise(resolve => win.webContents.once('did-finish-load', resolve));
+    win.webContents.reload();
+    await loaded;
+    win.webContents.setBackgroundThrottling(false);
+    await delay(450);
+    await js("window.RealDate = Date; window.Date = class extends window.RealDate { constructor(...args) { super(...(args.length ? args : [2026,8,8,20,0,0])); } }; window.dispatchEvent(new Event('focus')); true;");
+  };
+  await reloadAtNight();
+  await pond.recordDialogue('smoke', 'garden-event-4');
+  await pond.recordDialogue('smoke', 'garden-event-5');
+  await delay(150);
+  assert.equal((await js('window.koiPond.getState()')).dialogues, 5);
+  await reloadAtNight();
+  await pond.recordDialogue('smoke', 'garden-event-6');
+  await pond.recordDialogue('smoke', 'garden-event-7');
+  await delay(150);
+  assert.equal((await js('window.koiPond.getState()')).dialogues, 7);
+  await reloadAtNight();
+  await js("(async () => { await Promise.all(['koi-event-firefly.webp'].map(source => { const image = new Image(); image.src = source; return image.decode(); })); window.fireflyDraws = []; window.lastEventTranslate = [0, 0]; const context = document.getElementById('pond').getContext('2d'); const translate = context.translate.bind(context); const drawImage = context.drawImage.bind(context); context.translate = (x, y) => { window.lastEventTranslate = [x, y]; return translate(x, y); }; context.drawImage = (...args) => { if (String(args[0]?.src || '').includes('koi-event-firefly')) { window.fireflyDraws.push(window.lastEventTranslate); if (window.fireflyDraws.length > 200) window.fireflyDraws.shift(); } return drawImage(...args); }; return true; })()");
+  await pond.recordDialogue('smoke', 'garden-event-8');
+  await delay(250);
+  assert.equal(await js('document.body.dataset.event'), 'fireflies', 'The eighth dialogue at night must trigger fireflies');
+  const firstFireflyPosition = await js("window.fireflyDraws.length >= 10 ? window.fireflyDraws.slice(-10)[0] : null");
+  assert(firstFireflyPosition, 'Fireflies must render a full animated frame');
+  await delay(700);
+  const nextFireflyPosition = await js("window.fireflyDraws.length >= 10 ? window.fireflyDraws.slice(-10)[0] : null");
+  assert(Math.hypot(nextFireflyPosition[0] - firstFireflyPosition[0], nextFireflyPosition[1] - firstFireflyPosition[1]) > 3,
+    'Fireflies must visibly change position instead of only blinking');
+  await fs.writeFile(join(directory, 'pond-event-fireflies.png'), (await win.webContents.capturePage()).toPNG());
   await pond.stop();
   const { KoiPondStore } = require('./koi-pond-store.cjs');
   const restored = await new KoiPondStore(join(directory, 'pond.json')).view();
-  assert.equal(restored.dialogues, 2);
-  assert.equal(restored.fish[0].level, 3);
+  assert.equal(restored.dialogues, 8);
+  assert.equal(restored.fish[0].level, 9);
   assert.deepEqual(errors, []);
   await fs.writeFile(join(directory, 'result.json'), JSON.stringify({
-    passed: true, checks: ['preload IPC', 'singleton window', 'rename', 'feeding and eating',
+    passed: true, checks: ['preload IPC', 'singleton window', 'rename', 'personalities and persistent affinity', 'bounded ambient art and washi UI', 'feeding and eating',
       'day/night sine refraction changes pixels locally and decays', 'zen hides UI and notifications', 'right-click exits without feeding', 'zen restores UI',
-      'day/night artwork decoded', 'design-size screenshots', 'return button',
+      'day/night, event, and seasonal artwork decoded', 'local-date spring/summer/autumn/winter switching', 'design-size screenshots', 'dialogue garden event image sprite', 'random firefly flight', 'return button',
       'day/night', 'deduplication', 'closed-window growth', 'reopen', 'save reload', 'small viewport'],
     directory,
   }, null, 2));
@@ -290,7 +342,7 @@ await writeFile(join(directory, 'runner.cjs'), runner)
 const env = { ...process.env }
 delete env.ELECTRON_RUN_AS_NODE
 const child = spawn(require('electron'), [join(directory, 'runner.cjs')], { env, windowsHide: true, stdio: 'inherit' })
-const timer = setTimeout(() => child.kill(), 45000)
+const timer = setTimeout(() => child.kill(), 90000)
 const code = await new Promise((resolve, reject) => { child.once('error', reject); child.once('exit', resolve) })
 clearTimeout(timer)
 assert.equal(code, 0, `Electron smoke failed; artifacts: ${directory}`)

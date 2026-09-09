@@ -5,6 +5,7 @@
   --muted: #becdbb;
   --gold: #ab9c64;
   --panel: #052e29fa;
+  --scene-glow: #f6e5a51c;
   font-family: "Microsoft YaHei", sans-serif;
   color: var(--ivory);
   background: #123f39;
@@ -12,46 +13,59 @@
 * { box-sizing: border-box; }
 body { margin: 0; overflow: hidden; }
 body.night { --panel: #031e29fa; --muted: #b4c5c4; background: #062339; }
+body[data-period="dawn"] { --scene-glow: #f8d9ae32; }
+body[data-period="dusk"] { --scene-glow: #e58d4a35; }
+body[data-period="night"] { --scene-glow: #6da3bd1b; }
 body.night aside { top: 15.3%; }
 button, input, summary { font: inherit; }
 button, summary { cursor: pointer; }
 main { height: 100vh; position: relative; isolation: isolate; }
-canvas { width: 100%; height: 100%; display: block; outline-offset: -5px; }
+main::before, main::after { content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 1; }
+main::before { background: radial-gradient(circle at 48% 42%, transparent 38%, #031c1940 76%, #00120f92 116%), radial-gradient(circle at 24% 4%, var(--scene-glow), transparent 38%); box-shadow: inset 0 0 90px #001c1838; }
+main::after { opacity: .055; background-image: radial-gradient(#fff 0.45px, transparent .7px), radial-gradient(#071b16 0.45px, transparent .75px); background-position: 0 0, 2px 2px; background-size: 4px 4px; mix-blend-mode: soft-light; }
+canvas { position: relative; z-index: 0; width: 100%; height: 100%; display: block; outline-offset: -5px; }
 main.zen > :not(canvas) { display: none; }
 main.zen canvas { outline: none; }
 header {
   position: absolute; top: 3.7%; left: 1.85%; right: 1.85%;
   display: flex; align-items: center; gap: calc(18 * var(--unit)); pointer-events: none;
   filter: drop-shadow(0 2px 8px #001d1dbb);
+  z-index: 3;
 }
 .seal {
   display: grid; place-items: center; width: calc(51 * var(--unit)); height: calc(61 * var(--unit));
   flex-shrink: 0; color: #fff4d6; background: linear-gradient(120deg, #aa5123, #8b310e);
   border: 1px solid #c3ae75; outline: 1px solid #938653; outline-offset: 4px;
   box-shadow: inset 0 0 0 3px #b36a31; font: calc(31 * var(--unit)) "SimSun", serif;
+  text-shadow: 0 1px 0 #6c240d; position: relative;
 }
+.seal::after { content: ""; position: absolute; inset: 5px; border: 1px solid #f7d99c5c; }
 .eyebrow { font-size: calc(10 * var(--unit)); letter-spacing: calc(2.1 * var(--unit)); color: #e0e7d5; margin: 0 0 calc(10 * var(--unit)); }
 header .eyebrow { font-size: calc(9 * var(--unit)); line-height: 1.2; margin-bottom: calc(8 * var(--unit)); }
-h1 { margin: 0; font: calc(34 * var(--unit))/1.05 "SimSun", serif; letter-spacing: calc(6 * var(--unit)); }
+h1 { margin: 0; font: calc(34 * var(--unit))/1.05 "SimSun", serif; letter-spacing: calc(6 * var(--unit)); text-shadow: 0 2px 2px #001d1d, 0 0 18px #e8d79820; }
 h1 span { display: block; font: calc(13 * var(--unit)) "Microsoft YaHei", sans-serif; letter-spacing: 2px; margin-top: calc(10 * var(--unit)); }
 .window-tools { display: flex; align-items: center; gap: calc(8 * var(--unit)); margin-left: auto; align-self: flex-start; padding-top: calc(9 * var(--unit)); pointer-events: auto; }
 button {
-  border: 1px solid #aa9f6870; background: #052c27df; color: var(--ivory);
+  border: 1px solid #aa9f6870; background: linear-gradient(145deg, #0d4038ed, #031e1de8); color: var(--ivory);
   border-radius: 9px; padding: calc(10 * var(--unit)) calc(16 * var(--unit));
-  transition: background .2s, border-color .2s;
+  box-shadow: inset 0 1px #fff1bd16, 0 4px 15px #00191538; transition: background .2s, border-color .2s, transform .2s;
 }
-button:hover { background: #274c3ddf; border-color: #d7c896; }
+button:hover { background: linear-gradient(145deg, #315d4ce8, #0d332ddf); border-color: #d7c896; transform: translateY(-1px); }
 button:focus-visible, summary:focus-visible, input:focus-visible { outline: 2px solid #f4dda0; outline-offset: 3px; }
 .window-tools button { height: calc(43 * var(--unit)); min-width: calc(42 * var(--unit)); padding: 0 calc(12 * var(--unit)); font-size: calc(15 * var(--unit)); }
-#light { font: inherit; font-size: calc(15 * var(--unit)); height: calc(43 * var(--unit)); padding: 0 8px; border: 1px solid #aa9f6870; border-radius: 9px; background: #052c27; color: var(--ivory); cursor: pointer; }
+#light { font: inherit; font-size: calc(13 * var(--unit)); height: calc(43 * var(--unit)); padding: 0 30px 0 12px; border: 1px solid #aa9f6870; border-radius: 9px; background: linear-gradient(145deg, #16483eea, #041f1de8); color: var(--ivory); box-shadow: inset 0 1px #fff1bd18, 0 4px 15px #00191538; cursor: pointer; }
 #light:focus-visible { outline: 2px solid #f4dda0; outline-offset: 3px; }
+#light option { background: #07332f; color: #f0efcf; }
+#light option:checked { background: #d8c584; color: #062521; }
 #return { min-width: calc(86 * var(--unit)); font-family: "SimSun", serif; font-weight: bold; letter-spacing: 2px; }
 aside {
   position: absolute; top: 17.2%; right: 1.75%; width: calc(260 * var(--unit));
   max-height: calc(100vh - 240 * var(--unit)); padding: calc(24 * var(--unit));
-  background: linear-gradient(140deg, var(--panel), #031f20f5);
+  background: linear-gradient(140deg, var(--panel), #031f20f2), url("koi-pond-washi.webp") center / 360px auto;
+  background-blend-mode: normal, soft-light;
   border: 1px solid var(--gold); border-radius: 14px;
-  box-shadow: inset 0 0 0 3px #c9bd8220, 0 12px 34px #00151545;
+  box-shadow: inset 0 0 0 3px #c9bd8220, inset 0 1px #fff2c51a, 0 18px 45px #00151572;
+  z-index: 3;
   scrollbar-width: thin; scrollbar-color: #78947a #0b2925;
 }
 aside::before, .tools::before {
@@ -69,13 +83,15 @@ h2 { font: calc(21 * var(--unit)) "SimSun", serif; margin: 0 0 calc(10 * var(--u
 #journey, #lineage, #eggs, details p { font-size: calc(12 * var(--unit)); line-height: 1.85; color: var(--muted); }
 #journey { margin: 0 0 calc(9 * var(--unit)); }
 #fish-list { display: grid; gap: calc(3 * var(--unit)); max-height: min(36vh, calc(390 * var(--unit))); overflow-y: auto; scrollbar-width: thin; }
-.fish-card { display: flex; align-items: center; text-align: left; border-color: transparent; padding: calc(6 * var(--unit)) 0; gap: calc(12 * var(--unit)); background: transparent; border-radius: 5px; }
-.fish-card[aria-pressed=true] { background: #b3caa610; border-color: #b6c58e35; }
+.fish-card { position: relative; display: flex; align-items: center; text-align: left; border-color: transparent; padding: calc(7 * var(--unit)) calc(7 * var(--unit)); gap: calc(12 * var(--unit)); background: transparent; border-radius: 7px; box-shadow: none; }
+.fish-card::before { content: ""; position: absolute; left: -2px; top: 18%; bottom: 18%; width: 1px; background: transparent; }
+.fish-card[aria-pressed=true] { background: linear-gradient(90deg, #d9dfae18, #b3caa608); border-color: #c7c28f42; box-shadow: inset 0 1px #fffbd20d; }
+.fish-card[aria-pressed=true]::before { background: #e2cf84; box-shadow: 0 0 8px #e2cf8488; }
 .fish-mark { width: calc(10 * var(--unit)); height: calc(23 * var(--unit)); flex-shrink: 0; border-radius: 65% 40%; transform: rotate(36deg); box-shadow: inset -2px 0 3px #0004; }
 .fish-copy { flex: 1; min-width: 0; overflow-wrap: anywhere; font-family: "SimSun", serif; font-weight: bold; font-size: calc(15 * var(--unit)); }
 .fish-copy small { display: block; font: calc(10 * var(--unit)) "Microsoft YaHei", sans-serif; color: var(--muted); margin-top: calc(5 * var(--unit)); }
 .fish-card b { font: bold calc(14 * var(--unit)) Georgia, serif; white-space: nowrap; color: #efe9bb; }
-#profile { border-top: 1px solid #b5b28a40; margin-top: 12px; padding-top: 14px; }
+#profile { border-top: 1px solid #b5b28a40; margin-top: 12px; padding: 15px 8px 0; background: linear-gradient(180deg, #e5dfab08, transparent 72%); }
 label { font-size: calc(12 * var(--unit)); color: var(--muted); }
 .name-row { display: flex; gap: 5px; margin-top: 8px; }
 input { width: 100%; min-width: 0; background: #021d1db0; border: 1px solid #9b9e6c80; border-radius: 4px; color: var(--ivory); padding: 8px; font-size: 12px; }
@@ -85,17 +101,25 @@ input { width: 100%; min-width: 0; background: #021d1db0; border: 1px solid #9b9
 details { border-top: 1px solid #aaa87670; padding-top: calc(14 * var(--unit)); margin-top: calc(15 * var(--unit)); }
 details[open] { max-height: 24vh; overflow-y: auto; scrollbar-width: thin; }
 summary { font: calc(12 * var(--unit)) "SimSun", serif; color: #d8dfc3; }
-footer { position: absolute; bottom: 5.3%; left: 2%; right: 1.8%; display: flex; align-items: center; gap: calc(22 * var(--unit)); pointer-events: none; }
-.tools { display: flex; position: relative; pointer-events: auto; padding: 4px; border: 1px solid var(--gold); border-radius: 17px; background: #032b26ee; box-shadow: inset 0 0 0 3px #ac9c6030, 0 6px 22px #02282260; }
+footer { position: absolute; z-index: 3; bottom: 5.3%; left: 2%; right: 1.8%; display: flex; align-items: center; gap: calc(22 * var(--unit)); pointer-events: none; }
+.tools { display: flex; position: relative; pointer-events: auto; padding: 4px; border: 1px solid var(--gold); border-radius: 17px; background: linear-gradient(145deg, #073c35f2, #021e1cef), url("koi-pond-washi.webp") center / 280px auto; background-blend-mode: normal, soft-light; box-shadow: inset 0 0 0 3px #ac9c6030, inset 0 1px #fff4ca18, 0 8px 25px #001b176e; }
 .tools::before { left: 25%; top: calc(-24 * var(--unit)); width: calc(43 * var(--unit)); height: calc(30 * var(--unit)); }
 .tools button { display: flex; align-items: center; justify-content: center; gap: calc(10 * var(--unit)); width: calc(112 * var(--unit)); padding: calc(14 * var(--unit)) calc(16 * var(--unit)); background: transparent; border-color: transparent; font: calc(21 * var(--unit)) "SimSun", serif; font-weight: bold; border-radius: 10px; white-space: nowrap; }
 .tools svg { width: calc(22 * var(--unit)); height: calc(22 * var(--unit)); fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linecap: round; }
-.tools .active { background: #f1efc8; color: #1e5349; box-shadow: inset 0 0 0 1px #cbbd88; }
+.tools .active { background: linear-gradient(145deg, #fffbdc, #dedaa9); color: #1e5349; box-shadow: inset 0 0 0 1px #cbbd88, 0 3px 12px #00171455; }
 #hint { font-size: calc(14 * var(--unit)); color: #ecebd0; letter-spacing: 1px; text-shadow: 0 2px 5px #032a24; }
-.garden-label { position: relative; margin-left: auto; align-self: flex-end; padding: 0 calc(8 * var(--unit)) calc(15 * var(--unit)); border-bottom: 1px solid #b7ac6d80; font-size: calc(11 * var(--unit)); letter-spacing: 2px; color: #e9edd4; white-space: nowrap; }
+.garden-label { position: relative; margin-left: auto; align-self: flex-end; display: flex; align-items: baseline; gap: calc(8 * var(--unit)); padding: 0 calc(8 * var(--unit)) calc(15 * var(--unit)); border-bottom: 1px solid #b7ac6d80; font-size: calc(11 * var(--unit)); letter-spacing: 2px; color: #e9edd4; white-space: nowrap; text-shadow: 0 2px 5px #001c19; }
+.garden-label strong { font: calc(17 * var(--unit)) "SimSun", serif; letter-spacing: calc(4 * var(--unit)); color: #f4edbd; }
+.garden-label b { font: calc(12 * var(--unit)) "SimSun", serif; letter-spacing: calc(3 * var(--unit)); color: #d9bd83; }
+body[data-season="spring"] .garden-label b { color: #f1c9bd; }
+body[data-season="summer"] .garden-label b { color: #e9dd85; }
+body[data-season="autumn"] .garden-label b { color: #e5a16f; }
+body[data-season="winter"] .garden-label b { color: #c9dce0; }
+.garden-label time { font: calc(12 * var(--unit)) Georgia, serif; color: #d7c98f; }
+.garden-label em { margin-left: calc(7 * var(--unit)); font-style: normal; font-size: calc(9 * var(--unit)); opacity: .8; }
 .garden-label::after { content: "◇"; position: absolute; right: -2px; bottom: -6px; color: #c6bd85; font-size: 13px; }
 .garden-label i { margin: 0 12px; font-style: normal; }
-#notice { position: absolute; bottom: 16%; left: 50%; transform: translateX(-50%); background: #092e28ed; border: 1px solid #c5b777; color: #f1ebc6; padding: 12px 22px; border-radius: 8px; font-size: 12px; pointer-events: none; opacity: 0; transition: opacity .3s; max-width: 70%; text-align: center; }
+#notice { position: absolute; z-index: 4; bottom: 16%; left: 50%; transform: translateX(-50%); background: linear-gradient(145deg, #123e35f2, #062521f2), url("koi-pond-washi.webp") center / 260px auto; border: 1px solid #c5b777; color: #f1ebc6; padding: 12px 22px; border-radius: 8px; box-shadow: 0 8px 30px #001b1770, inset 0 1px #fff7cd1f; font-size: 12px; pointer-events: none; opacity: 0; transition: opacity .3s; max-width: 70%; text-align: center; }
 #notice.show { opacity: 1; }
 @media(max-width: 800px) {
   :root { --unit: .78px; }

@@ -1155,3 +1155,169 @@ Remove-Item -LiteralPath 'src/conversation-replay-host-injector.ts','src/convers
 - docs/koi-pond.md：更新设置方式、保存及手动光照说明。
 - progress.md：仅追加本轮证据。
 - 回滚：按本轮 diff 反向还原上述鱼塘文件的下拉选择、偏好存取及新增测试，保留前序自动时段、光影与不规则边界；不要整文件 restore 覆盖未提交前序修改。浏览器 localStorage 的 koi-pond-time-setting 键可保留，旧代码不会读取。
+
+## 2026-09-08 - Task: 增加锦鲤性格与亲密度玩法
+### What was done
+- 为初始锦鲤加入好奇、胆小、贪吃、安静四种稳定性格，后代按自身标识稳定获得六种性格之一；性格分别影响指针跟随、玩水躲避、追食速度和巡游速度。
+- 新增 0–100 亲密度：有效对话每条鱼加 1，一轮投喂中首次进食加 2，选中锦鲤在附近陪玩加 1且间隔至少20秒；亲密度最多提供10%游速提升，不设衰减和离线惩罚。
+- 鱼卡与档案显示性格、行为说明、亲密数值和关系阶段；关系记录独立保存在鱼塘持久化浏览器分区，关闭窗口期间的对话在重开时补记，不修改原鱼塘JSON结构。
+### Testing
+- node --check assets/koi-pond.js、node --check scripts/smoke-koi-pond.mjs 通过。
+- 六组定向 Vitest 共36项通过，覆盖初始性格、后代稳定性、亲密上限、独立保存、胆小躲避、好奇靠近、陪玩奖励以及原成长/边界/时段/折射回归。
+- 独立隐藏 Electron 冒烟通过，验证性格UI、进食亲密、每次对话全鱼亲密增长、窗口关闭期间补记、重开保持及原投喂/禅模式/小窗口。输出：C:\Users\karma617\AppData\Local\Temp\dsh-koi-smoke-Cmeksz；已查看 pond-day.png。
+- git diff --check 通过；未执行全量构建、打包或重启当前主壳，真实鼠标手感仍需在新窗口人工确认。
+### Notes
+- assets/koi-pond.js：新增性格计算、关系记录、亲密规则及对应游动反应。
+- assets/koi-pond.html：成长说明补充性格和亲密度。
+- src/koi-pond-window.ts：鱼塘分区改为持久化，以保存时段与关系偏好。
+- tests/koi-pond-personality.spec.mjs：新增性格与关系纯逻辑测试。
+- tests/koi-pond-interaction.spec.mjs：新增玩水性格反应与陪玩奖励测试，并补齐互动夹具。
+- tests/koi-pond.spec.ts：验证鱼塘使用独立持久化分区。
+- scripts/smoke-koi-pond.mjs：新增真实UI、进食、对话、关闭窗口和重开关系验证。
+- docs/koi-pond.md：记录性格、亲密规则、存储位置和行为边界。
+- progress.md：仅追加本轮记录，未覆盖其他任务历史。
+- 回滚：删除 tests/koi-pond-personality.spec.mjs；将 src/koi-pond-window.ts 的 partition 恢复为 koi-pond；在其余上述文件中按本任务 diff 反向移除 personalities、bonds、pointer 性格反应及对应测试/文档块。保留此前自动时段、不规则岸线、折射和点击限制；不要整文件 git restore 覆盖这些未提交前序改动。
+
+## 2026-09-08 - Task: 深化鱼塘氛围美术与界面材质
+### What was done
+- 保留既有玩法与两幅庭院原画，新增静态暗角、中心通透层和极淡画面颗粒，增强前景树荫、池水与岸边的空间层次。
+- 新增缓存氛围画布：清晨/日间显示细碎水光和少量花瓣，傍晚/夜间显示暖色微光，清晨/夜间增加薄雾；锦鲤增加低透明尾流、身体金边与背部柔光。
+- UI 改用深墨绿和纸材质、内高光、细金线、选中光标及更有层次的按钮；底部加入当前时段和时钟铭牌。
+- 使用 GPT Image Proxy 的 gpt-image-2 生成低对比和纸纹理，压缩为 512×512、20118 字节 WebP 后随 assets/* 本地打包；运行时无生成接口或网络依赖。
+- 性格、亲密、成长、投喂、折射、时段、边界和禅模式规则保持不变。
+### Testing
+- node --check assets/koi-pond.js、node --check scripts/smoke-koi-pond.mjs 与 git diff --check 通过。
+- 七组定向 Vitest 共 38 项通过；新增验证普通模式最多18个氛围点且100ms刷新、减少动态效果最多8点且静态、和纸素材格式/体积及本地引用数量。
+- 独立隐藏 Electron 冒烟通过，覆盖四时段截图、氛围合成、和纸UI、投喂/进食、折射、密集点击、性格亲密、禅模式、重开存档及680×520小窗口。输出：C:\Users\karma617\AppData\Local\Temp\dsh-koi-smoke-9mPVtJ。
+- 已查看日间、傍晚和夜间实际截图；未执行全量构建、安装包或重启当前主壳。
+### Notes
+- assets/koi-pond-washi.webp：新增 gpt-image-2 生成并本地压缩的深墨绿和纸UI材质。
+- assets/koi-pond.js：新增有界缓存氛围层、时段铭牌同步及锦鲤尾流/高光细节。
+- assets/koi-pond.css：新增暗角颗粒、和纸面板、按钮层次、选中光标和时段铭牌样式。
+- assets/koi-pond.html：底部庭院签名扩展为时段、时钟与英文铭牌。
+- tests/koi-pond-visual.spec.mjs：新增氛围预算及生成素材交付测试。
+- scripts/smoke-koi-pond.mjs：适配多缓存画布的逐帧统计，并记录氛围美术检查项。
+- docs/koi-pond.md：补充视觉层级、性能预算、素材来源和运行边界。
+- progress.md：仅追加本轮记录，保留前序任务历史。
+- 回滚：执行 Remove-Item -LiteralPath assets/koi-pond-washi.webp,tests/koi-pond-visual.spec.mjs；从 assets/koi-pond.js 删除 atmosphere/ambientPoints、visualBudget、makeAmbientPoints、drawAtmosphere、尾流和背部柔光块；将 assets/koi-pond.html 的 garden-label 恢复为原静态签名；在 assets/koi-pond.css 反向移除本轮暗角、颗粒、和纸引用和铭牌样式，并将 scripts/smoke-koi-pond.mjs 的帧重置恢复为原 drawImage 条件。保留此前性格、时段、岸线与折射改动，不整文件 git restore。
+
+## 2026-09-08 - Task: 增加对话随机庭院事件
+### What was done
+- 每次有效对话按对话序号产生约42%的稳定伪随机事件机会；同一时间最多一个事件，不排队、不写入存档，也不改变等级或亲密度。
+- 清晨/日间加入花瓣、蜻蜓、青蛙与锦鲤跃水；傍晚/夜间加入花瓣、青蛙、萤火虫与锦鲤跃水。事件具备淡入淡出、时段适配和庭院提示。
+- 跃水锦鲤短暂悬起并冻结平面位移，附带水圈、水珠与水面阴影；禅模式继续显示纯画面事件并隐藏提示文字。
+- 控制事件性能：花瓣最多12片、萤火虫最多10只，减少动态效果时均为6个；蜻蜓、青蛙与跃水使用固定路径，同一事件到期后清理状态。
+### Testing
+- node --check assets/koi-pond.js、node --check scripts/smoke-koi-pond.mjs 通过。
+- 八组定向 Vitest 共40项通过，覆盖昼夜事件池、稳定选择、空事件比例、粒子上限、减少动态效果及五类绘制/到期清理路径。
+- 独立隐藏 Electron 冒烟通过：第三次对话实际触发“花信入池”，事件状态和提示正确，截图 C:\Users\karma617\AppData\Local\Temp\dsh-koi-smoke-GDaLkX\pond-event-petals.png 已查看；原成长、亲密、投喂、折射、禅模式、重开和存档回归保持通过。
+- git diff --check 通过；未执行全量构建、打包或重启当前主壳。
+### Notes
+- assets/koi-pond.js：新增事件选择、生命周期、五类绘制以及跃水锦鲤表现。
+- assets/koi-pond.html：成长说明补充庭院事件入口。
+- tests/koi-pond-events.spec.mjs：新增事件池、概率边界、粒子预算及绘制生命周期测试。
+- scripts/smoke-koi-pond.mjs：新增真实对话事件、提示、截图及最终成长状态验证。
+- docs/koi-pond.md：记录事件规则、时段适配、持续时间、禅模式和性能上限。
+- progress.md：仅追加本轮证据，保留此前美术、时段、性格和边界记录。
+- 回滚：删除 tests/koi-pond-events.spec.mjs；在 assets/koi-pond.js 中移除 gardenEventPools/gardenEventLabels、gardenEventFor/gardenEventParticleCount、eventPoints/startGardenEvent/eventProgress/drawGardenEvent、update 内事件触发、koi 内跃水偏移和 animate 内 drawGardenEvent 调用；反向移除 HTML、冒烟与文档中的本轮事件块。保留此前氛围美术、性格亲密、时段、折射及不规则水域改动。
+
+## 2026-09-08 - Task: 修复 PowerShell String.raw 反引号导致的代码解析失败
+### What was done
+- 在代码执行器首次 TypeScript 解析失败后，识别严格限定的多行 String.raw + 独立闭合反引号 + .trim() 形态；正文含 PowerShell 反引号且无模板插值时，转换为等价普通字符串并重新解析一次。
+- 保留命令中的换行、美元变量、百分号与 PowerShell 反引号；只重试解析，不重复工具调用。其他模板形态继续使用原失败诊断。
+- 主/子代理共享提示改为优先使用字符串数组 join("\\n") 构造含反引号的复杂 PowerShell 命令，并说明限定修复条件。
+### Testing
+- 定向 Vitest 25/25 通过：先复现附件同类 String.raw + `n 解析错误，再确认修复后执行器只执行一次且命令文本逐字符等价；含 ${...} 插值和非独立闭合模板保持失败路径。
+- 实际安装 DSH 0.1.3-alpha.1 隔离冒烟通过：六个 Runtime 模块匹配并导入；实际 WorkerThreadCodeRuntime 对含 curl 百分号、PowerShell 变量和 `n 的多行命令完成限定修复，执行源码不再含 String.raw，返回命令文本一致；核心文件哈希未变化。
+- Node 24 + pnpm test：38文件/258测试通过；pnpm run build（含 tsc --noEmit）退出码0；git diff --check通过，仅有 koi-pond.css、progress.md 既有换行提示。构建仍有原工具 CJS 与依赖打包提示。
+- 未重启当前应用、未生成安装包、未请求附件中的线上地址；部署新版壳后新解析逻辑才会生效。
+### Notes
+- src/runtime-tool-compatibility.ts：新增严格限定的 String.raw 多行命令等价转换及一次解析重试，补强共享生成指引。
+- tests/runtime-tool-compatibility.spec.ts：新增命令文本保持、单次执行、插值与非标准模板边界测试。
+- scripts/smoke-runtime-tool-compatibility.mjs：扩展实际代码执行器的 PowerShell 反引号命令验证。
+- docs/runtime-tool-compatibility.md：记录命中条件、文本保持和推荐写法。
+- progress.md：仅追加本轮记录；koi-pond 等同时存在的修改未由本任务编辑。
+- 回滚：按本任务 diff 分块移除 RAW_MULTILINE_REPAIR、adaptRuntimeCode 中的限定重解析分支、对应测试/冒烟/文档段落，再执行 pnpm run build；保留此前语法诊断、grep、read、occurrence 兼容及 progress.md 历史。
+
+
+## 2026-09-08 - Task: 为随机庭院事件接入 GPT Image Proxy 美术素材
+### What was done
+- 使用 GPT Image Proxy 的 gpt-image-2 分别生成花瓣、蜻蜓、荷叶青蛙、萤火虫和跃水水花五张俯视日式庭院素材，经纯绿背景抠图、去绿边、透明裁切和 WebP 压缩后随壳本地打包。
+- 五类对话事件改为绘制真实透明图片：花瓣和萤火虫复用单张素材做有界旋转/缩放实例，蜻蜓沿原轨迹飞行，青蛙停在岸边荷叶上，跃水叠加立体环形水花；素材未解码时保留原 Canvas 小景兜底。
+- 保持既有事件概率、时段池、持续时间、粒子上限、等级和亲密规则不变；运行时不访问图片生成接口，不增加图片序列或逐像素事件处理。
+### Testing
+- node --check assets/koi-pond.js 与 node --check scripts/smoke-koi-pond.mjs 通过。
+- 八组定向 Vitest 共 41 项通过；新增验证五张素材均为本地 WebP、单图小于 120 KB、HTML 预加载与脚本映射齐全，并确认五类事件实际进入 drawImage 绘制路径。
+- 独立隐藏 Electron 冒烟通过，确认日夜背景及五张事件素材可解码，第三次对话实际触发花瓣图片事件并产生 Canvas 图片绘制；输出 C:\Users\karma617\AppData\Local\Temp\dsh-koi-smoke-u4Q2yU，已查看 pond-event-petals.png。
+- 未打包、未重启正在运行的主壳；git diff --check 通过。
+### Notes
+- assets/koi-event-petals.webp：新增透明樱花瓣事件素材。
+- assets/koi-event-dragonfly.webp：新增透明俯视蜻蜓事件素材。
+- assets/koi-event-frog.webp：新增透明荷叶青蛙事件素材。
+- assets/koi-event-firefly.webp：新增透明发光萤火虫事件素材。
+- assets/koi-event-splash.webp：新增透明立体环形水花事件素材。
+- assets/koi-pond.html：预加载五张本地事件素材。
+- assets/koi-pond.js：加载并绘制事件图片，保留未解码时的原 Canvas 兜底。
+- tests/koi-pond-events.spec.mjs：新增素材格式、体积、引用和图片绘制路径验证。
+- scripts/smoke-koi-pond.mjs：解码五张素材并确认真实对话事件产生图片绘制。
+- docs/koi-pond.md：记录素材来源、运行方式、性能边界和兜底行为。
+- progress.md：仅追加本轮实现与验证记录。
+- 回滚：删除 assets/koi-event-petals.webp、assets/koi-event-dragonfly.webp、assets/koi-event-frog.webp、assets/koi-event-firefly.webp、assets/koi-event-splash.webp；按本轮 diff 反向移除 HTML 预加载、JS eventImages/drawEventSprite 及对应测试、冒烟和文档段落，保留前序随机事件逻辑与 Canvas 绘制，不整文件 git restore。
+
+
+## 2026-09-08 - Task: 让庭院小生物随机活动
+### What was done
+- 萤火虫由原地微幅闪烁改为每只拥有独立速度、弧度、升降、漂移方向和朝向的平滑随机飞行，暖光仍按各自相位明灭。
+- 蜻蜓每次出现随机选择飞行方向、高度、曲线幅度和转弯节奏，并通过翅幅变化和侧倾表现振翅；青蛙与荷叶缓慢漂移、轻摆，并在随机时机小跳和带起浅水圈。
+- 花瓣原有飘落旋转与锦鲤原有跃水动作保持；减少动态效果时保留必要活动，但将萤火虫和青蛙位移幅度压至约三分之一、减弱蜻蜓摆动。
+### Testing
+- node --check assets/koi-pond.js 与 node --check scripts/smoke-koi-pond.mjs 通过。
+- 八组定向 Vitest 共 42 项通过；新增验证蜻蜓长距离飞行、青蛙跳跃、萤火虫位置与朝向持续变化，以及减少动态效果确实缩小飞行幅度。
+- 独立隐藏 Electron 冒烟通过：在夜间实际触发第 8 次对话的萤火虫事件，连续 Canvas 帧中同一萤火虫位移超过 3 像素，截图 C:\Users\karma617\AppData\Local\Temp\dsh-koi-smoke-JsU6xP\pond-event-fireflies.png 已查看。
+- 未打包、未重启正在运行的主壳；git diff --check 通过。
+### Notes
+- assets/koi-pond.js：为蜻蜓、青蛙和萤火虫增加独立平滑运动参数与绘制姿态。
+- tests/koi-pond-events.spec.mjs：新增三类小生物运动幅度、朝向和减少动态效果验证。
+- scripts/smoke-koi-pond.mjs：新增真实夜间萤火虫触发、跨帧位移断言和截图。
+- docs/koi-pond.md：更新各类小生物动作及性能边界。
+- progress.md：仅追加本轮实现与验证记录。
+- 回滚：按本轮 diff 反向移除 eventPoints 的 speed/arc/rise、dragonflyMotion/frogMotion/fireflyMotion、startGardenEvent 的随机动作参数及对应绘制、测试、冒烟和文档段落；保留五张事件图片和前序静态事件逻辑，不整文件 git restore。
+
+
+## 2026-09-09 - Task: 增加按本地日期自动变化的节气庭院
+### What was done
+- 按本地月份自动切换四季：3–5 月春季、6–8 月夏季、9–11 月秋季、12–2 月冬季；不依赖网络或定位，底部铭牌同步显示春景、夏景、秋景、冬景。
+- 春季增加粉色花瓣，夏季在傍晚与夜间增加流萤，秋季增加 GPT Image Proxy 生成的红叶飘落，冬季增加 GPT Image Proxy 生成的半透明薄雾；季节层使用独立有限实例并保留减少动态效果预算。
+- 使用 GPT Image Proxy / gpt-image-2 生成红枫叶和冬日雾带，完成纯绿背景抠图、去绿边、透明裁切及本地 WebP 压缩。春季复用花瓣素材，夏季复用萤火虫素材，运行时只读取本地资源。
+### Testing
+- node --check assets/koi-pond.js 与 node --check scripts/smoke-koi-pond.mjs 通过。
+- 八组定向 Vitest 共 45 项通过，覆盖月份边界、同一分钟跨月刷新、四季实例预算、素材格式体积、HTML 预加载和脚本映射。
+- 独立隐藏 Electron 冒烟通过：实际模拟本地日期验证春、夏、秋、冬切换及底部季节标签，生成四季截图；同时回归昼夜、庭院事件、萤火虫飞行、投喂、折射、禅模式、存档和小窗口。输出 C:\Users\karma617\AppData\Local\Temp\dsh-koi-smoke-vEjmYC，已查看秋叶和冬雾截图。
+- git diff --check 通过；未打包、未重启正在运行的主壳。
+### Notes
+- assets/koi-season-autumn-leaf.webp：新增 gpt-image-2 生成的透明红枫叶素材，22,736 字节。
+- assets/koi-season-winter-mist.webp：新增 gpt-image-2 生成的透明冬日薄雾素材，30,576 字节。
+- assets/koi-pond.html：预加载节气素材、增加季节说明和底部季节标签。
+- assets/koi-pond.css：增加春夏秋冬标签颜色。
+- assets/koi-pond.js：增加本地月份映射、季节缓存点、花瓣/萤火虫/红叶/薄雾绘制和季度切换刷新。
+- tests/koi-pond-time.spec.mjs：增加四季边界和跨月刷新测试。
+- tests/koi-pond-visual.spec.mjs：增加节气预算、素材格式体积和引用测试。
+- scripts/smoke-koi-pond.mjs：增加四季实际日期模拟、解码和截图验证；冒烟超时上限调整为 90 秒以容纳四季截图。
+- docs/koi-pond.md：记录四季规则、素材来源和性能边界。
+- progress.md：仅追加本轮实现与验证记录。
+- GPT Image Proxy 输出：红叶 https://webstatic.aiproxy.vip/output/20260909/90576/e5fcbbef-6b37-416f-b009-7ca8a6863f05.png；冬雾 https://webstatic.aiproxy.vip/output/20260909/90576/31ee9841-05c0-4ab6-b457-ce8a77284a1b.png。
+- 回滚：删除 assets/koi-season-autumn-leaf.webp、assets/koi-season-winter-mist.webp；按本轮 diff 反向移除 HTML 预加载与季节标签、CSS 颜色、JS seasonAt/seasonParticleCount/drawSeasonAtmosphere 及对应测试、冒烟和文档段落，保留此前五类庭院事件和图片素材，不整文件 git restore。
+
+## 2026-09-09 - Task: 修正鱼塘时段下拉框展开后的可读性
+### What was done
+- 为鱼塘右上角时段选择器的原生下拉选项补充深色背景和浅色文字，选中项使用浅金底深色字，避免展开列表时浅底浅字看不清。
+- 保持选择器尺寸、位置、交互和已有庭院主题样式不变，只收窄修正下拉选项配色。
+### Testing
+- pnpm exec vitest run tests/koi-pond-visual.spec.mjs --maxWorkers=1 --testTimeout=20000：1 个文件 / 4 项测试通过，新增覆盖 Windows 下拉选项背景和选中态文字配色。
+- git diff --check -- assets/koi-pond.css tests/koi-pond-visual.spec.mjs：退出码 0；仅提示 assets/koi-pond.css 既有 CRLF/LF 换行提示。
+- 未打包、未重启正在运行的主壳；展开下拉框的最终视觉效果仍以用户本机新版壳手动确认为准。
+### Notes
+- assets/koi-pond.css：为 #light option 和 #light option:checked 增加可读配色。
+- tests/koi-pond-visual.spec.mjs：新增时段选择器下拉选项配色断言。
+- progress.md：追加本轮实现与验证记录。
+- 回滚：按本轮 diff 移除 #light option / #light option:checked 两条样式和对应 koi-pond-visual 断言，再重新执行上述 Vitest 与 git diff --check。

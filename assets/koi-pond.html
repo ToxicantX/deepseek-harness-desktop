@@ -8,6 +8,13 @@
   <link rel="stylesheet" href="koi-pond.css">
   <link rel="preload" as="image" href="koi-pond-day.webp">
   <link rel="preload" as="image" href="koi-pond-night.webp">
+  <link rel="preload" as="image" href="koi-event-petals.webp">
+  <link rel="preload" as="image" href="koi-event-dragonfly.webp">
+  <link rel="preload" as="image" href="koi-event-frog.webp">
+  <link rel="preload" as="image" href="koi-event-firefly.webp">
+  <link rel="preload" as="image" href="koi-event-splash.webp">
+  <link rel="preload" as="image" href="koi-season-autumn-leaf.webp">
+  <link rel="preload" as="image" href="koi-season-winter-mist.webp">
 </head>
 <body>
   <main>
@@ -43,7 +50,7 @@
       <details><summary>继续守望 · 成长周期</summary>
         <p>成功发送一条主会话消息，每条锦鲤升 1 级。失败、历史加载、助手回复与原会话重试不计入。</p>
         <p>每 100 级渐长体型、舒展鳍尾；500 级异性配对产卵，再聊 5 次迎来新鱼。每条鱼一生繁育一次，鱼与卵合计最多 16 位。</p>
-        <p>点击水面投喂，切换「玩水」轻点泛起涟漪。投喂不刷等级，没有饥饿、死亡或离线惩罚。关掉庭院也会随对话成长。</p>
+        <p>点击水面投喂，切换「玩水」轻点泛起涟漪。对话、进食与陪玩会积累亲密度，也可能遇见花信、蜻蜓、蛙客、流萤或跃水锦鲤。庭院按本地日期呈现春花、夏萤、秋叶与冬雾。投喂不刷等级，没有离线惩罚。</p>
       </details>
     </aside>
     <footer>
@@ -52,7 +59,7 @@
         <button id="ripple" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 8q5-5 10 0t10 0M2 12q5-5 10 0t10 0M2 16q5-5 10 0t10 0"/></svg>玩水</button>
       </div>
       <p id="hint">轻点水面，送它们一餐小欢喜</p>
-      <span class="garden-label">日々是好日 <i>／</i> KOI GARDEN</span>
+      <span class="garden-label"><strong id="period-name">日间</strong><i>·</i><b id="season-name">秋景</b><i>·</i><time id="clock">--:--</time><em>日々是好日 ／ KOI GARDEN</em></span>
     </footer>
     <p id="notice" role="status" aria-live="polite"></p>
   </main>

@@ -44,7 +44,7 @@ export class KoiPondWindow {
       show: false, autoHideMenuBar: true, backgroundColor: '#102d2c',
       webPreferences: {
         preload: this.preload, nodeIntegration: false, contextIsolation: true, sandbox: true,
-        partition: 'koi-pond',
+        partition: 'persist:koi-pond',
       },
     })
     this.window = window

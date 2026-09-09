@@ -52,11 +52,59 @@ const PARSE_FAILURE = `\t\t\tconst stripped = stripTypeScriptTypes(STRIP_WRAP.pr
 \t\t\t\tkind: "exception",
 \t\t\t\tmessage: messageOf(error)`
 
+const RAW_MULTILINE_REPAIR = [
+  'function desktopRepairRawMultiline(program) {',
+  '\tconst marker = "String.raw`";',
+  '\tlet scan = 0;',
+  '\tlet copied = 0;',
+  '\tlet output = "";',
+  '\tlet changed = false;',
+  '\twhile (scan < program.length) {',
+  '\t\tconst start = program.indexOf(marker, scan);',
+  '\t\tif (start < 0) break;',
+  '\t\tconst bodyStart = start + marker.length;',
+  '\t\tconst first = program[bodyStart];',
+  '\t\tif (first !== "\\n" && !(first === "\\r" && program[bodyStart + 1] === "\\n")) {',
+  '\t\t\tscan = bodyStart;',
+  '\t\t\tcontinue;',
+  '\t\t}',
+  '\t\tconst closePattern = /^[\\t ]*`(?=\\.trim\\(\\))/gmu;',
+  '\t\tclosePattern.lastIndex = bodyStart;',
+  '\t\tconst close = closePattern.exec(program);',
+  '\t\tif (close === null) break;',
+  '\t\tconst closeTick = close.index + close[0].length - 1;',
+  '\t\tconst body = program.slice(bodyStart, closeTick);',
+  '\t\tif (!body.includes("`") || body.includes("${")) {',
+  '\t\t\tscan = closeTick + 1;',
+  '\t\t\tcontinue;',
+  '\t\t}',
+  '\t\toutput += program.slice(copied, start) + JSON.stringify(body);',
+  '\t\tcopied = closeTick + 1;',
+  '\t\tscan = copied;',
+  '\t\tchanged = true;',
+  '\t}',
+  '\treturn changed ? output + program.slice(copied) : program;',
+  '}',
+].join('\n')
+
 export function adaptRuntimeCode(source: string): { source: string; changed: boolean } {
-  if (!source.includes(PARSE_FAILURE) || source.includes('代码在解析阶段失败')) return { source, changed: false }
+  if (!source.includes(PARSE_FAILURE) || source.includes('desktopRepairRawMultiline')) return { source, changed: false }
   return {
-    source: source.replace(PARSE_FAILURE, PARSE_FAILURE
-      + ' + "\\n代码在解析阶段失败，本次调用中的工具均尚未执行。请检查字符串引号和对象字段冒号；普通引号字符串内的换行应写成转义序列。若出现 eof，检查代码是否被截断、括号或模板字符串是否闭合。String.raw 仍需正确处理反引号和插值；不要用空字符串 replaceAll 修复路径或源码。将长文件写入与后续命令分开提交，不要重放此前成功的调用。"'),
+    source: RAW_MULTILINE_REPAIR + '\n' + source.replace(PARSE_FAILURE, `\t\t\tconst stripped = stripTypeScriptTypes(STRIP_WRAP.prefix + request.program + STRIP_WRAP.suffix);
+\t\t\tcode = stripped.slice(STRIP_WRAP.prefix.length, stripped.length - STRIP_WRAP.suffix.length);
+\t\t} catch (error) {
+\t\t\tconst desktopRepaired = desktopRepairRawMultiline(request.program);
+\t\t\tif (desktopRepaired !== request.program) {
+\t\t\t\ttry {
+\t\t\t\t\tconst repaired = stripTypeScriptTypes(STRIP_WRAP.prefix + desktopRepaired + STRIP_WRAP.suffix);
+\t\t\t\t\tcode = repaired.slice(STRIP_WRAP.prefix.length, repaired.length - STRIP_WRAP.suffix.length);
+\t\t\t\t} catch (repairError) {
+\t\t\t\t\terror = repairError;
+\t\t\t\t}
+\t\t\t}
+\t\t\tif (code === void 0) return this.failureBeforeWorker({
+\t\t\t\tkind: "exception",
+\t\t\t\tmessage: messageOf(error) + "\\n代码在解析阶段失败，本次调用中的工具均尚未执行。请检查字符串引号和对象字段冒号；普通引号字符串内的换行应写成转义序列。若出现 eof，检查代码是否被截断、括号或模板字符串是否闭合。独立成行并以 .trim() 结束、且不含模板插值的 String.raw 多行命令会保留原始文本后重新解析；其他 String.raw 仍需正确处理反引号和插值。不要用空字符串 replaceAll 修复路径或源码。将长文件写入与后续命令分开提交，不要重放此前成功的调用。"`),
     changed: true,
   }
 }
@@ -70,7 +118,7 @@ export function adaptRuntimeToolPrompt(source: string): { source: string; change
       + '- On Windows use forward-slash absolute workdir paths such as E:/AI/project. Do not guess or silently repair damaged directory paths. Do not repeat a successfully completed call when correcting another call.\n'
       + '- Provide every required argument in the current schema, including description on run_code and on any subtool that requires it. An outer description does not supply an inner one. Send messages only to exact IDs confirmed by current tool results; never infer a parent ID from a tool name or another session. If a recipient is unavailable, stop retrying that ID and report the result through the normal final response.\n'
       + '- Before edit, read the current file and copy a unique literal old_string including surrounding context, without displayed line numbers. On multiple matches, add context or pass the verified 1-based occurrence; on no match, reread the affected region. Do not enable replace_all unless every occurrence is intended. Serialize edits to the same file and refresh context after each change.\n'
-      + '- Submit a large file write separately from verification commands. Check closing brackets and quotes before submitting. String.raw does not protect backticks or interpolation expressions; do not repair source with empty-string replaceAll. Preserve source-language backslashes through both JSON and TypeScript escaping.\n'),
+      + '- Submit a large file write separately from verification commands. Check closing brackets and quotes before submitting. For multiline PowerShell containing backticks, prefer an array of quoted lines joined with "\\n". A standalone String.raw block ending with .trim() is repaired only when it has no template interpolation; other String.raw forms still require correct backtick and interpolation escaping. Do not repair source with empty-string replaceAll. Preserve source-language backslashes through both JSON and TypeScript escaping.\n'),
     changed: true,
   }
 }

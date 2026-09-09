@@ -60,10 +60,11 @@ try {
   }), /分隔符/)
   const code = await import(pathToFileURL(verified[1].file).href)
   let executions = 0
+  let executedCode = ''
   const runtime = {
     disposed: false, validateBindings: () => new Map(),
     failureBeforeWorker: error => error,
-    execute: () => { executions++; return { ok: true } },
+    execute: (_request, source) => { executions++; executedCode = source; return { ok: true } },
   }
   const result = await code.WorkerThreadCodeRuntime.prototype.run.call(runtime, {
     program: "const text = 'first\nsecond';", bindings: [],
@@ -72,6 +73,19 @@ try {
   assert.equal(executions, 0)
   await code.WorkerThreadCodeRuntime.prototype.run.call(runtime, { program: 'return 1', bindings: [] })
   assert.equal(executions, 1)
+  const rawPowerShellProgram = [
+    'const command=String.raw`',
+    "$ErrorActionPreference='Continue'",
+    'Write-Output "HTTP=%{http_code} TOTAL=%{time_total}`n"',
+    '`.trim();',
+    'return command;',
+  ].join('\n')
+  await code.WorkerThreadCodeRuntime.prototype.run.call(runtime, { program: rawPowerShellProgram, bindings: [] })
+  assert.equal(executions, 2)
+  assert.doesNotMatch(executedCode, /String\.raw`/)
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
+  assert.equal(await new AsyncFunction(executedCode)(),
+    "$ErrorActionPreference='Continue'\nWrite-Output \"HTTP=%{http_code} TOTAL=%{time_total}`n\"")
   for (const entry of verified.slice(2)) await import(pathToFileURL(entry.file).href)
   const fsTools = await import(pathToFileURL(verified[3].file).href)
   const registered = new Map()
@@ -165,7 +179,7 @@ try {
   console.log(JSON.stringify({
     matchedAndImported: verified.map(entry => entry.name),
     powershell: 'passed', damagedWorkdir: 'rejected before execution',
-    parseFailure: 'diagnostic verified', coreFiles: 'unchanged',
+    parseFailure: 'diagnostic and constrained multiline String.raw repair verified', coreFiles: 'unchanged',
     compressedRead: 'actual registered read: concatenated frames, pagination and access failure passed',
     oversizedRead: '5000 accepted with configured cap 20; render and invalid limit checks passed',
     grep: 'literal route, 60s default, actual packaged rg search and model guidance passed',

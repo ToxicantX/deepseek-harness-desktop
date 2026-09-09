@@ -142,6 +142,8 @@ describe('koi dialogue observer', () => {
     expect(html).toContain('id="return"')
     expect(html).toContain('id="zen"')
     expect(html).toContain('id="light"')
+    const windowSource = await readFile(new URL('../src/koi-pond-window.ts', import.meta.url), 'utf8')
+    expect(windowSource).toContain("partition: 'persist:koi-pond'")
   })
 
   it('places the direct entry after Help and includes the local page and preload in packaging', async () => {

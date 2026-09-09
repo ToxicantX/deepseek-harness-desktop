@@ -7,10 +7,12 @@ const interact = source.slice(source.indexOf('  function interact('), source.ind
 function pond() {
   const context = {
     state: {}, mode: 'ripple', ripples: [], food: [], lastInteraction: -Infinity,
+    fish: [], selected: undefined, feedBatch: 0,
     width: 1280, height: 720, now: 0,
     window: { koiWater: { duration: 2.5 } },
     waterDistance: () => 0, random: () => 0,
     clamp: (v, min, max) => Math.max(min, Math.min(max, v)),
+    personalityFor: () => ({ key: 'calm' }), keepInWater: (x, y) => ({ x, y }), addAffinity: () => {},
     notify: () => { throw new Error('Rejected clicks must not refresh notices') },
   }
   context.performance = { now: () => context.now }
@@ -88,5 +90,21 @@ describe('pond interaction budget', () => {
     p.mode = 'ripple'
     p.interact(610, 400)
     expect(p.ripples).toHaveLength(3)
+  })
+
+  it('makes timid koi flee, curious koi inspect and the selected nearby koi bond', () => {
+    const p = pond(), gained = []
+    p.fish = [
+      { id: 'timid', key: 'timid', x: 600, y: 400 },
+      { id: 'curious', key: 'curious', x: 620, y: 400 },
+    ]
+    p.selected = 'curious'
+    p.personalityFor = fish => ({ key: fish.key })
+    p.addAffinity = (fish, amount) => gained.push([fish.id, amount])
+    p.interact(610, 400)
+    expect(p.fish[0].target.x).toBeLessThan(600)
+    expect(p.fish[0].startledUntil).toBe(1800)
+    expect(p.fish[1].target).toEqual({ x: 610, y: 400 })
+    expect(gained).toEqual([['curious', 1]])
   })
 })

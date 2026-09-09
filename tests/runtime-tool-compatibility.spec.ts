@@ -85,7 +85,7 @@ describe('code-generation diagnostics', () => {
       + 'await tools.edit({old_string:"old",new_string:"async function next() {}"});\n}')).not.toThrow()
   })
 
-  it('adds guidance only to the pre-worker parse failure, without retrying', () => {
+  it('adds guidance to ordinary pre-worker parse failures without executing tools', () => {
     const source = `function run(request) {
 \t\tlet code;
 \t\ttry {
@@ -111,6 +111,68 @@ describe('code-generation diagnostics', () => {
     expect(adaptRuntimeCode(transformed.source).changed).toBe(false)
   })
 
+  it('repairs a constrained multiline String.raw PowerShell block without changing command text', async () => {
+    const source = `function run(request) {
+\t\tlet code;
+\t\ttry {
+\t\t\tconst stripped = stripTypeScriptTypes(STRIP_WRAP.prefix + request.program + STRIP_WRAP.suffix);
+\t\t\tcode = stripped.slice(STRIP_WRAP.prefix.length, stripped.length - STRIP_WRAP.suffix.length);
+\t\t} catch (error) {
+\t\t\treturn this.failureBeforeWorker({
+\t\t\t\tkind: "exception",
+\t\t\t\tmessage: messageOf(error)
+\t\t\t});
+\t\t}
+\t\treturn this.execute(code);
+}`
+    const transformed = adaptRuntimeCode(source)
+    const run = new Function('stripTypeScriptTypes', 'STRIP_WRAP', 'messageOf',
+      transformed.source + '; return run;')(stripTypeScriptTypes,
+      { prefix: 'async function __dsh_program__() {\n', suffix: '\n}' }, (e: Error) => e.message)
+    let received = ''
+    const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
+    const target = {
+      execute: vi.fn((code: string) => { received = code; return new AsyncFunction(code)() }),
+      failureBeforeWorker: (e: unknown) => e,
+    }
+    const program = [
+      'const command=String.raw`',
+      "$ErrorActionPreference='Continue'",
+      'Write-Output "TOTAL=%{time_total}`n"',
+      '`.trim();',
+      'return command;',
+    ].join('\n')
+    expect(() => stripTypeScriptTypes('async function __dsh_program__() {\n' + program + '\n}')).toThrow()
+    const command = await run.call(target, { program })
+    expect(target.execute).toHaveBeenCalledOnce()
+    expect(received).not.toContain('String.raw`')
+    expect(command).toBe("$ErrorActionPreference='Continue'\nWrite-Output \"TOTAL=%{time_total}`n\"")
+  })
+
+  it('leaves interpolated or non-standalone raw templates on the normal failure path', () => {
+    const source = `function run(request) {
+\t\tlet code;
+\t\ttry {
+\t\t\tconst stripped = stripTypeScriptTypes(STRIP_WRAP.prefix + request.program + STRIP_WRAP.suffix);
+\t\t\tcode = stripped.slice(STRIP_WRAP.prefix.length, stripped.length - STRIP_WRAP.suffix.length);
+\t\t} catch (error) {
+\t\t\treturn this.failureBeforeWorker({
+\t\t\t\tkind: "exception",
+\t\t\t\tmessage: messageOf(error)
+\t\t\t});
+\t\t}
+\t\treturn this.execute(code);
+}`
+    const transformed = adaptRuntimeCode(source)
+    const run = new Function('stripTypeScriptTypes', 'STRIP_WRAP', 'messageOf',
+      transformed.source + '; return run;')(stripTypeScriptTypes,
+      { prefix: 'async function __dsh_program__() {\n', suffix: '\n}' }, (e: Error) => e.message)
+    const target = { execute: vi.fn(), failureBeforeWorker: (e: unknown) => e }
+    const program = ['const command=String.raw`', '${value}', 'Write-Output "`n"', '`.trim();'].join('\n')
+    expect(run.call(target, { program }).message).toContain('工具均尚未执行')
+    expect(target.execute).not.toHaveBeenCalled()
+  })
+
   it('adds shared SDK guidance once', () => {
     const source = 'const SDK_PROGRAM_INSTRUCTIONS = `Inside the program:\noriginal`;'
     const result = adaptRuntimeToolPrompt(source)
@@ -121,6 +183,7 @@ describe('code-generation diagnostics', () => {
     expect(result.source).toContain('Do not enable replace_all unless every occurrence is intended')
     expect(result.source).toContain('verified 1-based occurrence')
     expect(result.source).toContain('empty-string replaceAll')
+    expect(result.source).toContain('array of quoted lines')
     expect(adaptRuntimeToolPrompt(result.source).changed).toBe(false)
   })
 })
