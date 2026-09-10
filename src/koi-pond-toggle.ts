@@ -101,8 +101,8 @@ export function installKoiPondToggle(toggle: () => Promise<void>, inPond = false
     }
     span {
       position: absolute;
-      top: 60px;
-      right: 0;
+      left: 50%;
+      transform: translateX(-50%);
       white-space: nowrap;
       font: 12px system-ui;
       background: #173e39;
@@ -112,6 +112,15 @@ export function installKoiPondToggle(toggle: () => Promise<void>, inPond = false
       display: none;
       pointer-events: none;
       box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+      z-index: 1;
+    }
+    :host([data-placement="top"]) span {
+      top: auto;
+      bottom: calc(100% + 8px);
+    }
+    :host(:not([data-placement="top"])) span {
+      top: calc(100% + 8px);
+      bottom: auto;
     }
     button:hover + span,
     button:focus-visible + span {
@@ -146,6 +155,15 @@ export function installKoiPondToggle(toggle: () => Promise<void>, inPond = false
     }
   }
 
+  function updateTooltipPlacement(top: number) {
+    const winH = window.innerHeight || document.documentElement.clientHeight || 600
+    const spaceBelow = winH - (top + size)
+    const placement = spaceBelow < 48 ? 'top' : 'bottom'
+    host.setAttribute('data-placement', placement)
+  }
+
+  updateTooltipPlacement(currentTop)
+
   button.addEventListener('pointerdown', (event: PointerEvent) => {
     if (event.button !== 0) return
     isDragging = true
@@ -173,6 +191,7 @@ export function installKoiPondToggle(toggle: () => Promise<void>, inPond = false
       currentTop = clamped.y
       host.style.left = `${currentLeft}px`
       host.style.top = `${currentTop}px`
+      updateTooltipPlacement(currentTop)
     }
   })
 
@@ -224,6 +243,7 @@ export function installKoiPondToggle(toggle: () => Promise<void>, inPond = false
     currentTop = clamped.y
     host.style.left = `${currentLeft}px`
     host.style.top = `${currentTop}px`
+    updateTooltipPlacement(currentTop)
   })
 
   shadow.append(button, tooltip)

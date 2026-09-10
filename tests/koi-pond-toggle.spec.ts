@@ -182,4 +182,37 @@ describe('koi-pond-toggle component', () => {
     expect(saved.left).toBeGreaterThan(0)
     expect(saved.top).toBeGreaterThan(0)
   })
+
+  it('adjusts tooltip placement between top and bottom based on boundary clearance', () => {
+    // Initial position in 800h window with size 56 puts it at top = 800 - 56 - 16 = 728.
+    // Space below is 16px (< 48px), so data-placement must be 'top' to prevent bottom clipping.
+    const toggleFn = vi.fn().mockResolvedValue(undefined)
+    installKoiPondToggle(toggleFn, false)
+
+    const host = (document as any).getElementById('dsh-pond-toggle') as MockElement
+    expect(host.getAttribute('data-placement')).toBe('top')
+
+    // Drag to near the top of the window where space below is ample
+    const button = host?.shadowRoot?.querySelector('button')
+    button?.dispatchEvent({
+      type: 'pointerdown',
+      button: 0,
+      clientX: 500,
+      clientY: 728,
+      pointerId: 1,
+    })
+    button?.dispatchEvent({
+      type: 'pointermove',
+      clientX: 500,
+      clientY: 100,
+      pointerId: 1,
+    })
+    button?.dispatchEvent({
+      type: 'pointerup',
+      pointerId: 1,
+    })
+
+    // Now currentTop is near top, space below is abundant (> 48px)
+    expect(host.getAttribute('data-placement')).toBe('bottom')
+  })
 })
