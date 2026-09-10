@@ -1,10 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { PondView } from './koi-pond-store.ts'
-import { installKoiPondToggle } from './koi-pond-toggle.ts'
 
-window.addEventListener('DOMContentLoaded', () => {
-  installKoiPondToggle(() => ipcRenderer.invoke('pond:close'), true)
-})
 window.addEventListener('keydown', event => {
   if (event.key === 'Escape') {
     event.preventDefault()

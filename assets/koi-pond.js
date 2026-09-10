@@ -778,6 +778,14 @@
     keyboardActive = false
     canvas.focus({ preventScroll: true })
   }
+  const closeButton = $('close-pond')
+  if (closeButton) {
+    closeButton.onclick = () => {
+      if (typeof window.koiPond?.close === 'function') {
+        void window.koiPond.close().catch(console.error)
+      }
+    }
+  }
   canvas.addEventListener('contextmenu', e => {
     if (!zen) return
     e.preventDefault()

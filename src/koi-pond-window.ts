@@ -38,8 +38,22 @@ export class KoiPondWindow {
 
   private checkSender(event: IpcMainInvokeEvent): void {
     if (!this.view || this.view.webContents.isDestroyed() || event.sender !== this.view.webContents
-      || event.senderFrame !== event.sender.mainFrame
-      || event.sender.getURL() !== pathToFileURL(this.page).href) throw new Error('鱼塘窗口来源不匹配')
+      || event.senderFrame !== event.sender.mainFrame) {
+      throw new Error('鱼塘窗口来源不匹配')
+    }
+    const senderUrl = event.sender.getURL()
+    const expectedUrl = pathToFileURL(this.page).href
+    if (senderUrl !== expectedUrl) {
+      try {
+        const u1 = new URL(senderUrl)
+        const u2 = new URL(expectedUrl)
+        if (u1.protocol !== 'file:' || decodeURIComponent(u1.pathname).toLowerCase() !== decodeURIComponent(u2.pathname).toLowerCase()) {
+          throw new Error('鱼塘窗口来源不匹配')
+        }
+      } catch {
+        throw new Error('鱼塘窗口来源不匹配')
+      }
+    }
   }
 
   async open(): Promise<void> {
