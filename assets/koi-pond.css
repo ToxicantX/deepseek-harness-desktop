@@ -58,7 +58,10 @@ button {
 button:hover { background: linear-gradient(145deg, #315d4ce8, #0d332ddf); border-color: #d7c896; transform: translateY(-1px); }
 button:focus-visible, summary:focus-visible, input:focus-visible { outline: 2px solid #f4dda0; outline-offset: 3px; }
 .window-tools button { height: calc(43 * var(--unit)); min-width: calc(42 * var(--unit)); padding: 0 calc(12 * var(--unit)); font-size: calc(15 * var(--unit)); }
-#light { font: inherit; font-size: calc(13 * var(--unit)); height: calc(43 * var(--unit)); padding: 0 30px 0 12px; border: 1px solid #aa9f6870; border-radius: 9px; background: linear-gradient(145deg, #16483eea, #041f1de8); color: var(--ivory); box-shadow: inset 0 1px #fff1bd18, 0 4px 15px #00191538; cursor: pointer; }
+#light, #weather-select { font: inherit; font-size: calc(13 * var(--unit)); height: calc(43 * var(--unit)); padding: 0 30px 0 12px; border: 1px solid #aa9f6870; border-radius: 9px; background: linear-gradient(145deg, #16483eea, #041f1de8); color: var(--ivory); box-shadow: inset 0 1px #fff1bd18, 0 4px 15px #00191538; cursor: pointer; }
+#weather-select:focus-visible { outline: 2px solid #f4dda0; outline-offset: 3px; }
+#weather-select option { background: #07332f; color: #f0efcf; }
+#weather-select option:checked { background: #d8c584; color: #062521; }
 #light:focus-visible { outline: 2px solid #f4dda0; outline-offset: 3px; }
 #light option { background: #07332f; color: #f0efcf; }
 #light option:checked { background: #d8c584; color: #062521; }
@@ -120,6 +123,15 @@ body[data-season="spring"] .garden-label b { color: #f1c9bd; }
 body[data-season="summer"] .garden-label b { color: #e9dd85; }
 body[data-season="autumn"] .garden-label b { color: #e5a16f; }
 body[data-season="winter"] .garden-label b { color: #c9dce0; }
+.garden-label b#weather-name { color: #7de8d6; font-size: calc(13 * var(--unit)); }
+body[data-weather="clear"] .garden-label b#weather-name { color: #fce38a; }
+body[data-weather="overcast"] .garden-label b#weather-name { color: #b8c8c5; }
+body[data-weather="drizzle"] .garden-label b#weather-name,
+body[data-weather="rain"] .garden-label b#weather-name,
+body[data-weather="storm"] .garden-label b#weather-name { color: #72d6ec; }
+body[data-weather="light_snow"] .garden-label b#weather-name,
+body[data-weather="snow"] .garden-label b#weather-name,
+body[data-weather="heavy_snow"] .garden-label b#weather-name { color: #e4f3f7; }
 .garden-label time { font: calc(12 * var(--unit)) Georgia, serif; color: #d7c98f; }
 .garden-label em { margin-left: calc(7 * var(--unit)); font-style: normal; font-size: calc(9 * var(--unit)); opacity: .8; }
 .garden-label::after { content: "◇"; position: absolute; right: -2px; bottom: -6px; color: #c6bd85; font-size: 13px; }

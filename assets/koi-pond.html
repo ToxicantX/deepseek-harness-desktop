@@ -15,6 +15,7 @@
   <link rel="preload" as="image" href="koi-event-splash.webp">
   <link rel="preload" as="image" href="koi-season-autumn-leaf.webp">
   <link rel="preload" as="image" href="koi-season-winter-mist.webp">
+  <link rel="preload" as="image" href="koi-weather-snow.webp">
   <link rel="preload" as="image" href="koi-fish-kohaku-fry.webp">
   <link rel="preload" as="image" href="koi-fish-kohaku-juvenile.webp">
   <link rel="preload" as="image" href="koi-fish-kohaku-adult.webp">
@@ -39,6 +40,17 @@
       <div class="seal" aria-hidden="true">庭</div>
       <div><p class="eyebrow">A LITTLE GARDEN. BETWEEN TASKS</p><h1>后院鱼塘<span>一池清澈，日月生长。</span></h1></div>
       <nav class="window-tools" aria-label="庭院视图">
+        <select id="weather-select" title="天气设置" aria-label="天气设置">
+          <option value="auto">实时天气 (Open-Meteo)</option>
+          <option value="clear">手动 · 晴天</option>
+          <option value="overcast">手动 · 阴天</option>
+          <option value="drizzle">手动 · 小雨</option>
+          <option value="rain">手动 · 中雨</option>
+          <option value="storm">手动 · 暴雨</option>
+          <option value="light_snow">手动 · 小雪</option>
+          <option value="snow">手动 · 中雪</option>
+          <option value="heavy_snow">手动 · 大雪</option>
+        </select>
         <select id="light" title="时段设置" aria-label="时段设置">
           <option value="auto">自动时段</option>
           <option value="dawn">手动 · 清晨</option>
@@ -75,7 +87,7 @@
         <button id="ripple" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 8q5-5 10 0t10 0M2 12q5-5 10 0t10 0M2 16q5-5 10 0t10 0"/></svg>玩水</button>
       </div>
       <p id="hint">轻点水面，送它们一餐小欢喜</p>
-      <span class="garden-label"><strong id="period-name">日间</strong><i>·</i><b id="season-name">秋景</b><i>·</i><time id="clock">--:--</time><em>日々是好日 ／ KOI GARDEN</em></span>
+      <span class="garden-label"><strong id="period-name">日间</strong><i>·</i><b id="season-name">秋景</b><i>·</i><b id="weather-name">晴天</b><i>·</i><time id="clock">--:--</time><em>日々是好日 ／ KOI GARDEN</em></span>
     </footer>
     <p id="notice" role="status" aria-live="polite"></p>
   </main>

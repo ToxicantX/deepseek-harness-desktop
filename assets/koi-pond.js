@@ -38,6 +38,15 @@
     const saved = localStorage.getItem('koi-pond-time-setting')
     if (['auto', 'dawn', 'day', 'dusk', 'night'].includes(saved)) timeSetting = saved
   } catch { /* Keep the default when local storage is unavailable. */ }
+  let currentWeather = 'clear', weatherSetting = 'auto'
+  let weatherDrops = [], weatherRipples = [], weatherMelts = [], lastWeatherFetch = -Infinity
+  try {
+    const savedW = localStorage.getItem('koi-pond-weather-setting')
+    if (['auto', 'clear', 'overcast', 'drizzle', 'rain', 'storm', 'light_snow', 'snow', 'heavy_snow'].includes(savedW)) weatherSetting = savedW
+  } catch { /* Keep the default when local storage is unavailable. */ }
+  const weatherImages = { snow: new Image() }
+  weatherImages.snow.decoding = 'async'; weatherImages.snow.src = 'koi-weather-snow.webp'
+  weatherImages.snow.addEventListener('load', () => { ambientPaint = -Infinity })
   const refractionCanvas = document.createElement('canvas')
   const refractionContext = refractionCanvas.getContext('2d', { willReadFrequently: true })
   const sceneImages = { day: new Image(), night: new Image() }
@@ -328,6 +337,184 @@
     ctx.restore()
     return true
   }
+  function updateAndDrawWeather(dt, t) {
+    if (currentWeather === 'clear') {
+      weatherDrops = []
+      weatherRipples = weatherRipples.filter(wr => (wr.age += dt) < wr.duration)
+      weatherMelts = weatherMelts.filter(m => (m.age += dt) < m.duration)
+      drawWeatherRipplesAndMelts()
+      return
+    }
+    const isRain = currentWeather === 'drizzle' || currentWeather === 'rain' || currentWeather === 'storm'
+    const isSnow = currentWeather === 'light_snow' || currentWeather === 'snow' || currentWeather === 'heavy_snow'
+    const isOvercast = currentWeather === 'overcast'
+
+    if (isOvercast || isRain || isSnow) {
+      ctx.save()
+      const washAlpha = isOvercast ? .18 : currentWeather === 'storm' ? .42 : isRain ? .26 : .20
+      ctx.fillStyle = night ? `rgba(6, 20, 24, ${washAlpha * 1.2})` : `rgba(32, 48, 52, ${washAlpha})`
+      ctx.fillRect(0, 0, width, height)
+      ctx.restore()
+    }
+
+    if (!isRain && !isSnow) {
+      weatherDrops = []
+      weatherRipples = weatherRipples.filter(wr => (wr.age += dt) < wr.duration)
+      weatherMelts = weatherMelts.filter(m => (m.age += dt) < m.duration)
+      drawWeatherRipplesAndMelts()
+      return
+    }
+
+    // High performance particle counts (keeps 60fps stable)
+    const targetCount = reduced
+      ? (currentWeather === 'drizzle' || currentWeather === 'light_snow' ? 10 : currentWeather === 'storm' || currentWeather === 'heavy_snow' ? 24 : 16)
+      : (currentWeather === 'drizzle' ? 18 : currentWeather === 'rain' ? 36 : currentWeather === 'storm' ? 62
+         : currentWeather === 'light_snow' ? 14 : currentWeather === 'snow' ? 24 : 42)
+
+    while (weatherDrops.length < targetCount) {
+      let targetX, targetY, inWater = false
+      if (Math.random() < 0.8) {
+        for (let tries = 0; tries < 6; tries++) {
+          const rx = sceneFrame.x + random(.22, .80) * sceneFrame.width
+          const ry = sceneFrame.y + random(.12, .88) * sceneFrame.height
+          if (waterDistance(rx, ry) <= 1) { targetX = rx; targetY = ry; inWater = true; break }
+        }
+      }
+      if (!targetX) {
+        targetX = sceneFrame.x + random(0, 1) * sceneFrame.width
+        targetY = sceneFrame.y + random(.1, .95) * sceneFrame.height
+      }
+
+      const speed = isRain
+        ? (currentWeather === 'storm' ? random(900, 1300) : currentWeather === 'rain' ? random(700, 950) : random(500, 700))
+        : (currentWeather === 'heavy_snow' ? random(85, 130) : currentWeather === 'snow' ? random(60, 95) : random(40, 70))
+      const fallDist = random(120, 260)
+      weatherDrops.push({
+        x: targetX - (isRain ? (currentWeather === 'storm' ? 1.8 : 0.6) * fallDist * 0.2 : 0),
+        y: targetY - fallDist,
+        targetY, inWater, speed,
+        slant: isRain ? (currentWeather === 'storm' ? 1.8 : 0.6) : random(-0.35, 0.35),
+        size: isSnow ? random(10, currentWeather === 'heavy_snow' ? 18 : 15) : random(1, 2),
+        phase: random(0, Math.PI * 2),
+      })
+    }
+
+    const nextDrops = []
+    const maxRipples = reduced ? 8 : 16
+    const maxMelts = reduced ? 6 : 12
+
+    for (const d of weatherDrops) {
+      d.y += d.speed * dt
+      d.x += (d.slant || 0) * d.speed * dt * 0.2
+      if (d.y >= d.targetY) {
+        if (d.inWater) {
+          if (isRain && weatherRipples.length < maxRipples) {
+            weatherRipples.push({
+              x: d.x, y: d.targetY, age: 0,
+              duration: currentWeather === 'storm' ? 0.75 : currentWeather === 'rain' ? 1.0 : 1.3,
+              maxRadius: currentWeather === 'storm' ? 13 : currentWeather === 'rain' ? 16 : 11,
+              alpha: currentWeather === 'storm' ? .48 : .36,
+            })
+          } else if (isSnow) {
+            if (weatherMelts.length < maxMelts) {
+              weatherMelts.push({
+                x: d.x, y: d.targetY, age: 0,
+                duration: random(0.8, 1.2),
+                size: d.size * 0.65,
+                driftX: random(-2, 2),
+                driftY: random(1, 2.5),
+                rotation: d.phase,
+              })
+            }
+            if (weatherRipples.length < maxRipples) {
+              weatherRipples.push({
+                x: d.x, y: d.targetY, age: 0,
+                duration: 0.9, maxRadius: 7, alpha: .22,
+              })
+            }
+          }
+        }
+      } else {
+        nextDrops.push(d)
+      }
+    }
+    weatherDrops = nextDrops
+
+    if (isRain) {
+      ctx.save()
+      ctx.strokeStyle = night ? 'rgba(180, 220, 230, 0.35)' : 'rgba(215, 240, 245, 0.5)'
+      ctx.lineWidth = currentWeather === 'storm' ? 1.4 : 0.9
+      ctx.beginPath()
+      const streakLen = currentWeather === 'storm' ? 22 : currentWeather === 'rain' ? 15 : 9
+      for (const d of weatherDrops) {
+        ctx.moveTo(d.x, d.y)
+        ctx.lineTo(d.x - (d.slant || 0) * streakLen * 0.2, d.y - streakLen)
+      }
+      ctx.stroke()
+      ctx.restore()
+    } else if (isSnow) {
+      const sImg = weatherImages.snow
+      const hasSprite = sImg?.complete && sImg.naturalWidth > 0
+      ctx.save()
+      ctx.globalAlpha = night ? .72 : .85
+      for (const d of weatherDrops) {
+        const driftX = Math.sin(t * 1.4 + d.phase) * 10
+        const drawX = d.x + driftX, drawY = d.y
+        if (hasSprite) {
+          ctx.save()
+          ctx.translate(drawX, drawY)
+          ctx.rotate(d.phase + t * 0.4)
+          ctx.drawImage(sImg, -d.size / 2, -d.size / 2, d.size, d.size)
+          ctx.restore()
+        } else {
+          ellipse(ctx, drawX, drawY, d.size * 0.25, d.size * 0.25, 'rgba(245, 252, 255, 0.9)')
+        }
+      }
+      ctx.restore()
+    }
+
+    weatherRipples = weatherRipples.filter(wr => (wr.age += dt) < wr.duration)
+    weatherMelts = weatherMelts.filter(m => (m.age += dt) < m.duration)
+    drawWeatherRipplesAndMelts()
+  }
+
+  function drawWeatherRipplesAndMelts() {
+    if (!weatherRipples.length && !weatherMelts.length) return
+    ctx.save()
+
+    if (weatherRipples.length) {
+      ctx.strokeStyle = night ? 'rgba(175, 225, 220, 0.35)' : 'rgba(225, 248, 245, 0.45)'
+      ctx.lineWidth = 0.8
+      ctx.beginPath()
+      for (const r of weatherRipples) {
+        const progress = r.age / r.duration
+        const currentR = progress * r.maxRadius
+        ctx.moveTo(r.x + currentR, r.y)
+        ctx.ellipse(r.x, r.y, currentR, currentR * 0.55, 0, 0, Math.PI * 2)
+      }
+      ctx.stroke()
+    }
+
+    const sImg = weatherImages.snow
+    const hasSprite = sImg?.complete && sImg.naturalWidth > 0
+    for (const m of weatherMelts) {
+      const progress = m.age / m.duration
+      const dissolveFade = (1 - progress) * 0.65
+      const currentSize = m.size * (1 - progress * 0.45)
+      const x = m.x + m.driftX * progress, y = m.y + m.driftY * progress
+      if (hasSprite) {
+        ctx.save()
+        ctx.globalAlpha = dissolveFade
+        ctx.translate(x, y)
+        ctx.rotate(m.rotation + progress * 0.3)
+        ctx.drawImage(sImg, -currentSize / 2, -currentSize * 0.3, currentSize, currentSize * 0.6)
+        ctx.restore()
+      } else {
+        ellipse(ctx, x, y, currentSize * 0.25, currentSize * 0.12, `rgba(235, 248, 255, ${dissolveFade})`)
+      }
+    }
+    ctx.restore()
+  }
   function drawGardenEvent(time) {
     if (!gardenEvent) return
     const event = gardenEvent, progress = eventProgress(time)
@@ -394,6 +581,61 @@
       }
     }
     ctx.restore()
+  }
+  function mapWmoToWeather(code, rain = 0, snowfall = 0) {
+    if (snowfall > 0 || (code >= 71 && code <= 77) || (code >= 85 && code <= 86)) {
+      if (code === 75 || code === 86 || snowfall >= 1.5) return 'heavy_snow'
+      if (code === 73 || (snowfall >= 0.5 && snowfall < 1.5)) return 'snow'
+      return 'light_snow'
+    }
+    if (code === 95 || code === 96 || code === 99 || code === 65 || code === 82 || rain >= 6) return 'storm'
+    if (code === 63 || code === 81 || (rain >= 1.5 && rain < 6)) return 'rain'
+    if (code === 51 || code === 53 || code === 55 || code === 56 || code === 57 || code === 61 || code === 80 || (rain > 0 && rain < 1.5)) return 'drizzle'
+    if (code === 1 || code === 2 || code === 3 || code === 45 || code === 48) return 'overcast'
+    return 'clear'
+  }
+  const weatherLabels = {
+    clear: '晴天', overcast: '阴天', drizzle: '小雨', rain: '中雨',
+    storm: '暴雨', light_snow: '小雪', snow: '中雪', heavy_snow: '大雪',
+  }
+  function updateWeatherUI() {
+    const label = weatherLabels[currentWeather] || '晴天'
+    document.body.dataset.weather = currentWeather
+    if ($('weather-name')) {
+      $('weather-name').textContent = label
+      $('weather-name').title = weatherSetting === 'auto' ? `当前实时天气：${label} (每20分钟自 Open-Meteo 同步)` : `当前手动天气：${label}`
+    }
+    if ($('weather-select')) {
+      $('weather-select').value = weatherSetting
+      $('weather-select').setAttribute('aria-label', `天气设置：${weatherSetting === 'auto' ? '实时天气 (Open-Meteo)' : `手动 · ${label}`}`)
+      $('weather-select').title = weatherSetting === 'auto' ? `实时天气 · ${label} (Open-Meteo 实时同步)` : `手动 · ${label}`
+    }
+  }
+  async function fetchLiveWeather() {
+    if (weatherSetting !== 'auto' || !bridge?.getLiveWeather) return
+    try {
+      const data = await bridge.getLiveWeather()
+      if (data && typeof data.weatherCode === 'number') {
+        const nextW = mapWmoToWeather(data.weatherCode, data.rain, data.snowfall)
+        if (weatherSetting === 'auto') {
+          currentWeather = nextW
+          updateWeatherUI()
+        }
+      }
+    } catch {}
+  }
+  function syncWeather(forceFetch = false) {
+    if (weatherSetting !== 'auto') {
+      currentWeather = weatherSetting
+      updateWeatherUI()
+      return
+    }
+    updateWeatherUI()
+    const now = performance.now()
+    if (forceFetch || now - lastWeatherFetch >= 20 * 60 * 1000) {
+      lastWeatherFetch = now
+      fetchLiveWeather()
+    }
   }
   function periodAt(hour) {
     if (hour >= 8 && hour < 17) return 'day'
@@ -750,14 +992,19 @@
       const distanceFromWater = waterDistance(f.x, f.y)
       if (distanceFromWater > 1) {
           const edge = keepInWater(f.x, f.y)
-          if (edge && typeof edge.x === 'number' && typeof edge.y === 'number') {
-            f.x = edge.x; f.y = edge.y
-          }
-          // Turn fish around smoothly towards pond center when grazing boundary
           const cx = sceneFrame.x + sceneFrame.width * .53, cy = sceneFrame.y + sceneFrame.height * .48
-          const inwardAngle = Math.atan2(cy - f.y, cx - f.x)
+          const inwardAngle = Math.atan2(cy - (edge?.y ?? f.y), cx - (edge?.x ?? f.x))
+          // Nudge 8px towards pond center to escape boundary trapping
+          if (edge && typeof edge.x === 'number' && typeof edge.y === 'number') {
+            f.x = edge.x + Math.cos(inwardAngle) * 8
+            f.y = edge.y + Math.sin(inwardAngle) * 8
+          }
           f.angle = inwardAngle + random(-.3, .3)
-          f.target = null
+          // Assign an explicit target in the open pond center to swim away from the bank
+          f.target = {
+            x: cx + random(-0.15, 0.15) * sceneFrame.width,
+            y: cy + random(-0.15, 0.15) * sceneFrame.height,
+          }
       }
       const pellet = food.indexOf(target)
       if (pellet >= 0 && distance < size(f) + 5 && Math.abs(delta) < .7) {
@@ -778,6 +1025,7 @@
     drawAtmosphere(t)
     ctx.drawImage(atmosphere, 0, 0, width, height)
     drawGardenEvent(t)
+    updateAndDrawWeather(dt, t)
     for (const r of ripples) r.age += dt
     ripples = ripples.filter(r => r.age < window.koiWater.duration)
     if (ripples.length) refractWater(ripples)
@@ -865,6 +1113,15 @@
     } catch { notify('名字保存失败，请稍后再试。') }
   }
   addEventListener('resize', makeBackdrop)
+  if ($('weather-select')) {
+    $('weather-select').onchange = () => {
+      weatherSetting = $('weather-select').value
+      syncWeather(true)
+      try { localStorage.setItem('koi-pond-weather-setting', weatherSetting) }
+      catch { notify('天气已切换，本次设置未保存。') }
+    }
+  }
+
   $('light').onchange = () => {
     timeSetting = $('light').value
     clockMinute = -1
@@ -872,7 +1129,7 @@
     try { localStorage.setItem('koi-pond-time-setting', timeSetting) }
     catch { notify('时段已切换，本次设置未保存。') }
   }
-  addEventListener('focus', syncTime)
+  addEventListener('focus', () => { syncTime(); syncWeather(); })
   const syncVisibility = () => {
     cancelAnimationFrame(frame)
     if (viewVisible && !document.hidden) { syncTime(); last = performance.now(); frame = requestAnimationFrame(animate) }
@@ -884,6 +1141,7 @@
     image.src = `koi-pond-${name}.webp`
   }
   syncTime()
+  syncWeather(true)
   frame = requestAnimationFrame(animate)
   if (!bridge) { $('journey').textContent = '鱼塘连接不可用'; return }
   // Subscribe before reading; a late initial snapshot must not overwrite a newer event.

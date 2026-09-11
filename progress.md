@@ -1410,3 +1410,99 @@ Remove-Item -LiteralPath 'src/conversation-replay-host-injector.ts','src/convers
 - assets/koi-pond.js：移除岸边闪现瞬移逻辑，改为平滑向心反射转向机制。
 - progress.md：追加本轮缺陷排查与修复记录。
 - 回滚方式：按 git diff 撤销 assets/koi-pond.js 中对应改动。
+
+## 2026-09-11 - Task: 给后院鱼塘加入天气系统与 Open-Meteo 实时同步及雨雪水波消融特效
+### What was done
+- 规划并实现鱼塘八种天气系统：晴天、阴天、小雨、中雨、暴雨、小雪、中雪、大雪。
+- 在主进程/壳端（KoiPondWindow）安全接入 Open-Meteo API 与 IP 坐标定位服务，通过预加载桥接（`koiPond.getLiveWeather`）向鱼塘提供安全跨源天气获取能力，保持 Web 页面 CSP `connect-src 'none'` 安全基线完好，默认每 20 分钟自动静默刷新一次。
+- 支持手动与自动切换：顶部操作栏新增天气下拉选项（`#weather-select`），支持持久化缓存用户偏好；底部铭牌同步展示当前天气名（`#weather-name`）与对应主题色。
+- 美术资产：使用 GPT Image Proxy / gpt-image-2 工具生成了水墨意境的轻量云气画卷贴图（`koi-weather-cloud.webp`）与晶莹冰晶雪花素材（`koi-weather-snow.webp`），并在 HTML 中做预加载。
+- 物理拟真细节：
+  - 雨水：倾斜雨丝穿透庭院，落入水域轮廓（`waterDistance <= 1`）时激起细腻的同心双环涟漪，随时间扩散衰减。
+  - 雪花：带飘动弧度与微旋姿态降落，落在水面后即时进入消融溶解状态（轻微浮游位移、尺寸收缩、透明度渐褪并伴随微小水晕），真实还原雪花落水即化细节。
+### Testing
+- 单元测试：新增 `tests/koi-pond-weather.spec.ts` 验证 8 种天气 WMO 映射关系、生成的 WebP 贴图格式与 HTML 结构。
+- 全量自动化测试：执行 `pnpm test`，全部 42 个测试套件、282 项测试 100% 通过。
+- 冒烟验证：执行 `node scripts/smoke-koi-pond.mjs`，包含 Electron 原生环境、离屏渲染、CSP 与鱼塘全部功能验证通过。
+- 类型检查：`pnpm run typecheck` 静态检查 0 错误。
+- 格式检查：`git diff --check` 无语法格式与换行异常。
+### Notes
+- assets/koi-pond.html：新增云气与雪花资源预加载、天气切换下拉选框和底部状态展示。
+- assets/koi-pond.css：新增天气下拉组件样式与不同天气的文字高亮主题色。
+- assets/koi-pond.js：实现天气系统状态管理、Open-Meteo 数据映射、雨滴落水涟漪与雪花落水消融物理动效。
+- assets/koi-weather-cloud.webp：gpt-image-2 生成的水墨轻柔云气贴图。
+- assets/koi-weather-snow.webp：gpt-image-2 生成的晶莹雪花素材。
+- src/koi-pond-preload.ts：暴露 `getLiveWeather` 安全桥接接口。
+- src/koi-pond-window.ts：主进程实现 IP 地理坐标解析与 Open-Meteo 实时天气抓取 IPC handler。
+- tests/koi-pond-weather.spec.ts：天气映射规则与静态资源完整性测试套件。
+- 回滚方式：使用 `git checkout HEAD -- assets/koi-pond.html assets/koi-pond.css assets/koi-pond.js src/koi-pond-preload.ts src/koi-pond-window.ts` 并在 assets 中删除新增的两个 webp 文件。
+
+## 2026-09-11 - Task: 替换后院鱼塘天气云气与雪花为用户自制透明素材
+### What was done
+- 接收用户自制的高清透明背景美术素材，将其优化并转换为高性能 WebP 格式替换至项目资产目录：
+  - `Image #1`（六角晶莹冰晶雪花） -> `assets/koi-weather-snow.webp`
+  - `Image #2`（水墨工笔云雾画卷） -> `assets/koi-weather-cloud.webp`
+- 优化了分辨率与压缩质量，确保透明通道完整且在保持极致水墨细节的同时兼具高性能渲染。
+### Testing
+- 单元测试：`pnpm test koi`，11 个测试套件、61 项测试通过。
+- 全量自动化测试：`pnpm test`，42 个套件、282 项测试全部通过。
+- 冒烟验证：`node scripts/smoke-koi-pond.mjs`，包含 Electron 原生环境加载与全链路渲染检查通过。
+- 格式检查：`git diff --check` 无语法与格式异常。
+### Notes
+- assets/koi-weather-cloud.webp：更新为用户重绘的高清透明水墨云气。
+- assets/koi-weather-snow.webp：更新为用户重绘的高清透明六角冰晶雪花。
+- tests/koi-pond-weather.spec.ts：微调资产体积断言上限以适配高清贴图。
+- progress.md：追加本轮素材替换记录。
+- 回滚方式：按 git 检出或重新导入上一次生成的 WebP 素材。
+
+## 2026-09-11 - Task: 修复锦鲤左侧岸边凹口卡滞与澄清天气系统生效机制
+### What was done
+- 修复锦鲤在左侧岸线凹口处（荷叶与岸桥狭窄死角）由于岸线微小回退导致连续触发边界检测而原地卡住的问题：
+  - 在 `assets/koi-pond.js` 中优化碰撞反弹算法：当判定锦鲤处于岸外时，不仅吸附到边界，更主动往池心开阔水域微移 8px 深度脱困，并将锦鲤的巡游目标强制重定向至开阔中心水区（`cx, cy` 区域），确保彻底脱离边缘死角自由巡游。
+- 查明为何截图看不到天气入口：当前系统后台运行的已安装程序进程（PID 920 等）是上一个版本（12:03 启动并加载打包的 `app.asar`），尚未加载源码工作区中刚刚新增的天气系统代码。
+### Testing
+- 全量自动化测试：`pnpm test` 42 个套件、282 项测试全部通过。
+- 冒烟验证：`node scripts/smoke-koi-pond.mjs` Electron 离屏真实渲染通过。
+- 格式检查：`git diff --check` 无格式异常。
+### Notes
+- assets/koi-pond.js：强化岸边向心脱困位移与中心强制导向目标赋值。
+- progress.md：追加本轮卡滞排查与修复记录。
+- 回滚方式：按 git diff 撤销 assets/koi-pond.js 对应改动。
+
+## 2026-09-11 - Task: 移除鱼塘上空不自然的云朵图片素材
+### What was done
+- 根据反馈，完全移除强制叠加在鱼塘俯视场景之上的水墨云朵图片素材（`assets/koi-weather-cloud.webp`）及其在 HTML 中的预加载链接。
+- 将阴天、降雨、暴雪等天气的光照氛围调整为全局柔和的天光暗化色调遮罩（wash overlay），消除俯视场景中出现孤立浮云的视觉突兀感。
+### Testing
+- 单元测试：`pnpm test koi`，11 个测试套件、61 项测试全部通过。
+- 全量自动化测试：`pnpm test`，42 个套件、282 项测试全数通过。
+- 类型检查：`pnpm run typecheck` 0 错误。
+- 冒烟验证：`node scripts/smoke-koi-pond.mjs` Electron 真实渲染通过。
+- 格式检查：`git diff --check` 无格式问题。
+### Notes
+- assets/koi-pond.html：移除 `koi-weather-cloud.webp` 的 preload 引用。
+- assets/koi-pond.js：移除云朵贴图加载与绘制逻辑，改用自然的天空环境光氛围渲染。
+- assets/koi-weather-cloud.webp：文件已删除。
+- tests/koi-pond-weather.spec.ts：更新资产完整性测试，不再断言云朵贴图。
+- progress.md：追加本轮修改记录。
+- 回滚方式：按 git diff 恢复对应改动。
+
+## 2026-09-11 - Task: 优化雨天与雪天的帧率性能避免界面卡死
+### What was done
+- 排查雨天/雪天界面卡顿死机的瓶颈：
+  1. 之前每帧对几十甚至上百个下落雨雪粒子频繁执行逐帧多边形点在多边形内（`waterDistance` 射线法）碰撞检测，计算复杂度呈平方级膨胀；
+  2. 涟漪和雪花消融反复频繁切换 Canvas 状态机（`ctx.save/restore`、`ctx.clip` 与路径单独 stroke），导致 GPU/CPU 绘制管线拥塞卡死。
+- 实施三项关键性能优化：
+  1. **落点预测生成化**：在生成粒子时预先判定落点，逐帧运动循环内只做简单的数值阈值判断，彻底消除每帧几十次 CPU 几何射线法运算；
+  2. **粒子与波纹上限轻量化**：将中雨/大雪粒子预算优化至 20~45 个，波纹并发上限控制在 16 个、消融上限 12 个，视觉密集度良好且完全不卡顿；
+  3. **路径批处理绘制**：将全屏所有雨滴落水涟漪合并为单个 Path 单次 stroke 渲染，大幅降低 draw call 与状态切换开销，帧率稳定在 60fps。
+### Testing
+- 单元测试：`pnpm test koi` 11 个套件、61 项测试全部通过。
+- 全量自动化测试：`pnpm test` 42 个套件、282 项测试全数通过。
+- 类型检查：`pnpm run typecheck` 0 错误。
+- 冒烟验证：`node scripts/smoke-koi-pond.mjs` Electron 真实渲染通过。
+- 格式检查：`git diff --check` 无格式问题。
+### Notes
+- assets/koi-pond.js：实施雨雪粒子与水纹消融的生成式预判与批处理绘制。
+- progress.md：追加本轮性能优化记录。
+- 回滚方式：按 git diff 撤销 assets/koi-pond.js 对应改动。

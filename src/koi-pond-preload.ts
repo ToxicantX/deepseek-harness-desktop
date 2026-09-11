@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('koiPond', {
   close: (): Promise<void> => ipcRenderer.invoke('pond:close'),
   getState: (): Promise<PondView> => ipcRenderer.invoke('pond:get-state'),
   rename: (id: string, name: string): Promise<boolean> => ipcRenderer.invoke('pond:rename', id, name),
+  getLiveWeather: (): Promise<{ weatherCode: number; rain: number; snowfall: number } | null> => ipcRenderer.invoke('pond:get-live-weather'),
   onVisibility: (listener: (visible: boolean) => void) => {
     const receive = (_event: Electron.IpcRendererEvent, visible: boolean) => listener(visible)
     ipcRenderer.on('pond:visibility', receive)
