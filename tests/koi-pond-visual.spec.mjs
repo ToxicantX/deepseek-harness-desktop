@@ -59,3 +59,24 @@ it('keeps the time selector popup readable on Windows', () => {
   expect(css).toContain('#light option { background: #07332f; color: #f0efcf; }')
   expect(css).toContain('#light option:checked { background: #d8c584; color: #062521; }')
 })
+import { readFileSync } from 'node:fs'
+import { expect, it } from 'vitest'
+
+it('ships and preloads the generated fantasy celestial koi fish sprites for all patterns and growth stages', () => {
+  const html = readFileSync(new URL('../assets/koi-pond.html', import.meta.url), 'utf8')
+  const js = readFileSync(new URL('../assets/koi-pond.js', import.meta.url), 'utf8')
+  const patterns = ['kohaku', 'sanke', 'ogon', 'shusui']
+  const stages = ['fry', 'juvenile', 'adult']
+
+  for (const pattern of patterns) {
+    for (const stage of stages) {
+      const filename = `koi-fish-${pattern}-${stage}.webp`
+      const image = readFileSync(new URL(`../assets/${filename}`, import.meta.url))
+      expect(image.toString('ascii', 0, 4)).toBe('RIFF')
+      expect(image.toString('ascii', 8, 12)).toBe('WEBP')
+      expect(image.byteLength).toBeLessThan(120_000)
+      expect(html).toContain(`href="${filename}"`)
+      expect(js).toContain('koi-fish-${p}-${s}.webp')
+    }
+  }
+})

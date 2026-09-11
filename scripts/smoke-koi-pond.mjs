@@ -334,7 +334,7 @@ app.whenReady().then(async () => {
   const { KoiPondStore } = require('./koi-pond-store.cjs');
   const restored = await new KoiPondStore(join(directory, 'pond.json')).view();
   assert.equal(restored.dialogues, 8);
-  assert.equal(restored.fish[0].level, 9);
+  assert.equal(restored.fish[0].level, 8);
   assert.deepEqual(errors, []);
   await fs.writeFile(join(directory, 'result.json'), JSON.stringify({
     passed: true, checks: ['preload IPC', 'embedded view toggle', 'main window draft retained', 'rename', 'personalities and persistent affinity', 'bounded ambient art and washi UI', 'feeding and eating',

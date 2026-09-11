@@ -38,6 +38,15 @@
     const saved = localStorage.getItem('koi-pond-time-setting')
     if (['auto', 'dawn', 'day', 'dusk', 'night'].includes(saved)) timeSetting = saved
   } catch { /* Keep the default when local storage is unavailable. */ }
+  let currentWeather = 'clear', weatherSetting = 'auto'
+  let weatherDrops = [], weatherRipples = [], weatherMelts = [], lastWeatherFetch = -Infinity
+  try {
+    const savedW = localStorage.getItem('koi-pond-weather-setting')
+    if (['auto', 'clear', 'overcast', 'drizzle', 'rain', 'storm', 'light_snow', 'snow', 'heavy_snow'].includes(savedW)) weatherSetting = savedW
+  } catch { /* Keep the default when local storage is unavailable. */ }
+  const weatherImages = { snow: new Image() }
+  weatherImages.snow.decoding = 'async'; weatherImages.snow.src = 'koi-weather-snow.webp'
+  weatherImages.snow.addEventListener('load', () => { ambientPaint = -Infinity })
   const refractionCanvas = document.createElement('canvas')
   const refractionContext = refractionCanvas.getContext('2d', { willReadFrequently: true })
   const sceneImages = { day: new Image(), night: new Image() }
@@ -53,6 +62,15 @@
   seasonImages.autumn.decoding = 'async'; seasonImages.autumn.src = 'koi-season-autumn-leaf.webp'
   seasonImages.winter.decoding = 'async'; seasonImages.winter.src = 'koi-season-winter-mist.webp'
   for (const image of new Set(Object.values(seasonImages))) image.addEventListener('load', () => { ambientPaint = -Infinity })
+  const fishSprites = Object.fromEntries(
+    ['kohaku', 'sanke', 'ogon', 'shusui'].flatMap(p =>
+      ['fry', 'juvenile', 'adult'].map(s => {
+        const img = new Image()
+        img.decoding = 'async'; img.src = `koi-fish-${p}-${s}.webp`
+        return [`${p}-${s}`, img]
+      })
+    )
+  )
   let sceneFrame = { x: 0, y: 0, width: 1723, height: 913 }
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches
   const random = (min, max) => min + Math.random() * (max - min)
@@ -123,10 +141,15 @@
     state = next
     fish = next.fish.map((data, i) => {
       const existing = fish.find(f => f.id === data.id)
-      return Object.assign(existing || {
-        x: width * (.25 + i % 4 * .1), y: height * (.4 + Math.floor(i / 4) * .1),
+      const w = width || innerWidth || 1280, h = height || innerHeight || 720
+      const initial = {
+        x: w * (.35 + (i % 4) * .08), y: h * (.38 + Math.floor(i / 4) * .1),
         angle: random(0, Math.PI * 2), phase: random(0, 10), target: null,
-      }, data)
+      }
+      if (existing && existing.x > 50 && existing.y > 50) {
+        return Object.assign(existing, data)
+      }
+      return Object.assign(initial, data)
     })
     if (bonds.dialogues === null) bonds.dialogues = next.dialogues
     else if (next.dialogues > bonds.dialogues) {
@@ -222,16 +245,18 @@
   function keepInWater(x, y) {
     if (waterDistance(x, y) <= 1) return { x, y }
     const points = waterOutline()
-    let nearest, distance = Infinity
+    if (!points || !points.length) return { x, y }
+    let nearest = points[0], distance = Infinity
     for (let i = 0; i < points.length; i++) {
       const a = points[i], b = points[(i + 1) % points.length]
       const dx = b.x - a.x, dy = b.y - a.y
-      const t = clamp(((x - a.x) * dx + (y - a.y) * dy) / (dx * dx + dy * dy), 0, 1)
+      const denom = dx * dx + dy * dy
+      const t = denom > 0 ? clamp(((x - a.x) * dx + (y - a.y) * dy) / denom, 0, 1) : 0
       const p = { x: a.x + t * dx, y: a.y + t * dy }
       const d = Math.hypot(x - p.x, y - p.y)
       if (d < distance) { nearest = p; distance = d }
     }
-    return nearest
+    return nearest || { x, y }
   }
   function eventPoints(count) {
     const points = []
@@ -312,6 +337,184 @@
     ctx.restore()
     return true
   }
+  function updateAndDrawWeather(dt, t) {
+    if (currentWeather === 'clear') {
+      weatherDrops = []
+      weatherRipples = weatherRipples.filter(wr => (wr.age += dt) < wr.duration)
+      weatherMelts = weatherMelts.filter(m => (m.age += dt) < m.duration)
+      drawWeatherRipplesAndMelts()
+      return
+    }
+    const isRain = currentWeather === 'drizzle' || currentWeather === 'rain' || currentWeather === 'storm'
+    const isSnow = currentWeather === 'light_snow' || currentWeather === 'snow' || currentWeather === 'heavy_snow'
+    const isOvercast = currentWeather === 'overcast'
+
+    if (isOvercast || isRain || isSnow) {
+      ctx.save()
+      const washAlpha = isOvercast ? .18 : currentWeather === 'storm' ? .42 : isRain ? .26 : .20
+      ctx.fillStyle = night ? `rgba(6, 20, 24, ${washAlpha * 1.2})` : `rgba(32, 48, 52, ${washAlpha})`
+      ctx.fillRect(0, 0, width, height)
+      ctx.restore()
+    }
+
+    if (!isRain && !isSnow) {
+      weatherDrops = []
+      weatherRipples = weatherRipples.filter(wr => (wr.age += dt) < wr.duration)
+      weatherMelts = weatherMelts.filter(m => (m.age += dt) < m.duration)
+      drawWeatherRipplesAndMelts()
+      return
+    }
+
+    // High performance particle counts (keeps 60fps stable)
+    const targetCount = reduced
+      ? (currentWeather === 'drizzle' || currentWeather === 'light_snow' ? 10 : currentWeather === 'storm' || currentWeather === 'heavy_snow' ? 24 : 16)
+      : (currentWeather === 'drizzle' ? 18 : currentWeather === 'rain' ? 36 : currentWeather === 'storm' ? 62
+         : currentWeather === 'light_snow' ? 14 : currentWeather === 'snow' ? 24 : 42)
+
+    while (weatherDrops.length < targetCount) {
+      let targetX, targetY, inWater = false
+      if (Math.random() < 0.8) {
+        for (let tries = 0; tries < 6; tries++) {
+          const rx = sceneFrame.x + random(.22, .80) * sceneFrame.width
+          const ry = sceneFrame.y + random(.12, .88) * sceneFrame.height
+          if (waterDistance(rx, ry) <= 1) { targetX = rx; targetY = ry; inWater = true; break }
+        }
+      }
+      if (!targetX) {
+        targetX = sceneFrame.x + random(0, 1) * sceneFrame.width
+        targetY = sceneFrame.y + random(.1, .95) * sceneFrame.height
+      }
+
+      const speed = isRain
+        ? (currentWeather === 'storm' ? random(900, 1300) : currentWeather === 'rain' ? random(700, 950) : random(500, 700))
+        : (currentWeather === 'heavy_snow' ? random(85, 130) : currentWeather === 'snow' ? random(60, 95) : random(40, 70))
+      const fallDist = random(120, 260)
+      weatherDrops.push({
+        x: targetX - (isRain ? (currentWeather === 'storm' ? 1.8 : 0.6) * fallDist * 0.2 : 0),
+        y: targetY - fallDist,
+        targetY, inWater, speed,
+        slant: isRain ? (currentWeather === 'storm' ? 1.8 : 0.6) : random(-0.35, 0.35),
+        size: isSnow ? random(10, currentWeather === 'heavy_snow' ? 18 : 15) : random(1, 2),
+        phase: random(0, Math.PI * 2),
+      })
+    }
+
+    const nextDrops = []
+    const maxRipples = reduced ? 8 : 16
+    const maxMelts = reduced ? 6 : 12
+
+    for (const d of weatherDrops) {
+      d.y += d.speed * dt
+      d.x += (d.slant || 0) * d.speed * dt * 0.2
+      if (d.y >= d.targetY) {
+        if (d.inWater) {
+          if (isRain && weatherRipples.length < maxRipples) {
+            weatherRipples.push({
+              x: d.x, y: d.targetY, age: 0,
+              duration: currentWeather === 'storm' ? 0.75 : currentWeather === 'rain' ? 1.0 : 1.3,
+              maxRadius: currentWeather === 'storm' ? 13 : currentWeather === 'rain' ? 16 : 11,
+              alpha: currentWeather === 'storm' ? .48 : .36,
+            })
+          } else if (isSnow) {
+            if (weatherMelts.length < maxMelts) {
+              weatherMelts.push({
+                x: d.x, y: d.targetY, age: 0,
+                duration: random(0.8, 1.2),
+                size: d.size * 0.65,
+                driftX: random(-2, 2),
+                driftY: random(1, 2.5),
+                rotation: d.phase,
+              })
+            }
+            if (weatherRipples.length < maxRipples) {
+              weatherRipples.push({
+                x: d.x, y: d.targetY, age: 0,
+                duration: 0.9, maxRadius: 7, alpha: .22,
+              })
+            }
+          }
+        }
+      } else {
+        nextDrops.push(d)
+      }
+    }
+    weatherDrops = nextDrops
+
+    if (isRain) {
+      ctx.save()
+      ctx.strokeStyle = night ? 'rgba(180, 220, 230, 0.35)' : 'rgba(215, 240, 245, 0.5)'
+      ctx.lineWidth = currentWeather === 'storm' ? 1.4 : 0.9
+      ctx.beginPath()
+      const streakLen = currentWeather === 'storm' ? 22 : currentWeather === 'rain' ? 15 : 9
+      for (const d of weatherDrops) {
+        ctx.moveTo(d.x, d.y)
+        ctx.lineTo(d.x - (d.slant || 0) * streakLen * 0.2, d.y - streakLen)
+      }
+      ctx.stroke()
+      ctx.restore()
+    } else if (isSnow) {
+      const sImg = weatherImages.snow
+      const hasSprite = sImg?.complete && sImg.naturalWidth > 0
+      ctx.save()
+      ctx.globalAlpha = night ? .72 : .85
+      for (const d of weatherDrops) {
+        const driftX = Math.sin(t * 1.4 + d.phase) * 10
+        const drawX = d.x + driftX, drawY = d.y
+        if (hasSprite) {
+          ctx.save()
+          ctx.translate(drawX, drawY)
+          ctx.rotate(d.phase + t * 0.4)
+          ctx.drawImage(sImg, -d.size / 2, -d.size / 2, d.size, d.size)
+          ctx.restore()
+        } else {
+          ellipse(ctx, drawX, drawY, d.size * 0.25, d.size * 0.25, 'rgba(245, 252, 255, 0.9)')
+        }
+      }
+      ctx.restore()
+    }
+
+    weatherRipples = weatherRipples.filter(wr => (wr.age += dt) < wr.duration)
+    weatherMelts = weatherMelts.filter(m => (m.age += dt) < m.duration)
+    drawWeatherRipplesAndMelts()
+  }
+
+  function drawWeatherRipplesAndMelts() {
+    if (!weatherRipples.length && !weatherMelts.length) return
+    ctx.save()
+
+    if (weatherRipples.length) {
+      ctx.strokeStyle = night ? 'rgba(175, 225, 220, 0.35)' : 'rgba(225, 248, 245, 0.45)'
+      ctx.lineWidth = 0.8
+      ctx.beginPath()
+      for (const r of weatherRipples) {
+        const progress = r.age / r.duration
+        const currentR = progress * r.maxRadius
+        ctx.moveTo(r.x + currentR, r.y)
+        ctx.ellipse(r.x, r.y, currentR, currentR * 0.55, 0, 0, Math.PI * 2)
+      }
+      ctx.stroke()
+    }
+
+    const sImg = weatherImages.snow
+    const hasSprite = sImg?.complete && sImg.naturalWidth > 0
+    for (const m of weatherMelts) {
+      const progress = m.age / m.duration
+      const dissolveFade = (1 - progress) * 0.65
+      const currentSize = m.size * (1 - progress * 0.45)
+      const x = m.x + m.driftX * progress, y = m.y + m.driftY * progress
+      if (hasSprite) {
+        ctx.save()
+        ctx.globalAlpha = dissolveFade
+        ctx.translate(x, y)
+        ctx.rotate(m.rotation + progress * 0.3)
+        ctx.drawImage(sImg, -currentSize / 2, -currentSize * 0.3, currentSize, currentSize * 0.6)
+        ctx.restore()
+      } else {
+        ellipse(ctx, x, y, currentSize * 0.25, currentSize * 0.12, `rgba(235, 248, 255, ${dissolveFade})`)
+      }
+    }
+    ctx.restore()
+  }
   function drawGardenEvent(time) {
     if (!gardenEvent) return
     const event = gardenEvent, progress = eventProgress(time)
@@ -378,6 +581,61 @@
       }
     }
     ctx.restore()
+  }
+  function mapWmoToWeather(code, rain = 0, snowfall = 0) {
+    if (snowfall > 0 || (code >= 71 && code <= 77) || (code >= 85 && code <= 86)) {
+      if (code === 75 || code === 86 || snowfall >= 1.5) return 'heavy_snow'
+      if (code === 73 || (snowfall >= 0.5 && snowfall < 1.5)) return 'snow'
+      return 'light_snow'
+    }
+    if (code === 95 || code === 96 || code === 99 || code === 65 || code === 82 || rain >= 6) return 'storm'
+    if (code === 63 || code === 81 || (rain >= 1.5 && rain < 6)) return 'rain'
+    if (code === 51 || code === 53 || code === 55 || code === 56 || code === 57 || code === 61 || code === 80 || (rain > 0 && rain < 1.5)) return 'drizzle'
+    if (code === 1 || code === 2 || code === 3 || code === 45 || code === 48) return 'overcast'
+    return 'clear'
+  }
+  const weatherLabels = {
+    clear: '晴天', overcast: '阴天', drizzle: '小雨', rain: '中雨',
+    storm: '暴雨', light_snow: '小雪', snow: '中雪', heavy_snow: '大雪',
+  }
+  function updateWeatherUI() {
+    const label = weatherLabels[currentWeather] || '晴天'
+    document.body.dataset.weather = currentWeather
+    if ($('weather-name')) {
+      $('weather-name').textContent = label
+      $('weather-name').title = weatherSetting === 'auto' ? `当前实时天气：${label} (每20分钟自 Open-Meteo 同步)` : `当前手动天气：${label}`
+    }
+    if ($('weather-select')) {
+      $('weather-select').value = weatherSetting
+      $('weather-select').setAttribute('aria-label', `天气设置：${weatherSetting === 'auto' ? '实时天气 (Open-Meteo)' : `手动 · ${label}`}`)
+      $('weather-select').title = weatherSetting === 'auto' ? `实时天气 · ${label} (Open-Meteo 实时同步)` : `手动 · ${label}`
+    }
+  }
+  async function fetchLiveWeather() {
+    if (weatherSetting !== 'auto' || !bridge?.getLiveWeather) return
+    try {
+      const data = await bridge.getLiveWeather()
+      if (data && typeof data.weatherCode === 'number') {
+        const nextW = mapWmoToWeather(data.weatherCode, data.rain, data.snowfall)
+        if (weatherSetting === 'auto') {
+          currentWeather = nextW
+          updateWeatherUI()
+        }
+      }
+    } catch {}
+  }
+  function syncWeather(forceFetch = false) {
+    if (weatherSetting !== 'auto') {
+      currentWeather = weatherSetting
+      updateWeatherUI()
+      return
+    }
+    updateWeatherUI()
+    const now = performance.now()
+    if (forceFetch || now - lastWeatherFetch >= 20 * 60 * 1000) {
+      lastWeatherFetch = now
+      fetchLiveWeather()
+    }
   }
   function periodAt(hour) {
     if (hour >= 8 && hour < 17) return 'day'
@@ -588,43 +846,61 @@
     ctx.save(); ctx.translate(f.x, f.y - lift); ctx.rotate(f.angle)
     if (lift > 0) ctx.scale(1 + lift / (s * 16), 1 + lift / (s * 24))
     if (night) ctx.globalAlpha = .82
-    ctx.strokeStyle = night ? '#a7d7d21c' : '#e8f8d82a'; ctx.lineWidth = .65
-    for (const side of [-1, 1]) {
-      ctx.beginPath(); ctx.moveTo(-s * .55, side * s * .22)
-      ctx.quadraticCurveTo(-s * 1.15, side * s * (.35 + wag * .04), -s * 1.55, side * s * .2); ctx.stroke()
-    }
     if (!lift) ellipse(ctx, -3, 9, s * .92, s * .31, '#00191c66')
-    ctx.save(); ctx.translate(-s * .69, 0); ctx.rotate(wag * .22)
-    ctx.fillStyle = palette[1] + 'aa'
-    ctx.beginPath(); ctx.moveTo(2, 0); ctx.quadraticCurveTo(-s * .4, -s * .12, -s * (.6 + stage(f.level) * .015), -s * .38)
-    ctx.quadraticCurveTo(-s * .48, 0, -s * .64, s * .38); ctx.quadraticCurveTo(-s * .22, s * .14, 2, 0); ctx.fill(); ctx.restore()
-    for (const side of [-1, 1]) {
-      ctx.save(); ctx.translate(s * .18, side * s * .17); ctx.rotate(side * (.2 + wag * .12))
-      ellipse(ctx, -s * .06, side * s * .17, s * .3, s * (.13 + stage(f.level) * .009), palette[1] + '88', side * .8); ctx.restore()
+
+    const stgKey = f.level < 200 ? 'fry' : f.level < 500 ? 'juvenile' : 'adult'
+    const sprite = fishSprites[`${f.pattern}-${stgKey}`]
+    if (sprite?.complete && sprite.naturalWidth) {
+      const spriteW = s * 3.2
+      const spriteH = spriteW * (sprite.naturalHeight / sprite.naturalWidth)
+      const slices = 14
+      const sliceW = spriteW / slices
+      const imgSliceW = sprite.naturalWidth / slices
+      const headOffset = spriteW * .64
+
+      for (let i = slices - 1; i >= 0; i--) {
+        const u = (i + .5) / slices
+        const tailFactor = Math.pow(Math.max(0, (0.78 - u) / 0.78), 1.5)
+        const wave = Math.sin(time * 5 + f.phase - (1 - u) * 2.6)
+        const lateralOffset = wave * tailFactor * s * .58
+        const sliceX = i * sliceW - headOffset
+        const sliceY = -spriteH / 2 + lateralOffset
+
+        ctx.drawImage(
+          sprite,
+          i * imgSliceW, 0, imgSliceW, sprite.naturalHeight,
+          sliceX, sliceY, sliceW + .65, spriteH
+        )
+      }
+        } else {
+      ctx.strokeStyle = night ? '#a7d7d21c' : '#e8f8d82a'; ctx.lineWidth = .65
+      for (const side of [-1, 1]) {
+        ctx.beginPath(); ctx.moveTo(-s * .55, side * s * .22)
+        ctx.quadraticCurveTo(-s * 1.15, side * s * (.35 + wag * .04), -s * 1.55, side * s * .2); ctx.stroke()
+      }
+      ctx.save(); ctx.translate(-s * .69, 0); ctx.rotate(wag * .22)
+      ctx.fillStyle = palette[1] + 'aa'
+      ctx.beginPath(); ctx.moveTo(2, 0); ctx.quadraticCurveTo(-s * .4, -s * .12, -s * (.6 + stage(f.level) * .015), -s * .38)
+      ctx.quadraticCurveTo(-s * .48, 0, -s * .64, s * .38); ctx.quadraticCurveTo(-s * .22, s * .14, 2, 0); ctx.fill(); ctx.restore()
+      for (const side of [-1, 1]) {
+        ctx.save(); ctx.translate(s * .18, side * s * .17); ctx.rotate(side * (.2 + wag * .12))
+        ellipse(ctx, -s * .06, side * s * .17, s * .3, s * (.13 + stage(f.level) * .009), palette[1] + '88', side * .8); ctx.restore()
+      }
+      ctx.beginPath(); ctx.moveTo(s, 0); ctx.bezierCurveTo(s * .77, -s * .42, -s * .3, -s * .36, -s * .78, 0)
+      ctx.bezierCurveTo(-s * .3, s * .36, s * .77, s * .42, s, 0); ctx.closePath()
+      const body = ctx.createLinearGradient(0, -s * .35, 0, s * .35)
+      body.addColorStop(0, palette[1]); body.addColorStop(.45, palette[1]); body.addColorStop(1, f.pattern === 'ogon' ? '#957131' : '#809d93')
+      ctx.fillStyle = body; ctx.fill(); ctx.strokeStyle = '#fffbe04a'; ctx.lineWidth = .7; ctx.stroke()
+      ctx.save(); ctx.clip()
+      for (let i = 0; i < 4; i++) {
+        ellipse(ctx, s * (.65 - i * .35), Math.sin(i * 7 + f.phase) * s * .12, s * .18, s * .2, palette[2], i)
+        if (f.pattern === 'sanke' || f.pattern === 'shusui') ellipse(ctx, s * (.4 - i * .27), s * .08, s * .08, s * .105, '#25383a', i)
+      }
+      ctx.restore()
+      ellipse(ctx, s * .7, -s * .14, 2, 2, '#162a29'); ellipse(ctx, s * .7, s * .14, 2, 2, '#162a29')
+      ctx.strokeStyle = '#f1eed680'; ctx.lineWidth = .8
+      for (const side of [-1, 1]) { ctx.beginPath(); ctx.moveTo(s * .9, side * s * .05); ctx.quadraticCurveTo(s * 1.12, side * s * .05, s * 1.1, side * s * .15); ctx.stroke() }
     }
-    ctx.beginPath(); ctx.moveTo(s, 0); ctx.bezierCurveTo(s * .77, -s * .42, -s * .3, -s * .36, -s * .78, 0)
-    ctx.bezierCurveTo(-s * .3, s * .36, s * .77, s * .42, s, 0); ctx.closePath()
-    const body = ctx.createLinearGradient(0, -s * .35, 0, s * .35)
-    body.addColorStop(0, palette[1]); body.addColorStop(.45, palette[1]); body.addColorStop(1, f.pattern === 'ogon' ? '#957131' : '#809d93')
-    ctx.fillStyle = body; ctx.fill(); ctx.strokeStyle = '#fffbe04a'; ctx.lineWidth = .7; ctx.stroke()
-    ctx.save(); ctx.clip()
-    for (let i = 0; i < 4; i++) {
-      ellipse(ctx, s * (.65 - i * .35), Math.sin(i * 7 + f.phase) * s * .12, s * .18, s * .2, palette[2], i)
-      if (f.pattern === 'sanke' || f.pattern === 'shusui') ellipse(ctx, s * (.4 - i * .27), s * .08, s * .08, s * .105, '#25383a', i)
-    }
-    ctx.globalCompositeOperation = 'screen'
-    const sheen = ctx.createLinearGradient(0, -s * .35, 0, s * .1)
-    sheen.addColorStop(0, '#fffbd252'); sheen.addColorStop(1, '#fffbd200')
-    ctx.fillStyle = sheen; ctx.beginPath(); ctx.ellipse(s * .05, -s * .12, s * .72, s * .18, 0, 0, Math.PI * 2); ctx.fill()
-    ctx.globalCompositeOperation = 'source-over'
-    if (stage(f.level) >= 2) {
-      ctx.strokeStyle = '#fff8d328'; ctx.lineWidth = .7
-      for (let i = 0; i < 9; i++) { ctx.beginPath(); ctx.arc(s * (.6 - i * .14), 0, s * .18, -.9, .9); ctx.stroke() }
-    }
-    ctx.restore()
-    ellipse(ctx, s * .7, -s * .14, 2, 2, '#162a29'); ellipse(ctx, s * .7, s * .14, 2, 2, '#162a29')
-    ctx.strokeStyle = '#f1eed680'; ctx.lineWidth = .8
-    for (const side of [-1, 1]) { ctx.beginPath(); ctx.moveTo(s * .9, side * s * .05); ctx.quadraticCurveTo(s * 1.12, side * s * .05, s * 1.1, side * s * .15); ctx.stroke() }
     if (!zen && f.id === selected) { ctx.strokeStyle = '#e6ce8a90'; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(0, 0, s * 1.32, s * .62, 0, 0, Math.PI * 2); ctx.stroke() }
     ctx.restore()
   }
@@ -716,8 +992,19 @@
       const distanceFromWater = waterDistance(f.x, f.y)
       if (distanceFromWater > 1) {
           const edge = keepInWater(f.x, f.y)
-          f.x = edge.x; f.y = edge.y
-          f.target = null
+          const cx = sceneFrame.x + sceneFrame.width * .53, cy = sceneFrame.y + sceneFrame.height * .48
+          const inwardAngle = Math.atan2(cy - (edge?.y ?? f.y), cx - (edge?.x ?? f.x))
+          // Nudge 8px towards pond center to escape boundary trapping
+          if (edge && typeof edge.x === 'number' && typeof edge.y === 'number') {
+            f.x = edge.x + Math.cos(inwardAngle) * 8
+            f.y = edge.y + Math.sin(inwardAngle) * 8
+          }
+          f.angle = inwardAngle + random(-.3, .3)
+          // Assign an explicit target in the open pond center to swim away from the bank
+          f.target = {
+            x: cx + random(-0.15, 0.15) * sceneFrame.width,
+            y: cy + random(-0.15, 0.15) * sceneFrame.height,
+          }
       }
       const pellet = food.indexOf(target)
       if (pellet >= 0 && distance < size(f) + 5 && Math.abs(delta) < .7) {
@@ -738,6 +1025,7 @@
     drawAtmosphere(t)
     ctx.drawImage(atmosphere, 0, 0, width, height)
     drawGardenEvent(t)
+    updateAndDrawWeather(dt, t)
     for (const r of ripples) r.age += dt
     ripples = ripples.filter(r => r.age < window.koiWater.duration)
     if (ripples.length) refractWater(ripples)
@@ -778,6 +1066,14 @@
     keyboardActive = false
     canvas.focus({ preventScroll: true })
   }
+  const closeButton = $('close-pond')
+  if (closeButton) {
+    closeButton.onclick = () => {
+      if (typeof window.koiPond?.close === 'function') {
+        void window.koiPond.close().catch(console.error)
+      }
+    }
+  }
   canvas.addEventListener('contextmenu', e => {
     if (!zen) return
     e.preventDefault()
@@ -817,6 +1113,15 @@
     } catch { notify('名字保存失败，请稍后再试。') }
   }
   addEventListener('resize', makeBackdrop)
+  if ($('weather-select')) {
+    $('weather-select').onchange = () => {
+      weatherSetting = $('weather-select').value
+      syncWeather(true)
+      try { localStorage.setItem('koi-pond-weather-setting', weatherSetting) }
+      catch { notify('天气已切换，本次设置未保存。') }
+    }
+  }
+
   $('light').onchange = () => {
     timeSetting = $('light').value
     clockMinute = -1
@@ -824,7 +1129,7 @@
     try { localStorage.setItem('koi-pond-time-setting', timeSetting) }
     catch { notify('时段已切换，本次设置未保存。') }
   }
-  addEventListener('focus', syncTime)
+  addEventListener('focus', () => { syncTime(); syncWeather(); })
   const syncVisibility = () => {
     cancelAnimationFrame(frame)
     if (viewVisible && !document.hidden) { syncTime(); last = performance.now(); frame = requestAnimationFrame(animate) }
@@ -836,6 +1141,7 @@
     image.src = `koi-pond-${name}.webp`
   }
   syncTime()
+  syncWeather(true)
   frame = requestAnimationFrame(animate)
   if (!bridge) { $('journey').textContent = '鱼塘连接不可用'; return }
   // Subscribe before reading; a late initial snapshot must not overwrite a newer event.

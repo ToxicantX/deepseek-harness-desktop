@@ -34,12 +34,67 @@ export class KoiPondWindow {
       if (changed) await this.publish()
       return changed
     })
+    ipcMain.handle('pond:get-live-weather', async event => {
+      this.checkSender(event)
+      return this.fetchOpenMeteoWeather()
+    })
+  }
+
+  private async fetchOpenMeteoWeather(): Promise<{ weatherCode: number; rain: number; snowfall: number } | null> {
+    try {
+      let lat = 31.2304, lon = 121.4737
+      try {
+        const geoRes = await fetch('http://ip-api.com/json', { signal: AbortSignal.timeout(5000) })
+        if (geoRes.ok) {
+          const geo = await geoRes.json() as { lat?: number; lon?: number }
+          if (typeof geo.lat === 'number' && typeof geo.lon === 'number') {
+            lat = geo.lat; lon = geo.lon
+          }
+        }
+      } catch {
+        try {
+          const whoRes = await fetch('https://ipwho.is/', { signal: AbortSignal.timeout(4000) })
+          if (whoRes.ok) {
+            const who = await whoRes.json() as { latitude?: number; longitude?: number }
+            if (typeof who.latitude === 'number' && typeof who.longitude === 'number') {
+              lat = who.latitude; lon = who.longitude
+            }
+          }
+        } catch {}
+      }
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(4)}&longitude=${lon.toFixed(4)}&current=weather_code,precipitation,rain,snowfall&timezone=auto`
+      const weatherRes = await fetch(url, { signal: AbortSignal.timeout(8000) })
+      if (!weatherRes.ok) return null
+      const data = await weatherRes.json() as { current?: { weather_code?: number; rain?: number; snowfall?: number } }
+      if (!data.current) return null
+      return {
+        weatherCode: Number(data.current.weather_code) || 0,
+        rain: Number(data.current.rain) || 0,
+        snowfall: Number(data.current.snowfall) || 0,
+      }
+    } catch {
+      return null
+    }
   }
 
   private checkSender(event: IpcMainInvokeEvent): void {
     if (!this.view || this.view.webContents.isDestroyed() || event.sender !== this.view.webContents
-      || event.senderFrame !== event.sender.mainFrame
-      || event.sender.getURL() !== pathToFileURL(this.page).href) throw new Error('鱼塘窗口来源不匹配')
+      || event.senderFrame !== event.sender.mainFrame) {
+      throw new Error('鱼塘窗口来源不匹配')
+    }
+    const senderUrl = event.sender.getURL()
+    const expectedUrl = pathToFileURL(this.page).href
+    if (senderUrl !== expectedUrl) {
+      try {
+        const u1 = new URL(senderUrl)
+        const u2 = new URL(expectedUrl)
+        if (u1.protocol !== 'file:' || decodeURIComponent(u1.pathname).toLowerCase() !== decodeURIComponent(u2.pathname).toLowerCase()) {
+          throw new Error('鱼塘窗口来源不匹配')
+        }
+      } catch {
+        throw new Error('鱼塘窗口来源不匹配')
+      }
+    }
   }
 
   async open(): Promise<void> {

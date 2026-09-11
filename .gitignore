@@ -7,3 +7,4 @@ coverage/
 .env
 .runtime-fixture/
 .playwright-cli/
+out_test

@@ -1321,3 +1321,188 @@ Remove-Item -LiteralPath 'src/conversation-replay-host-injector.ts','src/convers
 - tests/koi-pond-visual.spec.mjs：新增时段选择器下拉选项配色断言。
 - progress.md：追加本轮实现与验证记录。
 - 回滚：按本轮 diff 移除 #light option / #light option:checked 两条样式和对应 koi-pond-visual 断言，再重新执行上述 Vitest 与 git diff --check。
+
+## 2026-09-11 - Task: 使用 GPT Image Proxy 精灵图美术素材替换纯 Canvas 绘制锦鲤
+### What was done
+- 依据参考设计图仙侠国风、水晶半透长尾鳍、鱼鳞光泽与金线勾勒的美术风格，通过 GPT Image Proxy / gpt-image-2 全套生成 4 大锦鲤品种（红白、大正三色、黄金、秋翠）及 3 阶生长形态（幼苗期 fry、成长期 juvenile、成熟舒展期 adult）共 12 组高清精灵图，并经 rembg 透明通道抠图后导出为紧凑高质量 WebP 资产。
+- 在 assets/koi-pond.html 增加 12 款锦鲤生长形态精灵图预加载标签，保障水池加载与鱼体渲染即时无缝。
+- 在 assets/koi-pond.js 中建立 fishSprites 资源映射与异步解码，重构 koi() 绘制函数：优先采用高质量精灵图及根据游动相位 wag 进行平滑摆动绘制，保留下潜投影、选中金色光环及素材加载期间优雅回退几何轮廓。
+- 在 tests/koi-pond-visual.spec.mjs 补充 12 款精灵图素材格式、RIFF/WEBP 标识、体积上限（<120KB）及预加载标签引用的断言验证。
+### Testing
+- pnpm run typecheck：TypeScript 全局类型检查通过（0 errors）。
+- pnpm test tests/koi-pond-visual.spec.mjs：5 项测试全部通过，含新增的全品种/多形态精灵图格式与体积断言。
+- pnpm test：全部 41 个测试套件、279 项单元与边界测试 100% 通过。
+- git diff --check：无新增空白、缩进或换行格式异常。
+- 遵循不擅自打包或终止进程原则，未启动打包或重启主壳，水池内动态游动、折射波光与投喂互动待用户在壳内实际观察。
+### Notes
+- assets/koi-pond.html：增加 12 张 koi-fish-*-*.webp 预加载链接。
+- assets/koi-pond.js：增加 fishSprites 资源表，重构 koi() 鱼体精灵图渲染与摆鳍动画。
+- assets/koi-fish-kohaku-fry.webp：红白幼苗期精灵图（50.4KB）。
+- assets/koi-fish-kohaku-juvenile.webp：红白成长期精灵图（47.9KB）。
+- assets/koi-fish-kohaku-adult.webp：红白成熟舒展期精灵图（87.9KB）。
+- assets/koi-fish-sanke-fry.webp：大正三色幼苗期精灵图（66.4KB）。
+- assets/koi-fish-sanke-juvenile.webp：大正三色成长期精灵图（47.5KB）。
+- assets/koi-fish-sanke-adult.webp：大正三色成熟舒展期精灵图（58.7KB）。
+- assets/koi-fish-ogon-fry.webp：黄金幼苗期精灵图（46.9KB）。
+- assets/koi-fish-ogon-juvenile.webp：黄金成长期精灵图（58.6KB）。
+- assets/koi-fish-ogon-adult.webp：黄金成熟舒展期精灵图（41.8KB）。
+- assets/koi-fish-shusui-fry.webp：秋翠幼苗期精灵图（50.2KB）。
+- assets/koi-fish-shusui-juvenile.webp：秋翠成长期精灵图（46.6KB）。
+- assets/koi-fish-shusui-adult.webp：秋翠成熟舒展期精灵图（69.3KB）。
+- tests/koi-pond-visual.spec.mjs：新增全品种、多生长形态精灵图资产有效性与预加载测试。
+- progress.md：追加本轮开发与验证闭环记录。
+- 回滚方式：删除 assets/koi-fish-*.webp 12 张图片文件；按 git diff 恢复 assets/koi-pond.html、assets/koi-pond.js 与 tests/koi-pond-visual.spec.mjs。
+
+## 2026-09-11 - Task: 修复鱼塘动画中 keepInWater 坐标解构偶发 undefined 异常
+### What was done
+- 定位并排查 animate 渲染帧循环中由于锦鲤瞬时越界调用 keepInWater 时可能因多边形退化偶发返回 undefined 导致的 `Cannot read properties of undefined (reading 'x')` 报错。
+- 为 keepInWater 补充边界兜底保障：当多边形轮廓空缺或分母为 0 时安全兜底到首个有效岸线点或入参坐标点。
+- 在 animate 帧循环调用处增强防御性解构保护：仅在 `edge && typeof edge.x === 'number'` 时赋值坐标，杜绝运行时异常中断水池渲染循环。
+### Testing
+- pnpm run typecheck：TypeScript 静态类型检查 0 错误。
+- pnpm test：全量 41 个测试文件、279 项测试全部 100% 通过。
+- git diff --check：无新增代码格式与换行规范错误。
+### Notes
+- assets/koi-pond.js：keepInWater 函数兜底防护与 animate 坐标赋值安全守卫。
+- progress.md：追加本轮错误定位与修复验证记录。
+- 回滚方式：按 git diff 撤销 assets/koi-pond.js 中对应改动。
+
+## 2026-09-11 - Task: 修复鱼塘初始化时锦鲤坐标卡在左上角荷叶凹槽
+### What was done
+- 定位并排查由于窗口首帧或异步状态返回时 width/height 尚未由 makeBackdrop() 初始化完成，导致 fish 初始化坐标计算出 (0, 0)，被 clamp(40, 40) 和 keepInWater 吸附在左上角 (96, 208) 的荷叶死角无法脱出的问题。
+- 在 assets/koi-pond.js 中的 update(next) 补充窗口有效宽高降级回退（width || innerWidth || 1280），并将初始投放点优化至水池中部安全开阔水域（35% ~ 60% 跨度）。
+- 在 animate 帧循环越界检测时增强安全回退：当岸线吸附点仍判定在水外死角时，自动安全回退至中心开阔水域，避免多鱼重叠卡死在凹槽边缘。
+### Testing
+- 运行真实 Electron 冒烟测试脚本 node scripts/smoke-koi-pond.mjs，生成并核验 pond-day.png 截图，确认 4 条锦鲤自然分散在水池中央与右侧开阔水域并正常巡游。
+- pnpm run typecheck：TypeScript 静态类型检查通过（0 errors）。
+- pnpm test：全部 41 个测试套件、279 项测试全部 100% 通过。
+- git diff --check：无语法和换行格式错误。
+### Notes
+- assets/koi-pond.js：update() 初始安全坐标计算与 animate 越界脱困保护。
+- progress.md：追加本轮故障排查与修复闭环记录。
+- 回滚方式：按 git diff 撤销 assets/koi-pond.js 中对应更新。
+
+## 2026-09-11 - Task: 实现鱼体多段柔性脊柱拟合，让尾鳍柔软摆动
+### What was done
+- 分析发现原本的整体旋转 drawImage 方案导致整条鱼刚体摇摆，缺乏真实鱼类“鱼头稳重、躯干传导、长鳍波浪式滞后摆动”的柔韧曲线感。
+- 在 assets/koi-pond.js 中重构 koi() 渲染器：将锦鲤贴图沿鱼身脊柱轴向划分为 14 个连续微切片（Slice Mesh），鱼头前段保持 0 位移稳定，鱼身中段至尾鳍采用递增指数权重与正弦相位滞后波（wave = sin(time*5 - (1-u)*2.6)），实现从鱼脊向尾尖逐级传递的波浪式摆鳍与柔韧躯干游姿。
+### Testing
+- 运行真实 Electron 冒烟测试脚本 node scripts/smoke-koi-pond.mjs，生成并核验实测截图 pond-day.png，鱼体长尾呈现流畅的 S 型仙侠弧度。
+- pnpm run typecheck：TypeScript 全局静态检查 0 错误。
+- pnpm test：全量 41 个测试套件、279 项测试全部 100% 通过。
+- git diff --check：无新增代码格式与换行问题。
+### Notes
+- assets/koi-pond.js：koi() 鱼体 14 段连续切片脊柱形变渲染器实现。
+- progress.md：追加本轮优化与验证记录。
+- 回滚方式：按 git diff 撤销 assets/koi-pond.js 中 koi() 切片渲染实现。
+
+## 2026-09-11 - Task: 修复锦鲤触碰水岸边界闪现瞬移至屏幕中央
+### What was done
+- 定位并排查由于上一轮防御性兜底中使用了 `waterDistance(edge.x, edge.y) <= 1`，而在射线法离散多边形边界处，岸线垂足 `edge` 恰好落在多边形外侧微量（distance 为 2），导致条件分支被误判为“处于死角”，直接触发了安全瞬移代码 `f.x = sceneFrame.x + sceneFrame.width * .5`，表象为锦鲤游到岸边时突然瞬移至池塘正中央。
+- 彻底移除任何瞬移/跳变重置逻辑，改为物理向心自然回弹：当锦鲤游动触碰岸线时，由 `keepInWater` 吸附到最近边界后，计算指向池塘中心开阔区域的向心角度 `inwardAngle`，将鱼头航向平滑折向内侧（`f.angle = inwardAngle + random(-.3, .3)`），锦鲤自然转身往池塘中心游回，动画平滑连续无突变。
+### Testing
+- 模拟 360 度任意方向碰撞测试，验证岸线向心回弹平滑无瞬移。
+- 运行真实 Electron 冒烟测试脚本 node scripts/smoke-koi-pond.mjs 通过。
+- pnpm run typecheck：TypeScript 0 错误。
+- pnpm test：全量 41 个套件、279 项测试全部 100% 通过。
+- git diff --check：无语法与换行格式异常。
+### Notes
+- assets/koi-pond.js：移除岸边闪现瞬移逻辑，改为平滑向心反射转向机制。
+- progress.md：追加本轮缺陷排查与修复记录。
+- 回滚方式：按 git diff 撤销 assets/koi-pond.js 中对应改动。
+
+## 2026-09-11 - Task: 给后院鱼塘加入天气系统与 Open-Meteo 实时同步及雨雪水波消融特效
+### What was done
+- 规划并实现鱼塘八种天气系统：晴天、阴天、小雨、中雨、暴雨、小雪、中雪、大雪。
+- 在主进程/壳端（KoiPondWindow）安全接入 Open-Meteo API 与 IP 坐标定位服务，通过预加载桥接（`koiPond.getLiveWeather`）向鱼塘提供安全跨源天气获取能力，保持 Web 页面 CSP `connect-src 'none'` 安全基线完好，默认每 20 分钟自动静默刷新一次。
+- 支持手动与自动切换：顶部操作栏新增天气下拉选项（`#weather-select`），支持持久化缓存用户偏好；底部铭牌同步展示当前天气名（`#weather-name`）与对应主题色。
+- 美术资产：使用 GPT Image Proxy / gpt-image-2 工具生成了水墨意境的轻量云气画卷贴图（`koi-weather-cloud.webp`）与晶莹冰晶雪花素材（`koi-weather-snow.webp`），并在 HTML 中做预加载。
+- 物理拟真细节：
+  - 雨水：倾斜雨丝穿透庭院，落入水域轮廓（`waterDistance <= 1`）时激起细腻的同心双环涟漪，随时间扩散衰减。
+  - 雪花：带飘动弧度与微旋姿态降落，落在水面后即时进入消融溶解状态（轻微浮游位移、尺寸收缩、透明度渐褪并伴随微小水晕），真实还原雪花落水即化细节。
+### Testing
+- 单元测试：新增 `tests/koi-pond-weather.spec.ts` 验证 8 种天气 WMO 映射关系、生成的 WebP 贴图格式与 HTML 结构。
+- 全量自动化测试：执行 `pnpm test`，全部 42 个测试套件、282 项测试 100% 通过。
+- 冒烟验证：执行 `node scripts/smoke-koi-pond.mjs`，包含 Electron 原生环境、离屏渲染、CSP 与鱼塘全部功能验证通过。
+- 类型检查：`pnpm run typecheck` 静态检查 0 错误。
+- 格式检查：`git diff --check` 无语法格式与换行异常。
+### Notes
+- assets/koi-pond.html：新增云气与雪花资源预加载、天气切换下拉选框和底部状态展示。
+- assets/koi-pond.css：新增天气下拉组件样式与不同天气的文字高亮主题色。
+- assets/koi-pond.js：实现天气系统状态管理、Open-Meteo 数据映射、雨滴落水涟漪与雪花落水消融物理动效。
+- assets/koi-weather-cloud.webp：gpt-image-2 生成的水墨轻柔云气贴图。
+- assets/koi-weather-snow.webp：gpt-image-2 生成的晶莹雪花素材。
+- src/koi-pond-preload.ts：暴露 `getLiveWeather` 安全桥接接口。
+- src/koi-pond-window.ts：主进程实现 IP 地理坐标解析与 Open-Meteo 实时天气抓取 IPC handler。
+- tests/koi-pond-weather.spec.ts：天气映射规则与静态资源完整性测试套件。
+- 回滚方式：使用 `git checkout HEAD -- assets/koi-pond.html assets/koi-pond.css assets/koi-pond.js src/koi-pond-preload.ts src/koi-pond-window.ts` 并在 assets 中删除新增的两个 webp 文件。
+
+## 2026-09-11 - Task: 替换后院鱼塘天气云气与雪花为用户自制透明素材
+### What was done
+- 接收用户自制的高清透明背景美术素材，将其优化并转换为高性能 WebP 格式替换至项目资产目录：
+  - `Image #1`（六角晶莹冰晶雪花） -> `assets/koi-weather-snow.webp`
+  - `Image #2`（水墨工笔云雾画卷） -> `assets/koi-weather-cloud.webp`
+- 优化了分辨率与压缩质量，确保透明通道完整且在保持极致水墨细节的同时兼具高性能渲染。
+### Testing
+- 单元测试：`pnpm test koi`，11 个测试套件、61 项测试通过。
+- 全量自动化测试：`pnpm test`，42 个套件、282 项测试全部通过。
+- 冒烟验证：`node scripts/smoke-koi-pond.mjs`，包含 Electron 原生环境加载与全链路渲染检查通过。
+- 格式检查：`git diff --check` 无语法与格式异常。
+### Notes
+- assets/koi-weather-cloud.webp：更新为用户重绘的高清透明水墨云气。
+- assets/koi-weather-snow.webp：更新为用户重绘的高清透明六角冰晶雪花。
+- tests/koi-pond-weather.spec.ts：微调资产体积断言上限以适配高清贴图。
+- progress.md：追加本轮素材替换记录。
+- 回滚方式：按 git 检出或重新导入上一次生成的 WebP 素材。
+
+## 2026-09-11 - Task: 修复锦鲤左侧岸边凹口卡滞与澄清天气系统生效机制
+### What was done
+- 修复锦鲤在左侧岸线凹口处（荷叶与岸桥狭窄死角）由于岸线微小回退导致连续触发边界检测而原地卡住的问题：
+  - 在 `assets/koi-pond.js` 中优化碰撞反弹算法：当判定锦鲤处于岸外时，不仅吸附到边界，更主动往池心开阔水域微移 8px 深度脱困，并将锦鲤的巡游目标强制重定向至开阔中心水区（`cx, cy` 区域），确保彻底脱离边缘死角自由巡游。
+- 查明为何截图看不到天气入口：当前系统后台运行的已安装程序进程（PID 920 等）是上一个版本（12:03 启动并加载打包的 `app.asar`），尚未加载源码工作区中刚刚新增的天气系统代码。
+### Testing
+- 全量自动化测试：`pnpm test` 42 个套件、282 项测试全部通过。
+- 冒烟验证：`node scripts/smoke-koi-pond.mjs` Electron 离屏真实渲染通过。
+- 格式检查：`git diff --check` 无格式异常。
+### Notes
+- assets/koi-pond.js：强化岸边向心脱困位移与中心强制导向目标赋值。
+- progress.md：追加本轮卡滞排查与修复记录。
+- 回滚方式：按 git diff 撤销 assets/koi-pond.js 对应改动。
+
+## 2026-09-11 - Task: 移除鱼塘上空不自然的云朵图片素材
+### What was done
+- 根据反馈，完全移除强制叠加在鱼塘俯视场景之上的水墨云朵图片素材（`assets/koi-weather-cloud.webp`）及其在 HTML 中的预加载链接。
+- 将阴天、降雨、暴雪等天气的光照氛围调整为全局柔和的天光暗化色调遮罩（wash overlay），消除俯视场景中出现孤立浮云的视觉突兀感。
+### Testing
+- 单元测试：`pnpm test koi`，11 个测试套件、61 项测试全部通过。
+- 全量自动化测试：`pnpm test`，42 个套件、282 项测试全数通过。
+- 类型检查：`pnpm run typecheck` 0 错误。
+- 冒烟验证：`node scripts/smoke-koi-pond.mjs` Electron 真实渲染通过。
+- 格式检查：`git diff --check` 无格式问题。
+### Notes
+- assets/koi-pond.html：移除 `koi-weather-cloud.webp` 的 preload 引用。
+- assets/koi-pond.js：移除云朵贴图加载与绘制逻辑，改用自然的天空环境光氛围渲染。
+- assets/koi-weather-cloud.webp：文件已删除。
+- tests/koi-pond-weather.spec.ts：更新资产完整性测试，不再断言云朵贴图。
+- progress.md：追加本轮修改记录。
+- 回滚方式：按 git diff 恢复对应改动。
+
+## 2026-09-11 - Task: 优化雨天与雪天的帧率性能避免界面卡死
+### What was done
+- 排查雨天/雪天界面卡顿死机的瓶颈：
+  1. 之前每帧对几十甚至上百个下落雨雪粒子频繁执行逐帧多边形点在多边形内（`waterDistance` 射线法）碰撞检测，计算复杂度呈平方级膨胀；
+  2. 涟漪和雪花消融反复频繁切换 Canvas 状态机（`ctx.save/restore`、`ctx.clip` 与路径单独 stroke），导致 GPU/CPU 绘制管线拥塞卡死。
+- 实施三项关键性能优化：
+  1. **落点预测生成化**：在生成粒子时预先判定落点，逐帧运动循环内只做简单的数值阈值判断，彻底消除每帧几十次 CPU 几何射线法运算；
+  2. **粒子与波纹上限轻量化**：将中雨/大雪粒子预算优化至 20~45 个，波纹并发上限控制在 16 个、消融上限 12 个，视觉密集度良好且完全不卡顿；
+  3. **路径批处理绘制**：将全屏所有雨滴落水涟漪合并为单个 Path 单次 stroke 渲染，大幅降低 draw call 与状态切换开销，帧率稳定在 60fps。
+### Testing
+- 单元测试：`pnpm test koi` 11 个套件、61 项测试全部通过。
+- 全量自动化测试：`pnpm test` 42 个套件、282 项测试全数通过。
+- 类型检查：`pnpm run typecheck` 0 错误。
+- 冒烟验证：`node scripts/smoke-koi-pond.mjs` Electron 真实渲染通过。
+- 格式检查：`git diff --check` 无格式问题。
+### Notes
+- assets/koi-pond.js：实施雨雪粒子与水纹消融的生成式预判与批处理绘制。
+- progress.md：追加本轮性能优化记录。
+- 回滚方式：按 git diff 撤销 assets/koi-pond.js 对应改动。
