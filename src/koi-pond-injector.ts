@@ -10,11 +10,50 @@ export function injectKoiPondDialogue(source: string): { source: string; changed
       async prompt(...args) {
         const sessionId = this.sessionId;
         const requestId = typeof args[3] === "string" ? args[3] : crypto.randomUUID();
-        try { window.postMessage({ type: "dsh/session-running", sessionId, requestId, running: true }, window.location.origin); } catch {}
+        let releaseRunning;
+        let running = false;
+        const notifyRunning = value => {
+          if (running === value) return;
+          running = value;
+          try { window.postMessage({ type: "dsh/session-running", sessionId, requestId, running: value }, window.location.origin); } catch {}
+        };
+        const stopRunning = () => {
+          const release = releaseRunning;
+          releaseRunning = undefined;
+          if (typeof release === "function") release();
+        };
+        notifyRunning(true);
+        if (typeof this.subscribe === "function" && typeof this.getSnapshot === "function") {
+          let observedRunning = false;
+          const syncRunning = () => {
+            let active = false;
+            try { active = this.getSnapshot().running === true; } catch {}
+            if (active) {
+              observedRunning = true;
+              notifyRunning(true);
+            } else if (observedRunning) {
+              notifyRunning(false);
+              stopRunning();
+            }
+          };
+          try {
+            releaseRunning = this.subscribe(syncRunning);
+            syncRunning();
+          } catch {}
+        }
         let result;
-        try { result = await this.__dshPondOriginalPrompt(...args); }
-        finally {
-          try { window.postMessage({ type: "dsh/session-running", sessionId, requestId, running: false }, window.location.origin); } catch {}
+        try {
+          result = await this.__dshPondOriginalPrompt(...args);
+        } catch (error) {
+          notifyRunning(false);
+          stopRunning();
+          throw error;
+        }
+        if (result?.ok !== true) {
+          notifyRunning(false);
+          stopRunning();
+        } else if (releaseRunning === undefined) {
+          notifyRunning(false);
         }
         try {
           if (result?.ok === true && this.address === void 0) {

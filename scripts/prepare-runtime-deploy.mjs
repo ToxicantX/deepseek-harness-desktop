@@ -11,7 +11,12 @@ const runtime = JSON.parse(await readFile(resolve(process.argv[2], 'python/sdk-r
 cli.dependencies = { ...runtime.dependencies, ...cli.dependencies }
 delete cli.dependencies[cli.name]
 const packages = new Map()
-for (const path of globSync(['packages/*/*/package.json', 'vendor/*/package.json', 'apps/*/package.json'], { cwd: process.argv[2] })) {
+for (const path of globSync([
+  'packages/*/*/package.json',
+  'vendor/*/package.json',
+  'apps/*/package.json',
+  'native/*/packages/*/package.json',
+], { cwd: process.argv[2] })) {
   const manifest = JSON.parse(await readFile(resolve(process.argv[2], path), 'utf8'))
   packages.set(manifest.name, manifest)
 }
@@ -43,6 +48,12 @@ for (const [name, specifier] of Object.entries(document.toJS().overrides ?? {}))
     document.setIn(['overrides', name], `file:${specifier.slice(5)}`)
     changed++
   }
+}
+// This archive targets Windows x64; omit workspace packages for other platforms.
+for (const manifest of packages.values()) {
+  const unsupportedOs = Array.isArray(manifest.os) && !manifest.os.includes('win32')
+  const unsupportedCpu = Array.isArray(manifest.cpu) && !manifest.cpu.includes('x64')
+  if (unsupportedOs || unsupportedCpu) document.setIn(['overrides', manifest.name], '-')
 }
 // Hoisting otherwise adds links back to unrelated original workspace projects.
 document.set('hoistWorkspacePackages', false)

@@ -167,6 +167,13 @@ describe('koi dialogue observer', () => {
     expect(main).toContain("ipcMain.on('pond:session-running'")
   })
 
+  it('uses a compact koi pond SVG for the floating toggle', async () => {
+    const source = await readFile(new URL('../src/koi-pond-toggle.ts', import.meta.url), 'utf8')
+    expect(source).toContain('viewBox="0 0 24 24"')
+    expect(source).toContain('fill="#f28b52"')
+    expect(source).not.toContain("button.textContent = '\\u6c60'")
+  })
+
   function client(body = 'return { ok: true };', signature = 'content, mode, signal, requestId') {
     const source = `() => class { async prompt(${signature}) { ${body} } }`
     const transformed = injectKoiPondDialogue(source)
@@ -195,6 +202,26 @@ describe('koi dialogue observer', () => {
     await expect(client('throw new Error("send failed");').prompt('hello')).rejects.toThrow('send failed')
     expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'dsh/session-running', running: true }), 'https://fixture.invalid')
     expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'dsh/session-running', running: false }), 'https://fixture.invalid')
+  })
+
+  it('keeps a session visible until its running snapshot reports completion', async () => {
+    const postMessage = vi.fn()
+    vi.stubGlobal('window', { postMessage, location: { origin: 'https://fixture.invalid' } })
+    const source = `() => class {
+      sessionId = 'running-session';
+      running = true;
+      getSnapshot() { return { running: this.running }; }
+      subscribe(listener) { this.listener = listener; return () => { this.listener = undefined; }; }
+      async prompt(content, mode, signal, requestId) { return { ok: true }; }
+    }`
+    const transformed = injectKoiPondDialogue(source)
+    expect(transformed.changed).toBe(true)
+    const session = new (Function(`return (${transformed.source})`)()())()
+    await session.prompt('hello', 'queue', undefined, 'request')
+    expect(postMessage).toHaveBeenCalledWith({ type: 'dsh/session-running', sessionId: 'running-session', requestId: 'request', running: true }, 'https://fixture.invalid')
+    session.running = false
+    session.listener()
+    expect(postMessage).toHaveBeenCalledWith({ type: 'dsh/session-running', sessionId: 'running-session', requestId: 'request', running: false }, 'https://fixture.invalid')
   })
 
   it('keeps accepted messages successful if the pond observer breaks', async () => {

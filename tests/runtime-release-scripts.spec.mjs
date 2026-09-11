@@ -230,7 +230,7 @@ describe('Runtime release scripts', () => {
     await writeFile(join(nestedPeer, 'index.js'), "module.exports = require('test-peer')\n")
     await writeFile(join(source, 'package.json'), JSON.stringify({ private: true }))
     await writeFile(join(source, 'pnpm-workspace.yaml'), [
-      'packages: [apps/*, vendor/*]',
+      'packages: [apps/*, vendor/*, native/*/packages/*]',
       'linkWorkspacePackages: true',
       'overrides:',
       "  '@deepseek-ai/schemastery': link:vendor/schemastery",
@@ -259,6 +259,7 @@ describe('Runtime release scripts', () => {
         '@deepseek-ai/node-addon-landlock-run-linux-arm64': 'workspace:*',
         '@deepseek-ai/node-addon-landlock-run-linux-x64': 'workspace:*',
         'test-native-addon': 'workspace:*',
+        'test-native-addon-darwin': 'workspace:*',
       },
     }))
     await writeFile(join(addon, 'index.js'), "module.exports = require('test-native-addon') + require('test-nested-peer')\n")
@@ -266,6 +267,11 @@ describe('Runtime release scripts', () => {
       name: 'test-native-addon', version: '1.0.0', main: 'index.js', os: [process.platform], cpu: [process.arch],
     }))
     await writeFile(join(nativeAddon, 'index.js'), 'module.exports = 43\n')
+    const darwinAddon = join(source, 'native', 'system', 'packages', 'darwin-arm64')
+    await mkdir(darwinAddon, { recursive: true })
+    await writeFile(join(darwinAddon, 'package.json'), JSON.stringify({
+      name: 'test-native-addon-darwin', version: '1.0.0', os: ['darwin'], cpu: ['arm64'],
+    }))
     for (const arch of ['arm64', 'x64']) {
       const linuxAddon = join(source, 'vendor', `linux-${arch}`)
       await mkdir(linuxAddon)
@@ -309,6 +315,7 @@ describe('Runtime release scripts', () => {
     const map = JSON.parse(await readFile(join(archive, 'runtime-links.json'), 'utf8'))
     expect(map.links.some(link => link.path.endsWith('/@deepseek-ai/schemastery'))).toBe(true)
     expect(map.links.some(link => link.path.includes('node-addon-landlock-run-linux-'))).toBe(false)
+    expect(map.links.some(link => link.path.includes('test-native-addon-darwin'))).toBe(false)
     await rm(runtime, { recursive: true, force: true })
     for (const link of map.links) {
       await mkdir(resolve(archive, link.path, '..'), { recursive: true })
