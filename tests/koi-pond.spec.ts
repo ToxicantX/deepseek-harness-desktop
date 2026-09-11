@@ -34,7 +34,7 @@ describe('shell koi persistence and growth', () => {
     expect(view.fish.map(f => f.name)).toEqual(['丹枫', '墨雪', '小金', '浅葱'])
     expect(view).not.toHaveProperty('recentIds')
     view.fish[0]!.level = 999
-    expect((await store.view()).fish[0]!.level).toBe(1)
+    expect((await store.view()).fish[0]!.level).toBe(0)
   })
 
   it('serializes successful messages, deduplicates by session/request, and survives reopening', async () => {
@@ -45,7 +45,7 @@ describe('shell koi persistence and growth', () => {
     ])).toEqual([true, false, true, true])
     const restored = new KoiPondStore(path)
     expect(await restored.recordDialogue('a', '1')).toBe(false)
-    expect(await restored.view()).toMatchObject({ dialogues: 3, fish: Array.from({ length: 4 }, () => ({ level: 4 })) })
+    expect(await restored.view()).toMatchObject({ dialogues: 3, fish: Array.from({ length: 4 }, () => ({ level: 3 })) })
   })
 
   it('retains valid long and escaped request IDs across restarts', async () => {
@@ -70,7 +70,7 @@ describe('shell koi persistence and growth', () => {
     const hatched = await store.view()
     expect(hatched.eggs).toHaveLength(0)
     expect(hatched.fish).toHaveLength(6)
-    expect(hatched.fish.slice(4).every(f => f.level === 1 && f.generation === 2)).toBe(true)
+    expect(hatched.fish.slice(4).every(f => f.level === 0 && f.generation === 2)).toBe(true)
     await store.recordDialogue('a', 'after')
     expect((await store.view()).eggs).toHaveLength(0)
   })

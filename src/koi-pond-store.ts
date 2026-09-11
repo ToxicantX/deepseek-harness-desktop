@@ -34,7 +34,7 @@ function initialState(): PondState {
     version: 1, dialogues: 0, eggs: [], recentIds: [],
     fish: (['kohaku', 'sanke', 'ogon', 'shusui'] as const).map((pattern, index) => ({
       id: randomUUID(), name: ['丹枫', '墨雪', '小金', '浅葱'][index]!,
-      sex: index % 2 === 0 ? 'female' : 'male', pattern, level: 1, bred: false, generation: 1,
+      sex: index % 2 === 0 ? 'female' : 'male', pattern, level: 0, bred: false, generation: 1,
     })),
   }
 }
@@ -55,7 +55,7 @@ function validState(value: unknown): value is PondState {
     || !s.recentIds.every(id => typeof id === 'string' && id.length > 0 && id.length <= 1600)) return false
   if (!s.fish.every(f => f && shortId(f.id) && typeof f.name === 'string' && f.name.trim().length > 0
     && Array.from(f.name).length <= 16 && (f.sex === 'female' || f.sex === 'male') && pattern(f.pattern)
-    && integer(f.level, 1) && typeof f.bred === 'boolean' && integer(f.generation, 1))) return false
+    && integer(f.level, 0) && typeof f.bred === 'boolean' && integer(f.generation, 1))) return false
   const ids = new Set(s.fish.map(f => f.id))
   return ids.size === s.fish.length && s.eggs.every(e => e && shortId(e.id)
     && Array.isArray(e.parents) && e.parents.length === 2 && e.parents[0] !== e.parents[1]
@@ -128,7 +128,7 @@ export class KoiPondStore {
         egg.remaining--
         if (egg.remaining === 0) next.fish.push({
           id: egg.id, name: `锦鲤 ${next.fish.length + 1}`, sex: Math.random() < 0.5 ? 'female' : 'male',
-          pattern: egg.pattern, level: 1, bred: false, generation: egg.generation,
+          pattern: egg.pattern, level: 0, bred: false, generation: egg.generation,
         })
       }
       next.eggs = next.eggs.filter(egg => egg.remaining > 0)

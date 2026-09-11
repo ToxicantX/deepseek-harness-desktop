@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #08171e;
+    color: #e2e8f0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+    padding: 30px;
+    width: 1400px;
+    height: 980px;
+    overflow: hidden;
+  }
+  h1 {
+    font-size: 26px;
+    font-weight: 600;
+    color: #f7fafc;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .badge {
+    font-size: 13px;
+    background: #3182ce;
+    color: #fff;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-weight: normal;
+  }
+  .subtitle {
+    font-size: 14px;
+    color: #94a3b8;
+    margin-bottom: 24px;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+  .card {
+    background: rgba(15, 23, 42, 0.75);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 12px 14px;
+    position: relative;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+  }
+  .card.highlight {
+    border-color: #ecc94b;
+    background: rgba(30, 41, 59, 0.85);
+  }
+  .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+  .card-title {
+    font-size: 15px;
+    font-weight: bold;
+    color: #f1f5f9;
+  }
+  .card-level {
+    font-size: 12px;
+    color: #38bdf8;
+    background: rgba(56, 189, 248, 0.15);
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+  .canvas-wrapper {
+    width: 100%;
+    height: 110px;
+    background: radial-gradient(circle at center, #134e4a 0%, #062b2b 70%, #031818 100%);
+    border-radius: 8px;
+    position: relative;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+  }
+  canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+  .specs {
+    margin-top: 8px;
+    font-size: 11.5px;
+    color: #94a3b8;
+    line-height: 1.5;
+  }
+  .specs b {
+    color: #cbd5e1;
+  }
+  .specs .feat {
+    color: #f6ad55;
+  }
+
+  /* Comparison Detail section */
+  .detail-section {
+    background: rgba(15, 23, 42, 0.75);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 16px 20px;
+    display: flex;
+    gap: 24px;
+    align-items: center;
+  }
+  .detail-box {
+    flex: 1;
+  }
+  .detail-box h3 {
+    font-size: 15px;
+    color: #f8fafc;
+    margin-bottom: 8px;
+  }
+  .detail-box p {
+    font-size: 12.5px;
+    color: #94a3b8;
+    line-height: 1.6;
+  }
+  .detail-box ul {
+    margin-left: 18px;
+    margin-top: 6px;
+    font-size: 12.5px;
+    color: #cbd5e1;
+    line-height: 1.6;
+  }
+  .side-by-side-canvas {
+    width: 440px;
+    height: 150px;
+    background: radial-gradient(circle at center, #115e59 0%, #042f2e 70%, #021a19 100%);
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+</style>
+</head>
+<body>
+
+<h1>
+  <span>锦鲤全阶形态演化全景 (Stage 0 ~ Stage 10)</span>
+  <span class="badge">Canvas 渲染验证</span>
+</h1>
+<div class="subtitle">
+  基于锦鲤池实际渲染引擎（原汁原味 koi-pond.js Canvas 2D Path 与鱼身着色器），展示全阶段身体尺寸、尾鳍延伸、胸鳍摆幅以及金色鱼鳞变化
+</div>
+
+<div class="grid" id="grid">
+  <!-- Filled dynamically -->
+</div>
+
+<div class="detail-section">
+  <div class="detail-box">
+    <h3>核心演化机制与肉眼辨识分析</h3>
+    <p>锦鲤池的演化档位由 <code>stage = min(10, floor(level / 100))</code> 决定：</p>
+    <ul>
+      <li><b>0~99级（第1阶）与 100~199级（第2阶）：</b> 基础体型仅增加约 16.7%（18px &rarr; 21px），尾鳍后延 +1.5%，胸鳍摆幅 +0.9px，且此时<b>尚未达到鱼鳞生成条件</b>，因此 100 级刚突破时肉眼感知较平缓。</li>
+      <li><b>200级起（第3阶及以上）：</b> 触发关键分水岭！正式激活 <code>9 道同心金色背鳞（arc）</code>，背部开始具有层叠光泽。</li>
+      <li><b>500级（第6阶）：</b> 达到性成熟标志（可触发伴侣孕育），鱼身尺寸达到 33px（初始的 1.83 倍）。</li>
+      <li><b>1000级（第11阶满阶）：</b> 鱼身尺寸达 48px（初始的 2.67 倍），尾鳍与胸鳍舒展至最大尺寸，威严巡游。</li>
+    </ul>
+  </div>
+  <div>
+    <div style="font-size: 12px; color: #94a3b8; margin-bottom: 6px; text-align: center;">Lv.0 (初始) vs Lv.100 vs Lv.200 (出鳞) vs Lv.1000 (满阶)</div>
+    <canvas id="compCanvas" class="side-by-side-canvas" width="880" height="300"></canvas>
+  </div>
+</div>
+
+<script>
+  const patterns = {
+    kohaku: ['红白', '#ff4d2d', '#ffffff'],
+    taisho: ['大正三色', '#ea4335', '#ffffff'],
+    showa: ['昭和三色', '#1b2838', '#ff4a22'],
+    ogon: ['黄金', '#f6b73c', '#fff2a8'],
+    asagi: ['浅黄', '#5c8096', '#ea5d3c'],
+    shusui: ['秋翠', '#4e7088', '#ea5d3c']
+  };
+
+  function stage(level) { return Math.min(10, Math.floor(level / 100)); }
+  function size(level, width = 1280) {
+    const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+    return (18 + stage(level) * 3) * clamp(width / 1280, 0.8, 1.35);
+  }
+
+  function drawKoi(ctx, x, y, level, patternKey = 'kohaku', scaleMult = 1, angle = 0) {
+    const f = {
+      level: level,
+      pattern: patternKey,
+      phase: 0
+    };
+    const s = size(level) * scaleMult;
+    const wag = 0.3; // static swimming posture
+    const palette = patterns[f.pattern];
+
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(angle);
+
+    // shadow
+    ctx.beginPath();
+    ctx.ellipse(-3, 9 * scaleMult, s * .92, s * .31, 0, 0, Math.PI * 2);
+    ctx.fillStyle = '#00191c66';
+    ctx.fill();
+
+    // tail fin
+    ctx.save();
+    ctx.translate(-s * .69, 0);
+    ctx.rotate(wag * .22);
+    ctx.fillStyle = palette[1] + 'aa';
+    ctx.beginPath();
+    ctx.moveTo(2, 0);
+    ctx.quadraticCurveTo(-s * .4, -s * .12, -s * (.6 + stage(f.level) * .015), -s * .38);
+    ctx.quadraticCurveTo(-s * .48, 0, -s * .64, s * .38);
+    ctx.quadraticCurveTo(-s * .22, s * .14, 2, 0);
+    ctx.fill();
+    ctx.restore();
+
+    // pectoral fins
+    for (const side of [-1, 1]) {
+      ctx.save();
+      ctx.translate(s * .18, side * s * .17);
+      ctx.rotate(side * (.2 + wag * .12));
+      ctx.beginPath();
+      ctx.ellipse(-s * .06, side * s * .17, s * .3, s * (.13 + stage(f.level) * .009), 0, 0, Math.PI * 2);
+      ctx.fillStyle = palette[1] + '88';
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // body
+    ctx.beginPath();
+    ctx.moveTo(s, 0);
+    ctx.bezierCurveTo(s * .77, -s * .42, -s * .3, -s * .36, -s * .78, 0);
+    ctx.bezierCurveTo(-s * .3, s * .36, s * .77, s * .42, s, 0);
+    ctx.closePath();
+
+    const body = ctx.createLinearGradient(0, -s * .35, 0, s * .35);
+    body.addColorStop(0, palette[1]);
+    body.addColorStop(.45, palette[1]);
+    body.addColorStop(1, f.pattern === 'ogon' ? '#957131' : '#809d93');
+    ctx.fillStyle = body;
+    ctx.fill();
+    ctx.strokeStyle = '#fffbe04a';
+    ctx.lineWidth = .7;
+    ctx.stroke();
+
+    // spots & scales clipping
+    ctx.save();
+    ctx.clip();
+
+    // pattern markings
+    for (let i = 0; i < 4; i++) {
+      ctx.beginPath();
+      ctx.ellipse(s * (.65 - i * .35), Math.sin(i * 7 + f.phase) * s * .12, s * .18, s * .2, 0, 0, Math.PI * 2);
+      ctx.fillStyle = palette[2];
+      ctx.fill();
+    }
+
+    // sheen
+    ctx.globalCompositeOperation = 'screen';
+    const sheen = ctx.createLinearGradient(0, -s * .35, 0, s * .1);
+    sheen.addColorStop(0, '#fffbd252');
+    sheen.addColorStop(1, '#fffbd200');
+    ctx.fillStyle = sheen;
+    ctx.beginPath();
+    ctx.ellipse(s * .05, -s * .12, s * .72, s * .18, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
+
+    // Scales (Lv 200+)
+    if (stage(f.level) >= 2) {
+      ctx.strokeStyle = '#fff8d340';
+      ctx.lineWidth = 0.9;
+      for (let i = 0; i < 9; i++) {
+        ctx.beginPath();
+        ctx.arc(s * (.6 - i * .14), 0, s * .18, -.9, .9);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+
+    // eyes
+    ctx.beginPath();
+    ctx.arc(s * .7, -s * .14, 2 * scaleMult, 0, Math.PI * 2);
+    ctx.fillStyle = '#162a29';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(s * .7, s * .14, 2 * scaleMult, 0, Math.PI * 2);
+    ctx.fill();
+
+    // barbels (whiskers)
+    ctx.strokeStyle = '#f1eed680';
+    ctx.lineWidth = .8;
+    for (const side of [-1, 1]) {
+      ctx.beginPath();
+      ctx.moveTo(s * .9, side * s * .05);
+      ctx.quadraticCurveTo(s * 1.12, side * s * .05, s * 1.1, side * s * .15);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  // Generate 8 representative cards: Stage 0 to Stage 7 (Lv 0, 100, 200, 300, 400, 500, 700, 1000)
+  const displayStages = [
+    { level: 0, tag: "初始鱼苗", desc: "基础形体，鳍翼初生" },
+    { level: 100, tag: "小成幼鱼", desc: "体型 +16.7%，鳍稍舒展" },
+    { level: 200, tag: "金鳞初显", desc: "体型 +33.3%，9道背部金鳞显现", feat: "⭐ 正式长出金鳞" },
+    { level: 300, tag: "游动健硕", desc: "体型 +50%，鳞片弧度拉大" },
+    { level: 400, tag: "蓄势待发", desc: "体型 +66.7%，鳍翅飘逸" },
+    { level: 500, tag: "达到成熟", desc: "体型 +83.3%，性成熟可繁育", feat: "❤️ 解锁孕育后代" },
+    { level: 700, tag: "大美巡游", desc: "体型 +116.7%，体长逾2倍" },
+    { level: 1000, tag: "大圆满态", desc: "体型 +166.7% (达48px)，体态雄伟", feat: "👑 达到极境完全体" }
+  ];
+
+  const grid = document.getElementById('grid');
+  displayStages.forEach((item, idx) => {
+    const card = document.createElement('div');
+    card.className = 'card' + (item.level === 200 || item.level === 1000 ? ' highlight' : '');
+    const st = stage(item.level);
+    const s = size(item.level);
+    
+    card.innerHTML = `
+      <div class="card-header">
+        <span class="card-title">第 ${st + 1} 阶 · ${item.tag}</span>
+        <span class="card-level">Lv. ${item.level}</span>
+      </div>
+      <div class="canvas-wrapper">
+        <canvas id="cv_${item.level}" width="500" height="220"></canvas>
+      </div>
+      <div class="specs">
+        <div><b>尺寸半径：</b>${s.toFixed(1)} px (${((s / 18 - 1) * 100).toFixed(0)}% 增幅)</div>
+        <div><b>尾鳍外延：</b>${(0.6 + st * 0.015).toFixed(3)}s · <b>胸鳍：</b>${(0.13 + st * 0.009).toFixed(3)}s</div>
+        <div><b>状态：</b>${st >= 2 ? '<span style="color:#ecc94b">9道同心金鳞激活</span>' : '<span style="color:#94a3b8">尚无鳞纹</span>'}</div>
+        ${item.feat ? `<div class="feat">${item.feat}</div>` : ''}
+      </div>
+    `;
+    grid.appendChild(card);
+
+    setTimeout(() => {
+      const cv = document.getElementById('cv_' + item.level);
+      const ctx = cv.getContext('2d');
+      // Draw water ripple
+      ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(250, 110, 60, 0, Math.PI * 2);
+      ctx.stroke();
+      // Draw fish horizontally
+      drawKoi(ctx, 250, 110, item.level, idx % 2 === 0 ? 'kohaku' : 'taisho', 1.8, -0.05);
+    }, 50);
+  });
+
+  // Draw comparison in bottom box
+  setTimeout(() => {
+    const cv = document.getElementById('compCanvas');
+    const ctx = cv.getContext('2d');
+    const compareLevels = [0, 100, 200, 1000];
+    const compareNames = ['Lv.0 (阶1)', 'Lv.100 (阶2)', 'Lv.200 (阶3·出鳞)', 'Lv.1000 (阶11·完全体)'];
+    
+    compareLevels.forEach((lvl, i) => {
+      const x = 90 + i * 230;
+      const y = 140;
+      
+      // Label
+      ctx.fillStyle = lvl >= 200 ? '#f6e05e' : '#cbd5e1';
+      ctx.font = 'bold 20px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(compareNames[i], x, 40);
+
+      // Water glow
+      const grad = ctx.createRadialGradient(x, y, 5, x, y, 70);
+      grad.addColorStop(0, 'rgba(45, 212, 191, 0.15)');
+      grad.addColorStop(1, 'rgba(45, 212, 191, 0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(x, y, 70, 0, Math.PI * 2);
+      ctx.fill();
+
+      drawKoi(ctx, x, y, lvl, 'kohaku', 1.75, -Math.PI / 2);
+    });
+  }, 100);
+</script>
+
+</body>
+</html>
