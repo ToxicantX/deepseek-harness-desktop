@@ -53,6 +53,15 @@
   seasonImages.autumn.decoding = 'async'; seasonImages.autumn.src = 'koi-season-autumn-leaf.webp'
   seasonImages.winter.decoding = 'async'; seasonImages.winter.src = 'koi-season-winter-mist.webp'
   for (const image of new Set(Object.values(seasonImages))) image.addEventListener('load', () => { ambientPaint = -Infinity })
+  const fishSprites = Object.fromEntries(
+    ['kohaku', 'sanke', 'ogon', 'shusui'].flatMap(p =>
+      ['fry', 'juvenile', 'adult'].map(s => {
+        const img = new Image()
+        img.decoding = 'async'; img.src = `koi-fish-${p}-${s}.webp`
+        return [`${p}-${s}`, img]
+      })
+    )
+  )
   let sceneFrame = { x: 0, y: 0, width: 1723, height: 913 }
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches
   const random = (min, max) => min + Math.random() * (max - min)
@@ -123,10 +132,15 @@
     state = next
     fish = next.fish.map((data, i) => {
       const existing = fish.find(f => f.id === data.id)
-      return Object.assign(existing || {
-        x: width * (.25 + i % 4 * .1), y: height * (.4 + Math.floor(i / 4) * .1),
+      const w = width || innerWidth || 1280, h = height || innerHeight || 720
+      const initial = {
+        x: w * (.35 + (i % 4) * .08), y: h * (.38 + Math.floor(i / 4) * .1),
         angle: random(0, Math.PI * 2), phase: random(0, 10), target: null,
-      }, data)
+      }
+      if (existing && existing.x > 50 && existing.y > 50) {
+        return Object.assign(existing, data)
+      }
+      return Object.assign(initial, data)
     })
     if (bonds.dialogues === null) bonds.dialogues = next.dialogues
     else if (next.dialogues > bonds.dialogues) {
@@ -222,16 +236,18 @@
   function keepInWater(x, y) {
     if (waterDistance(x, y) <= 1) return { x, y }
     const points = waterOutline()
-    let nearest, distance = Infinity
+    if (!points || !points.length) return { x, y }
+    let nearest = points[0], distance = Infinity
     for (let i = 0; i < points.length; i++) {
       const a = points[i], b = points[(i + 1) % points.length]
       const dx = b.x - a.x, dy = b.y - a.y
-      const t = clamp(((x - a.x) * dx + (y - a.y) * dy) / (dx * dx + dy * dy), 0, 1)
+      const denom = dx * dx + dy * dy
+      const t = denom > 0 ? clamp(((x - a.x) * dx + (y - a.y) * dy) / denom, 0, 1) : 0
       const p = { x: a.x + t * dx, y: a.y + t * dy }
       const d = Math.hypot(x - p.x, y - p.y)
       if (d < distance) { nearest = p; distance = d }
     }
-    return nearest
+    return nearest || { x, y }
   }
   function eventPoints(count) {
     const points = []
@@ -588,43 +604,61 @@
     ctx.save(); ctx.translate(f.x, f.y - lift); ctx.rotate(f.angle)
     if (lift > 0) ctx.scale(1 + lift / (s * 16), 1 + lift / (s * 24))
     if (night) ctx.globalAlpha = .82
-    ctx.strokeStyle = night ? '#a7d7d21c' : '#e8f8d82a'; ctx.lineWidth = .65
-    for (const side of [-1, 1]) {
-      ctx.beginPath(); ctx.moveTo(-s * .55, side * s * .22)
-      ctx.quadraticCurveTo(-s * 1.15, side * s * (.35 + wag * .04), -s * 1.55, side * s * .2); ctx.stroke()
-    }
     if (!lift) ellipse(ctx, -3, 9, s * .92, s * .31, '#00191c66')
-    ctx.save(); ctx.translate(-s * .69, 0); ctx.rotate(wag * .22)
-    ctx.fillStyle = palette[1] + 'aa'
-    ctx.beginPath(); ctx.moveTo(2, 0); ctx.quadraticCurveTo(-s * .4, -s * .12, -s * (.6 + stage(f.level) * .015), -s * .38)
-    ctx.quadraticCurveTo(-s * .48, 0, -s * .64, s * .38); ctx.quadraticCurveTo(-s * .22, s * .14, 2, 0); ctx.fill(); ctx.restore()
-    for (const side of [-1, 1]) {
-      ctx.save(); ctx.translate(s * .18, side * s * .17); ctx.rotate(side * (.2 + wag * .12))
-      ellipse(ctx, -s * .06, side * s * .17, s * .3, s * (.13 + stage(f.level) * .009), palette[1] + '88', side * .8); ctx.restore()
+
+    const stgKey = f.level < 200 ? 'fry' : f.level < 500 ? 'juvenile' : 'adult'
+    const sprite = fishSprites[`${f.pattern}-${stgKey}`]
+    if (sprite?.complete && sprite.naturalWidth) {
+      const spriteW = s * 3.2
+      const spriteH = spriteW * (sprite.naturalHeight / sprite.naturalWidth)
+      const slices = 14
+      const sliceW = spriteW / slices
+      const imgSliceW = sprite.naturalWidth / slices
+      const headOffset = spriteW * .64
+
+      for (let i = slices - 1; i >= 0; i--) {
+        const u = (i + .5) / slices
+        const tailFactor = Math.pow(Math.max(0, (0.78 - u) / 0.78), 1.5)
+        const wave = Math.sin(time * 5 + f.phase - (1 - u) * 2.6)
+        const lateralOffset = wave * tailFactor * s * .58
+        const sliceX = i * sliceW - headOffset
+        const sliceY = -spriteH / 2 + lateralOffset
+
+        ctx.drawImage(
+          sprite,
+          i * imgSliceW, 0, imgSliceW, sprite.naturalHeight,
+          sliceX, sliceY, sliceW + .65, spriteH
+        )
+      }
+        } else {
+      ctx.strokeStyle = night ? '#a7d7d21c' : '#e8f8d82a'; ctx.lineWidth = .65
+      for (const side of [-1, 1]) {
+        ctx.beginPath(); ctx.moveTo(-s * .55, side * s * .22)
+        ctx.quadraticCurveTo(-s * 1.15, side * s * (.35 + wag * .04), -s * 1.55, side * s * .2); ctx.stroke()
+      }
+      ctx.save(); ctx.translate(-s * .69, 0); ctx.rotate(wag * .22)
+      ctx.fillStyle = palette[1] + 'aa'
+      ctx.beginPath(); ctx.moveTo(2, 0); ctx.quadraticCurveTo(-s * .4, -s * .12, -s * (.6 + stage(f.level) * .015), -s * .38)
+      ctx.quadraticCurveTo(-s * .48, 0, -s * .64, s * .38); ctx.quadraticCurveTo(-s * .22, s * .14, 2, 0); ctx.fill(); ctx.restore()
+      for (const side of [-1, 1]) {
+        ctx.save(); ctx.translate(s * .18, side * s * .17); ctx.rotate(side * (.2 + wag * .12))
+        ellipse(ctx, -s * .06, side * s * .17, s * .3, s * (.13 + stage(f.level) * .009), palette[1] + '88', side * .8); ctx.restore()
+      }
+      ctx.beginPath(); ctx.moveTo(s, 0); ctx.bezierCurveTo(s * .77, -s * .42, -s * .3, -s * .36, -s * .78, 0)
+      ctx.bezierCurveTo(-s * .3, s * .36, s * .77, s * .42, s, 0); ctx.closePath()
+      const body = ctx.createLinearGradient(0, -s * .35, 0, s * .35)
+      body.addColorStop(0, palette[1]); body.addColorStop(.45, palette[1]); body.addColorStop(1, f.pattern === 'ogon' ? '#957131' : '#809d93')
+      ctx.fillStyle = body; ctx.fill(); ctx.strokeStyle = '#fffbe04a'; ctx.lineWidth = .7; ctx.stroke()
+      ctx.save(); ctx.clip()
+      for (let i = 0; i < 4; i++) {
+        ellipse(ctx, s * (.65 - i * .35), Math.sin(i * 7 + f.phase) * s * .12, s * .18, s * .2, palette[2], i)
+        if (f.pattern === 'sanke' || f.pattern === 'shusui') ellipse(ctx, s * (.4 - i * .27), s * .08, s * .08, s * .105, '#25383a', i)
+      }
+      ctx.restore()
+      ellipse(ctx, s * .7, -s * .14, 2, 2, '#162a29'); ellipse(ctx, s * .7, s * .14, 2, 2, '#162a29')
+      ctx.strokeStyle = '#f1eed680'; ctx.lineWidth = .8
+      for (const side of [-1, 1]) { ctx.beginPath(); ctx.moveTo(s * .9, side * s * .05); ctx.quadraticCurveTo(s * 1.12, side * s * .05, s * 1.1, side * s * .15); ctx.stroke() }
     }
-    ctx.beginPath(); ctx.moveTo(s, 0); ctx.bezierCurveTo(s * .77, -s * .42, -s * .3, -s * .36, -s * .78, 0)
-    ctx.bezierCurveTo(-s * .3, s * .36, s * .77, s * .42, s, 0); ctx.closePath()
-    const body = ctx.createLinearGradient(0, -s * .35, 0, s * .35)
-    body.addColorStop(0, palette[1]); body.addColorStop(.45, palette[1]); body.addColorStop(1, f.pattern === 'ogon' ? '#957131' : '#809d93')
-    ctx.fillStyle = body; ctx.fill(); ctx.strokeStyle = '#fffbe04a'; ctx.lineWidth = .7; ctx.stroke()
-    ctx.save(); ctx.clip()
-    for (let i = 0; i < 4; i++) {
-      ellipse(ctx, s * (.65 - i * .35), Math.sin(i * 7 + f.phase) * s * .12, s * .18, s * .2, palette[2], i)
-      if (f.pattern === 'sanke' || f.pattern === 'shusui') ellipse(ctx, s * (.4 - i * .27), s * .08, s * .08, s * .105, '#25383a', i)
-    }
-    ctx.globalCompositeOperation = 'screen'
-    const sheen = ctx.createLinearGradient(0, -s * .35, 0, s * .1)
-    sheen.addColorStop(0, '#fffbd252'); sheen.addColorStop(1, '#fffbd200')
-    ctx.fillStyle = sheen; ctx.beginPath(); ctx.ellipse(s * .05, -s * .12, s * .72, s * .18, 0, 0, Math.PI * 2); ctx.fill()
-    ctx.globalCompositeOperation = 'source-over'
-    if (stage(f.level) >= 2) {
-      ctx.strokeStyle = '#fff8d328'; ctx.lineWidth = .7
-      for (let i = 0; i < 9; i++) { ctx.beginPath(); ctx.arc(s * (.6 - i * .14), 0, s * .18, -.9, .9); ctx.stroke() }
-    }
-    ctx.restore()
-    ellipse(ctx, s * .7, -s * .14, 2, 2, '#162a29'); ellipse(ctx, s * .7, s * .14, 2, 2, '#162a29')
-    ctx.strokeStyle = '#f1eed680'; ctx.lineWidth = .8
-    for (const side of [-1, 1]) { ctx.beginPath(); ctx.moveTo(s * .9, side * s * .05); ctx.quadraticCurveTo(s * 1.12, side * s * .05, s * 1.1, side * s * .15); ctx.stroke() }
     if (!zen && f.id === selected) { ctx.strokeStyle = '#e6ce8a90'; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(0, 0, s * 1.32, s * .62, 0, 0, Math.PI * 2); ctx.stroke() }
     ctx.restore()
   }
@@ -716,7 +750,12 @@
       const distanceFromWater = waterDistance(f.x, f.y)
       if (distanceFromWater > 1) {
           const edge = keepInWater(f.x, f.y)
-          f.x = edge.x; f.y = edge.y
+          if (edge && typeof edge.x === 'number' && typeof edge.y === 'number' && waterDistance(edge.x, edge.y) <= 1) {
+            f.x = edge.x; f.y = edge.y
+          } else {
+            f.x = sceneFrame.x + sceneFrame.width * .5 + random(-40, 40)
+            f.y = sceneFrame.y + sceneFrame.height * .5 + random(-40, 40)
+          }
           f.target = null
       }
       const pellet = food.indexOf(target)

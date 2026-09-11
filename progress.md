@@ -1321,3 +1321,77 @@ Remove-Item -LiteralPath 'src/conversation-replay-host-injector.ts','src/convers
 - tests/koi-pond-visual.spec.mjs：新增时段选择器下拉选项配色断言。
 - progress.md：追加本轮实现与验证记录。
 - 回滚：按本轮 diff 移除 #light option / #light option:checked 两条样式和对应 koi-pond-visual 断言，再重新执行上述 Vitest 与 git diff --check。
+
+## 2026-09-11 - Task: 使用 GPT Image Proxy 精灵图美术素材替换纯 Canvas 绘制锦鲤
+### What was done
+- 依据参考设计图仙侠国风、水晶半透长尾鳍、鱼鳞光泽与金线勾勒的美术风格，通过 GPT Image Proxy / gpt-image-2 全套生成 4 大锦鲤品种（红白、大正三色、黄金、秋翠）及 3 阶生长形态（幼苗期 fry、成长期 juvenile、成熟舒展期 adult）共 12 组高清精灵图，并经 rembg 透明通道抠图后导出为紧凑高质量 WebP 资产。
+- 在 assets/koi-pond.html 增加 12 款锦鲤生长形态精灵图预加载标签，保障水池加载与鱼体渲染即时无缝。
+- 在 assets/koi-pond.js 中建立 fishSprites 资源映射与异步解码，重构 koi() 绘制函数：优先采用高质量精灵图及根据游动相位 wag 进行平滑摆动绘制，保留下潜投影、选中金色光环及素材加载期间优雅回退几何轮廓。
+- 在 tests/koi-pond-visual.spec.mjs 补充 12 款精灵图素材格式、RIFF/WEBP 标识、体积上限（<120KB）及预加载标签引用的断言验证。
+### Testing
+- pnpm run typecheck：TypeScript 全局类型检查通过（0 errors）。
+- pnpm test tests/koi-pond-visual.spec.mjs：5 项测试全部通过，含新增的全品种/多形态精灵图格式与体积断言。
+- pnpm test：全部 41 个测试套件、279 项单元与边界测试 100% 通过。
+- git diff --check：无新增空白、缩进或换行格式异常。
+- 遵循不擅自打包或终止进程原则，未启动打包或重启主壳，水池内动态游动、折射波光与投喂互动待用户在壳内实际观察。
+### Notes
+- assets/koi-pond.html：增加 12 张 koi-fish-*-*.webp 预加载链接。
+- assets/koi-pond.js：增加 fishSprites 资源表，重构 koi() 鱼体精灵图渲染与摆鳍动画。
+- assets/koi-fish-kohaku-fry.webp：红白幼苗期精灵图（50.4KB）。
+- assets/koi-fish-kohaku-juvenile.webp：红白成长期精灵图（47.9KB）。
+- assets/koi-fish-kohaku-adult.webp：红白成熟舒展期精灵图（87.9KB）。
+- assets/koi-fish-sanke-fry.webp：大正三色幼苗期精灵图（66.4KB）。
+- assets/koi-fish-sanke-juvenile.webp：大正三色成长期精灵图（47.5KB）。
+- assets/koi-fish-sanke-adult.webp：大正三色成熟舒展期精灵图（58.7KB）。
+- assets/koi-fish-ogon-fry.webp：黄金幼苗期精灵图（46.9KB）。
+- assets/koi-fish-ogon-juvenile.webp：黄金成长期精灵图（58.6KB）。
+- assets/koi-fish-ogon-adult.webp：黄金成熟舒展期精灵图（41.8KB）。
+- assets/koi-fish-shusui-fry.webp：秋翠幼苗期精灵图（50.2KB）。
+- assets/koi-fish-shusui-juvenile.webp：秋翠成长期精灵图（46.6KB）。
+- assets/koi-fish-shusui-adult.webp：秋翠成熟舒展期精灵图（69.3KB）。
+- tests/koi-pond-visual.spec.mjs：新增全品种、多生长形态精灵图资产有效性与预加载测试。
+- progress.md：追加本轮开发与验证闭环记录。
+- 回滚方式：删除 assets/koi-fish-*.webp 12 张图片文件；按 git diff 恢复 assets/koi-pond.html、assets/koi-pond.js 与 tests/koi-pond-visual.spec.mjs。
+
+## 2026-09-11 - Task: 修复鱼塘动画中 keepInWater 坐标解构偶发 undefined 异常
+### What was done
+- 定位并排查 animate 渲染帧循环中由于锦鲤瞬时越界调用 keepInWater 时可能因多边形退化偶发返回 undefined 导致的 `Cannot read properties of undefined (reading 'x')` 报错。
+- 为 keepInWater 补充边界兜底保障：当多边形轮廓空缺或分母为 0 时安全兜底到首个有效岸线点或入参坐标点。
+- 在 animate 帧循环调用处增强防御性解构保护：仅在 `edge && typeof edge.x === 'number'` 时赋值坐标，杜绝运行时异常中断水池渲染循环。
+### Testing
+- pnpm run typecheck：TypeScript 静态类型检查 0 错误。
+- pnpm test：全量 41 个测试文件、279 项测试全部 100% 通过。
+- git diff --check：无新增代码格式与换行规范错误。
+### Notes
+- assets/koi-pond.js：keepInWater 函数兜底防护与 animate 坐标赋值安全守卫。
+- progress.md：追加本轮错误定位与修复验证记录。
+- 回滚方式：按 git diff 撤销 assets/koi-pond.js 中对应改动。
+
+## 2026-09-11 - Task: 修复鱼塘初始化时锦鲤坐标卡在左上角荷叶凹槽
+### What was done
+- 定位并排查由于窗口首帧或异步状态返回时 width/height 尚未由 makeBackdrop() 初始化完成，导致 fish 初始化坐标计算出 (0, 0)，被 clamp(40, 40) 和 keepInWater 吸附在左上角 (96, 208) 的荷叶死角无法脱出的问题。
+- 在 assets/koi-pond.js 中的 update(next) 补充窗口有效宽高降级回退（width || innerWidth || 1280），并将初始投放点优化至水池中部安全开阔水域（35% ~ 60% 跨度）。
+- 在 animate 帧循环越界检测时增强安全回退：当岸线吸附点仍判定在水外死角时，自动安全回退至中心开阔水域，避免多鱼重叠卡死在凹槽边缘。
+### Testing
+- 运行真实 Electron 冒烟测试脚本 node scripts/smoke-koi-pond.mjs，生成并核验 pond-day.png 截图，确认 4 条锦鲤自然分散在水池中央与右侧开阔水域并正常巡游。
+- pnpm run typecheck：TypeScript 静态类型检查通过（0 errors）。
+- pnpm test：全部 41 个测试套件、279 项测试全部 100% 通过。
+- git diff --check：无语法和换行格式错误。
+### Notes
+- assets/koi-pond.js：update() 初始安全坐标计算与 animate 越界脱困保护。
+- progress.md：追加本轮故障排查与修复闭环记录。
+- 回滚方式：按 git diff 撤销 assets/koi-pond.js 中对应更新。
+
+## 2026-09-11 - Task: 实现鱼体多段柔性脊柱拟合，让尾鳍柔软摆动
+### What was done
+- 分析发现原本的整体旋转 drawImage 方案导致整条鱼刚体摇摆，缺乏真实鱼类“鱼头稳重、躯干传导、长鳍波浪式滞后摆动”的柔韧曲线感。
+- 在 assets/koi-pond.js 中重构 koi() 渲染器：将锦鲤贴图沿鱼身脊柱轴向划分为 14 个连续微切片（Slice Mesh），鱼头前段保持 0 位移稳定，鱼身中段至尾鳍采用递增指数权重与正弦相位滞后波（wave = sin(time*5 - (1-u)*2.6)），实现从鱼脊向尾尖逐级传递的波浪式摆鳍与柔韧躯干游姿。
+### Testing
+- 运行真实 Electron 冒烟测试脚本 node scripts/smoke-koi-pond.mjs，生成并核验实测截图 pond-day.png，鱼体长尾呈现流畅的 S 型仙侠弧度。
+- pnpm run typecheck：TypeScript 全局静态检查 0 错误。
+- pnpm test：全量 41 个测试套件、279 项测试全部 100% 通过。
+- git diff --check：无新增代码格式与换行问题。
+### Notes
+- assets/koi-pond.js：koi() 鱼体 14 段连续切片脊柱形变渲染器实现。
+- progress.md：追加本轮优化与验证记录。
+- 回滚方式：按 git diff 撤销 assets/koi-pond.js 中 koi() 切片渲染实现。
