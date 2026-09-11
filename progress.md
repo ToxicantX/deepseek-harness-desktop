@@ -1395,3 +1395,18 @@ Remove-Item -LiteralPath 'src/conversation-replay-host-injector.ts','src/convers
 - assets/koi-pond.js：koi() 鱼体 14 段连续切片脊柱形变渲染器实现。
 - progress.md：追加本轮优化与验证记录。
 - 回滚方式：按 git diff 撤销 assets/koi-pond.js 中 koi() 切片渲染实现。
+
+## 2026-09-11 - Task: 修复锦鲤触碰水岸边界闪现瞬移至屏幕中央
+### What was done
+- 定位并排查由于上一轮防御性兜底中使用了 `waterDistance(edge.x, edge.y) <= 1`，而在射线法离散多边形边界处，岸线垂足 `edge` 恰好落在多边形外侧微量（distance 为 2），导致条件分支被误判为“处于死角”，直接触发了安全瞬移代码 `f.x = sceneFrame.x + sceneFrame.width * .5`，表象为锦鲤游到岸边时突然瞬移至池塘正中央。
+- 彻底移除任何瞬移/跳变重置逻辑，改为物理向心自然回弹：当锦鲤游动触碰岸线时，由 `keepInWater` 吸附到最近边界后，计算指向池塘中心开阔区域的向心角度 `inwardAngle`，将鱼头航向平滑折向内侧（`f.angle = inwardAngle + random(-.3, .3)`），锦鲤自然转身往池塘中心游回，动画平滑连续无突变。
+### Testing
+- 模拟 360 度任意方向碰撞测试，验证岸线向心回弹平滑无瞬移。
+- 运行真实 Electron 冒烟测试脚本 node scripts/smoke-koi-pond.mjs 通过。
+- pnpm run typecheck：TypeScript 0 错误。
+- pnpm test：全量 41 个套件、279 项测试全部 100% 通过。
+- git diff --check：无语法与换行格式异常。
+### Notes
+- assets/koi-pond.js：移除岸边闪现瞬移逻辑，改为平滑向心反射转向机制。
+- progress.md：追加本轮缺陷排查与修复记录。
+- 回滚方式：按 git diff 撤销 assets/koi-pond.js 中对应改动。

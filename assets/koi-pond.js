@@ -750,12 +750,13 @@
       const distanceFromWater = waterDistance(f.x, f.y)
       if (distanceFromWater > 1) {
           const edge = keepInWater(f.x, f.y)
-          if (edge && typeof edge.x === 'number' && typeof edge.y === 'number' && waterDistance(edge.x, edge.y) <= 1) {
+          if (edge && typeof edge.x === 'number' && typeof edge.y === 'number') {
             f.x = edge.x; f.y = edge.y
-          } else {
-            f.x = sceneFrame.x + sceneFrame.width * .5 + random(-40, 40)
-            f.y = sceneFrame.y + sceneFrame.height * .5 + random(-40, 40)
           }
+          // Turn fish around smoothly towards pond center when grazing boundary
+          const cx = sceneFrame.x + sceneFrame.width * .53, cy = sceneFrame.y + sceneFrame.height * .48
+          const inwardAngle = Math.atan2(cy - f.y, cx - f.x)
+          f.angle = inwardAngle + random(-.3, .3)
           f.target = null
       }
       const pellet = food.indexOf(target)
