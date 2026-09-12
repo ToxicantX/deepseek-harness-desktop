@@ -90,6 +90,14 @@ describe('runtime startup UI contract', () => {
     expect(main).not.toContain('打开插件管理终端')
   })
 
+  it('exposes a manual model catalog connection repair action in Help', () => {
+    expect(main).toContain('function repairModelCatalogConnection()')
+    expect(main).toContain('modelCatalogRecoveryAttempts = 0')
+    expect(main).toContain('mainWindow.webContents.reload()')
+    expect(main).toContain("label: '修复模型目录连接'")
+    expect(main).toContain('click: repairModelCatalogConnection')
+  })
+
   it('authorizes both exact runtime-page windows and no unrelated utility sender', () => {
     const guard = main.slice(main.indexOf('function runtimeClient'), main.indexOf('function pluginService'))
     expect(guard).toContain('event.sender === mainWindow.webContents')

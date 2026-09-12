@@ -365,6 +365,12 @@ function showMainWindow(): void {
   mainWindow.focus()
 }
 
+function repairModelCatalogConnection(): void {
+  if (mainWindow === undefined || mainWindow.isDestroyed()) return
+  modelCatalogRecoveryAttempts = 0
+  mainWindow.webContents.reload()
+}
+
 function createTray(): void {
   tray = new Tray(nativeImage.createFromPath(join(app.getAppPath(), 'assets', 'icon.png')))
   tray.setToolTip('DeepSeek Harness')
@@ -794,6 +800,7 @@ function installMenu(): void {
     {
       label: '帮助',
       submenu: [
+        { label: '修复模型目录连接', click: repairModelCatalogConnection },
         { label: '修复历史会话', click: () => { void openSessionRepair() } },
         { label: '用量监控', click: () => { void openUsageMonitor() } },
         { type: 'separator' },
