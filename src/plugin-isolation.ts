@@ -29,10 +29,13 @@ export function thirdParty(name: string): boolean {
 export function classifyPluginFailure(diagnostics: string): string[] {
   const clean = diagnostics.replace(/\u001b\[[0-?]*[ -/]*[@-~]/gu, '')
   const names = new Set<string>()
-  for (const match of clean.matchAll(/failed to import loader entry [\w-]+ \(([^)]+)\): ([^\n]+)/gu)) {
-    const name = match[1]!
-    const reason = match[2]!
-    if (thirdParty(name) && /(?:client-modules: require\("[^"\n]+"\) missed the module table|Cannot find (?:package|module) ['"]|does not provide an export named)/u.test(reason)) names.add(name)
+  for (const match of clean.matchAll(/failed to (import|apply) loader entry [\w-]+ \(([^)]+)\): ([^\n]+)/gu)) {
+    const name = match[2]!
+    const reason = match[3]!.trim()
+    const incompatible = match[1] === 'import'
+      ? /(?:client-modules: require\("[^"\n]+"\) missed the module table|Cannot find (?:package|module) ['"]|does not provide an export named)/u.test(reason)
+      : /^cannot get property "[\w$]+" without inject$/u.test(reason)
+    if (thirdParty(name) && incompatible) names.add(name)
   }
   return [...names]
 }

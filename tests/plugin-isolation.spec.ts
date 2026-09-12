@@ -2,6 +2,7 @@ import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
+import { parse } from 'yaml'
 import { PluginIsolation, classifyPluginFailure, isolationTargets } from '../src/plugin-isolation.ts'
 import type { InstalledRuntime } from '../src/runtime-store.ts'
 
@@ -23,6 +24,35 @@ describe('plugin isolation', () => {
     expect(() => isolationTargets([{ id: 'same', name: 'third-party' }, { id: 'same', name: 'core' }], ['third-party'])).toThrow(/ambiguous/)
     expect(() => isolationTargets([{ id: 'one', name: 'third-party', disabled: true }], ['third-party'], true)).toThrow(/用户配置/)
     expect(() => isolationTargets([{ id: 'outer', group: true, disabled: true, config: rows }], ['third-party'], true)).toThrow(/用户配置/)
+  })
+
+  it('attributes exact undeclared service access to the applying third-party plugin', () => {
+    const diagnostic = 'failed to apply loader entry telegram-channel (dsh-channel-telegram): cannot get property "webServer" without inject'
+    expect(classifyPluginFailure(diagnostic + '\n' + diagnostic)).toEqual(['dsh-channel-telegram'])
+    expect(classifyPluginFailure('failed to apply loader entry core (@deepseek-ai/core): cannot get property "webServer" without inject')).toEqual([])
+    expect(classifyPluginFailure('failed to apply loader entry channel (dsh-channel-telegram): fetch failed ECONNRESET')).toEqual([])
+    expect(classifyPluginFailure('failed to apply loader entry channel (dsh-channel-telegram): 401 Unauthorized')).toEqual([])
+    expect(classifyPluginFailure('failed to apply loader entry channel (dsh-channel-telegram): unexpected error')).toEqual([])
+    expect(classifyPluginFailure('cannot get property "webServer" without inject')).toEqual([])
+  })
+
+  it('isolates only the declared plugin causing undeclared service access', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-isolation-service-'))
+    const service = new PluginIsolation({ home: root, directory: root })
+    vi.spyOn(service, 'packages').mockResolvedValue(['dsh-channel-telegram', 'other-plugin'])
+    vi.spyOn(service, 'composition').mockResolvedValue([
+      { id: 'telegram-channel', name: 'dsh-channel-telegram' },
+      { id: 'other', name: 'other-plugin' },
+    ])
+    const runtime = { manifest: { dshVersion: '0.1.5-rc.2' } } as InstalledRuntime
+    const diagnostic = 'failed to apply loader entry telegram-channel (dsh-channel-telegram): cannot get property "webServer" without inject'
+
+    expect(await service.quarantine(runtime, {}, diagnostic)).toBe(true)
+    expect(await service.list()).toEqual([{ name: 'dsh-channel-telegram', reason: 'import-incompatible' }])
+    expect(await service.quarantine(runtime, {}, diagnostic)).toBe(false)
+    const overlay = await service.prepare(runtime, {})
+    expect(parse(await readFile(overlay!.path, 'utf8'))).toEqual([{ id: 'telegram-channel', name: 'dsh-channel-telegram', disabled: true }])
+    await overlay!.dispose()
   })
 
   it('persists isolation separately and keeps it until a successful validation', async () => {
