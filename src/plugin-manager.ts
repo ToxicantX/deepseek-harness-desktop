@@ -1,8 +1,9 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { readFile, rm } from 'node:fs/promises'
+import { readFile, rm, writeFile } from 'node:fs/promises'
 import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path'
 import { gt, valid } from 'semver'
+import { parse, stringify } from 'yaml'
 import type { InstalledRuntime } from './runtime-store.ts'
 
 const MAX_PACKAGE_NAME = 214
@@ -14,6 +15,8 @@ const OPERATION_TIMEOUT_MS = 15 * 60_000
 const UPDATE_CHECK_TIMEOUT_MS = 8_000
 const MAX_UPDATE_BYTES = 256 * 1024
 const VIRTUAL_STORE_MISMATCH = 'ERR_PNPM_VIRTUAL_STORE_DIR_MAX_LENGTH_DIFF'
+const EPERM_SYMLINK = /EPERM[^\n]*symlink/iu
+const ALLOW_BUILDS_HINT = /allowBuilds/iu
 
 export type PluginAction = 'add' | 'update' | 'remove'
 
@@ -143,6 +146,32 @@ export function validatePackageSpec(value: unknown): string {
   const github = /^(?:github:|(?:git\+)?https:\/\/github\.com\/)[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\.git)?(?:#[A-Za-z0-9._\/-]+)?$/u
   if (!registry.test(spec) && !github.test(spec)) throw new Error('spec must be an npm package or GitHub HTTPS reference')
   return spec
+}
+
+export function packageNameFromSpec(spec: string): string | undefined {
+  const source = spec.split('#', 1)[0] ?? spec
+  if (!source.startsWith('github:') && !source.startsWith('https://github.com/')) return undefined
+  const repository = source.replace(/^github:/u, '').replace(/^https:\/\/github\.com\//u, '')
+  const name = repository.split('/').pop()?.replace(/\.git$/u, '')
+  try { return name === undefined ? undefined : validatePackageName(name) } catch { return undefined }
+}
+
+export function updateAllowBuildsText(text: string, packageName: string): string {
+  const value = parse(text) as Record<string, unknown> | null
+  const config = value !== null && typeof value === 'object' && !Array.isArray(value) ? value : {}
+  const allowBuilds = config.allowBuilds !== null && typeof config.allowBuilds === 'object' && !Array.isArray(config.allowBuilds)
+    ? config.allowBuilds as Record<string, unknown>
+    : {}
+  allowBuilds[packageName] = true
+  config.allowBuilds = allowBuilds
+  return stringify(config)
+}
+
+export function ensureNpmrcText(text: string): string {
+  const lines = text.split(/\r?\n/u).filter(line => line.length > 0)
+  if (!lines.some(line => /^\s*node-linker\s*=/iu.test(line))) lines.push('node-linker=hoisted')
+  if (!lines.some(line => /^\s*package-import-method\s*=/iu.test(line))) lines.push('package-import-method=copy')
+  return lines.join('\n') + '\n'
 }
 
 function parseStartInput(value: unknown): PluginStartInput {
@@ -290,6 +319,7 @@ export class PluginManager {
   private readonly runProcess: PluginProcessRunner
   private readonly readText: (filename: string) => Promise<string>
   private readonly removeFile: (filename: string) => Promise<void>
+  private readonly removeDirectory: (directory: string) => Promise<void>
   private readonly onOperationFinished: (status: PluginOperationStatus) => void
   private readonly operations = new Map<string, OperationRecord>()
   private activeOperationId: string | undefined
@@ -304,6 +334,7 @@ export class PluginManager {
     this.runProcess = options.runProcess ?? defaultRunProcess
     this.readText = options.readText ?? (async filename => readFile(filename, 'utf8'))
     this.removeFile = options.removeFile ?? (async filename => rm(filename, { force: true }))
+    this.removeDirectory = async directory => rm(directory, { recursive: true, force: true })
     this.onOperationFinished = options.onOperationFinished ?? (() => {})
   }
 
@@ -395,11 +426,10 @@ export class PluginManager {
             && !repairAttempted
             && !this.disposed
             && this.activeOperationId === operationId
-            && record.output.includes(VIRTUAL_STORE_MISMATCH)) {
+            && (record.output.includes(VIRTUAL_STORE_MISMATCH) || EPERM_SYMLINK.test(record.output) || ALLOW_BUILDS_HINT.test(record.output))) {
             repairAttempted = true
-            record.output = appendOutput(record.output, '\n检测到旧版 pnpm 元数据不兼容，正在重建后重试...\n')
-            const metadata = join(this.home, 'profiles', 'web', 'node_modules', '.modules.yaml')
-            void this.removeFile(metadata).then(
+            record.output = appendOutput(record.output, '\n正在修复 pnpm Profile 配置并重建插件目录后重试...\n')
+            void this.repairPackageManager(input, record.output).then(
               () => {
                 if (this.disposed || this.activeOperationId !== operationId) return
                 runAttempt()
@@ -528,6 +558,30 @@ export class PluginManager {
       env: { ...env, DSH_HOME: this.home, PATH: path },
       shell: false,
       windowsHide: true,
+    }
+  }
+
+  private async repairPackageManager(input: PluginStartInput, output: string): Promise<void> {
+    const profile = join(this.home, 'profiles', 'web')
+    const workspace = join(profile, 'pnpm-workspace.yaml')
+    const npmrc = join(profile, '.npmrc')
+    let workspaceText = ''
+    try { workspaceText = await readFile(workspace, 'utf8') } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+    if (input.action === 'add' && (ALLOW_BUILDS_HINT.test(output) || EPERM_SYMLINK.test(output))) {
+      const packageName = packageNameFromSpec(input.spec)
+      if (packageName !== undefined) workspaceText = updateAllowBuildsText(workspaceText, packageName)
+    }
+    if (workspaceText.length > 0 || input.action === 'add') await writeFile(workspace, workspaceText.length > 0 ? workspaceText : 'packages:\n  - .\n')
+    let npmrcText = ''
+    try { npmrcText = await readFile(npmrc, 'utf8') } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+    await writeFile(npmrc, ensureNpmrcText(npmrcText))
+    if (EPERM_SYMLINK.test(output) || output.includes(VIRTUAL_STORE_MISMATCH)) {
+      await this.removeDirectory(join(profile, 'node_modules'))
+      await this.removeFile(join(profile, 'pnpm-lock.yaml.tmp'))
     }
   }
 
