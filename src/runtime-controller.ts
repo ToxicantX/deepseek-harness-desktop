@@ -245,6 +245,13 @@ export class RuntimeController {
       this.state = await this.store.setPreference(preference)
       await this.stopBackend()
       await this.boot()
+      if (preference.mode === 'pinned' && this.state.currentVersion !== preference.version) {
+        const message = this.state.currentVersion === undefined
+          ? `DSH ${preference.version} 未能启动`
+          : `DSH ${preference.version} 启动失败，已继续使用 DSH ${this.state.currentVersion}`
+        if (this.phase !== 'error') this.fail(message)
+        throw new Error(this.error ?? message)
+      }
     })
   }
 

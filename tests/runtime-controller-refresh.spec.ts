@@ -122,6 +122,40 @@ describe('RuntimeController catalog refresh', () => {
     expect(controller.snapshot().currentVersion).toBe(newRelease.dshVersion)
   })
 
+  it('rejects a pinned switch when startup falls back to the previous runtime', async () => {
+    const oldRelease = manifest('0.1.0-rc.7')
+    const newRelease = manifest('0.1.1-rc.2')
+    let preference: RuntimePreference = { mode: 'pinned', version: oldRelease.dshVersion }
+    const store = {
+      loadCatalog: vi.fn(async () => ({ catalog: catalog(newRelease, oldRelease), cached: false })),
+      readState: vi.fn(async () => ({ schemaVersion: 1, preference, currentVersion: oldRelease.dshVersion })),
+      setPreference: vi.fn(async (next: RuntimePreference) => {
+        preference = next
+        return { schemaVersion: 1, preference, currentVersion: oldRelease.dshVersion }
+      }),
+      installed: vi.fn(async (version: string) => version === oldRelease.dshVersion ? installed(oldRelease) : undefined),
+      install: vi.fn(async () => { throw new Error('source build failed') }),
+      promote: vi.fn(async (version: string) => ({ schemaVersion: 1, preference, currentVersion: version })),
+    }
+    mocks.startBackend.mockResolvedValue({
+      url: new URL('http://127.0.0.1:43123/'),
+      done: new Promise(() => {}),
+      stop: vi.fn(async () => ({ exitCode: 0, signal: null, diagnostics: '' })),
+    })
+    const controller = createController(store)
+
+    await controller.refreshCatalog()
+
+    await expect(controller.setPreference({ mode: 'pinned', version: newRelease.dshVersion }))
+      .rejects.toThrow(`DSH ${newRelease.dshVersion} 启动失败，已继续使用 DSH ${oldRelease.dshVersion}`)
+
+    expect(controller.snapshot()).toMatchObject({
+      phase: 'error',
+      currentVersion: oldRelease.dshVersion,
+      error: `DSH ${newRelease.dshVersion} 启动失败，已继续使用 DSH ${oldRelease.dshVersion}`,
+    })
+  })
+
   it('publishes source-build stages and cleans the busy state after failure', async () => {
     const release = manifest('0.1.1-rc.2')
     let preference: RuntimePreference = { mode: 'latest-compatible' }
@@ -139,7 +173,8 @@ describe('RuntimeController catalog refresh', () => {
     const controller = createController(store, view => { views.push(view) })
 
     await controller.refreshCatalog()
-    await controller.setPreference({ mode: 'pinned', version: release.dshVersion })
+    await expect(controller.setPreference({ mode: 'pinned', version: release.dshVersion }))
+      .rejects.toThrow('source build failed')
 
     expect(views.map(view => view.message)).toEqual(expect.arrayContaining([
       '正在克隆 DSH 0.1.1-rc.2 源码',
@@ -165,7 +200,8 @@ describe('RuntimeController catalog refresh', () => {
     const controller = createController(store)
 
     await controller.refreshCatalog()
-    await controller.setPreference({ mode: 'pinned', version: '9.9.9' })
+    await expect(controller.setPreference({ mode: 'pinned', version: '9.9.9' }))
+      .rejects.toThrow('unavailable or incompatible')
 
     expect(install).not.toHaveBeenCalled()
     expect(controller.snapshot().phase).toBe('error')
