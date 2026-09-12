@@ -49,7 +49,7 @@ export type PluginStartInput =
 
 export interface PluginOperationStatus {
   operationId: string
-  state: 'running' | 'succeeded' | 'failed'
+  state: 'preparing' | 'running' | 'repairing' | 'succeeded' | 'failed' | 'rolled-back'
   action: PluginAction
   packageName?: string
   output: string
@@ -90,6 +90,16 @@ export interface PluginManagerOptions {
 interface OperationRecord extends PluginOperationStatus {
   child?: PluginProcess
   timer?: NodeJS.Timeout
+  backup?: ProfileBackup
+}
+
+interface ProfileBackupEntry {
+  path: string
+  contents?: Buffer
+}
+
+interface ProfileBackup {
+  entries: ProfileBackupEntry[]
 }
 
 interface ProcessResult {
@@ -378,7 +388,7 @@ export class PluginManager {
     const args = ['plugin', '--profile', 'web', input.action, argument]
     const record: OperationRecord = {
       operationId,
-      state: 'running',
+      state: 'preparing',
       action: input.action,
       ...(input.action === 'add' ? {} : { packageName: input.packageName }),
       output: '',
@@ -388,12 +398,11 @@ export class PluginManager {
     this.trimOperations()
     let settled = false
     let repairAttempted = false
-    const finish = (state: 'succeeded' | 'failed', error?: string): void => {
-      if (settled) return
-      settled = true
+    const finalize = (state: 'succeeded' | 'failed' | 'rolled-back', error?: string): void => {
       if (record.timer !== undefined) clearTimeout(record.timer)
       delete record.timer
       delete record.child
+      delete record.backup
       record.state = state
       if (state === 'succeeded') this.pendingRestartOperationId = operationId
       if (error === undefined) delete record.error
@@ -403,18 +412,37 @@ export class PluginManager {
         try { this.onOperationFinished(this.status(operationId)) } catch {}
       }
     }
+    const finish = (state: 'succeeded' | 'failed' | 'rolled-back', error?: string): void => {
+      if (settled) return
+      settled = true
+      finalize(state, error)
+    }
+    const fail = (error: string): void => {
+      if (settled) return
+      settled = true
+      if (record.timer !== undefined) clearTimeout(record.timer)
+      delete record.timer
+      delete record.child
+      record.state = 'repairing'
+      record.error = error
+      void this.restoreProfile(record.backup).then(
+        () => finalize('rolled-back', error),
+        (restoreError: unknown) => finalize('failed', error + '\n回滚失败：' + (restoreError instanceof Error ? restoreError.message : String(restoreError))),
+      )
+    }
     const runAttempt = (): void => {
       if (settled) return
       if (this.disposed) {
-        finish('failed', 'plugin manager is disposed')
+        fail('plugin manager is disposed')
         return
       }
       try {
         const child = this.spawn(runtime, args)
+        record.state = 'running'
         record.child = child
         child.stdout.on('data', chunk => { record.output = appendOutput(record.output, chunk) })
         child.stderr.on('data', chunk => { record.output = appendOutput(record.output, chunk) })
-        child.once('error', error => { finish('failed', '无法启动插件管理进程：' + error.message) })
+        child.once('error', error => { fail('无法启动插件管理进程：' + error.message) })
         child.once('close', (code, signal) => {
           if (settled) return
           delete record.child
@@ -428,6 +456,7 @@ export class PluginManager {
             && this.activeOperationId === operationId
             && (record.output.includes(VIRTUAL_STORE_MISMATCH) || EPERM_SYMLINK.test(record.output) || ALLOW_BUILDS_HINT.test(record.output))) {
             repairAttempted = true
+            record.state = 'repairing'
             record.output = appendOutput(record.output, '\n正在修复 pnpm Profile 配置并重建插件目录后重试...\n')
             void this.repairPackageManager(input, record.output).then(
               () => {
@@ -436,26 +465,27 @@ export class PluginManager {
               },
               (error: unknown) => {
                 const detail = error instanceof Error ? error.message : String(error)
-                finish('failed', '无法重建旧插件目录：' + detail)
+                fail('无法重建旧插件目录：' + detail)
               },
             )
             return
           }
-          finish('failed', signal === null ? '插件操作退出码：' + String(code ?? 'unknown') : '插件操作被终止：' + signal)
+          fail(signal === null ? '插件操作退出码：' + String(code ?? 'unknown') : '插件操作被终止：' + signal)
         })
       } catch (error: unknown) {
-        finish('failed', error instanceof Error ? error.message : String(error))
+        fail(error instanceof Error ? error.message : String(error))
       }
     }
     record.timer = setTimeout(() => {
       record.child?.kill('SIGTERM')
-      finish('failed', '插件操作超时')
+      fail('插件操作超时')
     }, OPERATION_TIMEOUT_MS)
     record.timer.unref()
     try {
+      record.backup = await this.snapshotProfile()
       await prepare()
     } catch (error: unknown) {
-      finish('failed', '无法准备插件变更：' + (error instanceof Error ? error.message : String(error)))
+      fail('无法准备插件变更：' + (error instanceof Error ? error.message : String(error)))
     }
     runAttempt()
     return { operationId }
@@ -582,6 +612,29 @@ export class PluginManager {
     if (EPERM_SYMLINK.test(output) || output.includes(VIRTUAL_STORE_MISMATCH)) {
       await this.removeDirectory(join(profile, 'node_modules'))
       await this.removeFile(join(profile, 'pnpm-lock.yaml.tmp'))
+    }
+  }
+
+  private async snapshotProfile(): Promise<ProfileBackup> {
+    const profile = join(this.home, 'profiles', 'web')
+    const entries: ProfileBackupEntry[] = []
+    for (const name of ['package.json', 'pnpm-workspace.yaml', '.npmrc', 'pnpm-lock.yaml']) {
+      const path = join(profile, name)
+      try {
+        entries.push({ path, contents: await readFile(path) })
+      } catch (error: unknown) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        entries.push({ path })
+      }
+    }
+    return { entries }
+  }
+
+  private async restoreProfile(backup: ProfileBackup | undefined): Promise<void> {
+    if (backup === undefined) return
+    for (const entry of backup.entries) {
+      if (entry.contents === undefined) await this.removeFile(entry.path)
+      else await writeFile(entry.path, entry.contents)
     }
   }
 

@@ -916,7 +916,7 @@ async function startApplication(): Promise<void> {
     runtime: () => controller?.installedRuntime(),
     home,
     onOperationFinished(operation) {
-      if (operation.state !== 'failed' || controller === undefined) return
+      if ((operation.state !== 'failed' && operation.state !== 'rolled-back') || controller === undefined) return
       void controller.retry().catch(logFatalError)
     },
   })

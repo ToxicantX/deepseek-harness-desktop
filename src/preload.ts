@@ -521,7 +521,7 @@ function initializePluginManagerPage(): void {
     for (;;) {
       const value = await ipcRenderer.invoke('plugin-manager:status', operationId) as PluginOperationStatus
       showLog(value.output)
-      if (value.state !== 'running') return value
+      if (value.state !== 'preparing' && value.state !== 'running' && value.state !== 'repairing') return value
       await new Promise<void>(resolve => { setTimeout(resolve, 350) })
     }
   }
@@ -537,9 +537,10 @@ function initializePluginManagerPage(): void {
         return
       }
       showLog(current.output)
-      setStatus(current.state === 'running' ? '检测到尚未完成的插件操作，正在继续等待...' : '插件操作已完成，正在重启 Runtime...')
-      const result = current.state === 'running' ? await waitForOperation(current.operationId) : current
-      if (result.state === 'failed') throw new Error(result.error ?? '插件操作失败')
+      const pending = current.state === 'preparing' || current.state === 'running' || current.state === 'repairing'
+      setStatus(pending ? '检测到尚未完成的插件操作，正在继续等待...' : '插件操作已完成，正在重启 Runtime...')
+      const result = pending ? await waitForOperation(current.operationId) : current
+      if (result.state === 'failed' || result.state === 'rolled-back') throw new Error(result.error ?? '插件操作失败，已恢复原配置')
       await ipcRenderer.invoke('plugin-manager:restart', result.operationId)
       if (result.action === 'update' && result.packageName !== undefined) completedUpdates.add(result.packageName)
       await loadEntries()
@@ -558,7 +559,7 @@ function initializePluginManagerPage(): void {
     try {
       const started = await ipcRenderer.invoke('plugin-manager:start', input) as { operationId: string }
       const result = await waitForOperation(started.operationId)
-      if (result.state === 'failed') throw new Error(result.error ?? '插件操作失败')
+      if (result.state === 'failed' || result.state === 'rolled-back') throw new Error(result.error ?? '插件操作失败，已恢复原配置')
       setStatus(label + '完成，正在重启 Runtime...')
       await ipcRenderer.invoke('plugin-manager:restart', started.operationId)
       if (input.action === 'update') completedUpdates.add(input.packageName)

@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { mkdtemp, mkdir, readFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { PassThrough } from 'node:stream'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -68,7 +68,7 @@ describe('plugin manager pnpm recovery', () => {
     const started = await manager.start({ action: 'add', spec: 'github:ToxicantX/dsh-multi-model-orchestrator' })
     for (;;) {
       const status = manager.status(started.operationId)
-      if (status.state !== 'running') {
+      if (status.state !== 'preparing' && status.state !== 'running' && status.state !== 'repairing') {
         expect(status.state).toBe('succeeded')
         break
       }
@@ -77,5 +77,47 @@ describe('plugin manager pnpm recovery', () => {
     expect(calls).toBe(2)
     expect(await readFile(join(profile, 'pnpm-workspace.yaml'), 'utf8')).toContain('dsh-multi-model-orchestrator: true')
     expect(await readFile(join(profile, '.npmrc'), 'utf8')).toContain('package-import-method=copy')
+  })
+
+  it('rolls back Profile files when a repaired plugin operation still fails', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-plugin-manager-'))
+    const profile = join(root, 'profiles', 'web')
+    await mkdir(profile, { recursive: true })
+    const originalPackage = '{"dependencies":{"old-plugin":"1.0.0"}}\n'
+    const originalWorkspace = 'packages:\n  - .\n'
+    const originalNpmrc = 'registry=https://registry.npmjs.org/\n'
+    await writeFile(join(profile, 'package.json'), originalPackage)
+    await writeFile(join(profile, 'pnpm-workspace.yaml'), originalWorkspace)
+    await writeFile(join(profile, '.npmrc'), originalNpmrc)
+    let calls = 0
+    const manager = new PluginManager({
+      runtime: () => runtime(),
+      home: root,
+      runProcess: () => {
+        calls++
+        const child = new FakeProcess()
+        queueMicrotask(() => {
+          child.stderr.write(calls === 1 ? 'EPERM: operation not permitted, symlink x' : 'plugin install failed')
+          child.stdout.end()
+          child.stderr.end()
+          child.emit('close', 1, null)
+        })
+        return child as any
+      },
+    })
+
+    const started = await manager.start({ action: 'add', spec: 'github:ToxicantX/dsh-multi-model-orchestrator' })
+    for (;;) {
+      const status = manager.status(started.operationId)
+      if (status.state !== 'preparing' && status.state !== 'running' && status.state !== 'repairing') {
+        expect(status.state).toBe('rolled-back')
+        break
+      }
+      await new Promise(resolve => setTimeout(resolve, 5))
+    }
+    expect(calls).toBe(2)
+    expect(await readFile(join(profile, 'package.json'), 'utf8')).toBe(originalPackage)
+    expect(await readFile(join(profile, 'pnpm-workspace.yaml'), 'utf8')).toBe(originalWorkspace)
+    expect(await readFile(join(profile, '.npmrc'), 'utf8')).toBe(originalNpmrc)
   })
 })
