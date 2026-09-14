@@ -1506,3 +1506,16 @@ Remove-Item -LiteralPath 'src/conversation-replay-host-injector.ts','src/convers
 - assets/koi-pond.js：实施雨雪粒子与水纹消融的生成式预判与批处理绘制。
 - progress.md：追加本轮性能优化记录。
 - 回滚方式：按 git diff 撤销 assets/koi-pond.js 对应改动。
+
+## 2026-09-14 - Task: 发布 Desktop Shell 0.1.39
+### What was done
+- 将 Desktop Shell 发布版本从 0.1.38 升级至 0.1.39，为基于最新远端 main 的 GitHub Actions 远端构建与 Release 发布准备版本标识。
+- 本地鱼塘功能工作区改动已使用 Git stash 完整保留，未纳入本次仅包含版本号的发布提交。
+### Testing
+- `pnpm run typecheck`：通过（TypeScript 0 错误）。
+- `pnpm test`：43 个测试套件、292 项测试全部通过。
+- 远端打包由 shell-v0.1.39 标签触发 GitHub Actions 的 Windows 2025 工作流执行。
+### Notes
+- package.json：Shell 版本升级为 0.1.39。
+- progress.md：追加本次远端发布准备与验证记录。
+- 回滚方式：执行 git revert <release-prepare-commit>；如需恢复暂存的本地鱼塘改动，执行 git stash pop。
