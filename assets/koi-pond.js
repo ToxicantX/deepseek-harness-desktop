@@ -1098,15 +1098,27 @@
     const valid = Array.isArray(sessions) ? sessions.filter(item => item && typeof item.id === 'string') : []
     runningPanel.hidden = valid.length === 0
     $('running-count').textContent = String(valid.length)
-    runningList.replaceChildren(...valid.map(item => {
+    const groups = new Map()
+    for (const item of valid) {
+      const key = item.projectName || '当前项目'
+      const group = groups.get(key) || []
+      group.push(item); groups.set(key, group)
+    }
+    const rows = []
+    for (const [project, items] of groups) {
+      const heading = document.createElement('strong'); heading.className = 'running-project'; heading.textContent = project
+      rows.push(heading)
+      for (const item of items) rows.push((() => {
       const row = document.createElement('div'); row.className = 'running-item'
       const copy = document.createElement('div'); copy.className = 'running-copy'
-      const name = document.createElement('strong'); name.textContent = item.projectName || ('会话 ' + item.id.slice(0, 8))
+      const name = document.createElement('strong'); name.textContent = (item.sessionLabel || ('会话 ' + item.id.slice(0, 8))) + (item.subAgent ? ' · 子 agent' : '')
       const output = document.createElement('small'); output.textContent = item.approval ? '等待审批' : (item.output || '执行中')
       copy.append(name, output)
       const state = document.createElement('span'); state.className = item.approval ? 'running-approval' : ''; state.textContent = item.approval ? '审批' : '运行中'
       row.append(copy, state); return row
-    }))
+      })())
+    }
+    runningList.replaceChildren(...rows)
   }
   $('rename-form').onsubmit = async e => {
     e.preventDefault()

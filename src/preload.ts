@@ -64,7 +64,7 @@ window.addEventListener('message', (event) => {
   if (event.source !== window || event.origin !== window.location.origin || event.data?.type !== 'dsh/session-running') return
   const value = event.data as Record<string, unknown>
   if (typeof value.sessionId !== 'string' || typeof value.requestId !== 'string' || typeof value.running !== 'boolean') return
-  ipcRenderer.send('pond:session-running', value.sessionId, value.requestId, value.running, value.projectName, value.output, value.approval)
+  ipcRenderer.send('pond:session-running', value.sessionId, value.requestId, value.running, value.projectName, value.output, value.approval, value.sessionLabel, value.subAgent)
 })
 
 contextBridge.exposeInMainWorld('dshDesktopSkins', {

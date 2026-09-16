@@ -16,8 +16,9 @@ export function injectKoiPondDialogue(source: string): { source: string; changed
           if (running === value) return;
           running = value;
           try {
-            const projectName = this.projectName || this.workspaceName || this.sessionLabel || this.sessionId;
-            window.postMessage({ type: "dsh/session-running", sessionId, requestId, running: value, projectName, output }, window.location.origin);
+            const projectName = this.projectName || this.workspaceName || "当前项目";
+            const sessionLabel = this.sessionLabel || this.sessionName || this.sessionId;
+            window.postMessage({ type: "dsh/session-running", sessionId, requestId, running: value, projectName, sessionLabel, subAgent: this.address !== void 0, output }, window.location.origin);
           } catch {}
         };
         const stopRunning = () => {

@@ -23,8 +23,8 @@ contextBridge.exposeInMainWorld('koiPond', {
     ipcRenderer.on('pond:state', wrapped)
     return () => { ipcRenderer.removeListener('pond:state', wrapped) }
   },
-  onRunningSessions: (listener: (sessions: Array<{ id: string; startedAt: number; projectName?: string; output?: string; approval?: boolean }>) => void) => {
-    const receive = (_event: Electron.IpcRendererEvent, sessions: Array<{ id: string; startedAt: number; projectName?: string; output?: string; approval?: boolean }>) => listener(sessions)
+  onRunningSessions: (listener: (sessions: Array<{ id: string; startedAt: number; projectName?: string; sessionLabel?: string; output?: string; approval?: boolean; subAgent?: boolean }>) => void) => {
+    const receive = (_event: Electron.IpcRendererEvent, sessions: Array<{ id: string; startedAt: number; projectName?: string; sessionLabel?: string; output?: string; approval?: boolean; subAgent?: boolean }>) => listener(sessions)
     ipcRenderer.on('pond:running-sessions', receive)
     return () => { ipcRenderer.removeListener('pond:running-sessions', receive) }
   },

@@ -10,7 +10,7 @@ export class KoiPondWindow {
   private loading: Promise<void> | undefined
   private disposing = false
   private readonly store: KoiPondStore
-  private runningSessions: Array<{ id: string; startedAt: number; projectName?: string; output?: string; approval?: boolean }> = []
+  private runningSessions: Array<{ id: string; startedAt: number; projectName?: string; sessionLabel?: string; output?: string; approval?: boolean; subAgent?: boolean }> = []
 
   constructor(
     savePath: string,
@@ -191,7 +191,7 @@ export class KoiPondWindow {
     if (await this.store.recordDialogue(sessionId, requestId)) await this.publish()
   }
 
-  setRunningSessions(sessions: Array<{ id: string; startedAt: number; projectName?: string; output?: string; approval?: boolean }>): void {
+  setRunningSessions(sessions: Array<{ id: string; startedAt: number; projectName?: string; sessionLabel?: string; output?: string; approval?: boolean; subAgent?: boolean }>): void {
     this.runningSessions = sessions.map(session => ({ ...session }))
     if (this.view && !this.view.webContents.isDestroyed()) this.view.webContents.send('pond:running-sessions', this.runningSessions)
   }
