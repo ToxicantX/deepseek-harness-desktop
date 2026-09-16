@@ -1,6 +1,14 @@
 # DeepSeek Harness Desktop
 
-中文 | [English](README.en.md)
+[中文](README.md) | [English](README.en.md)
+
+[![Shell release](https://img.shields.io/github/v/release/ToxicantX/deepseek-harness-desktop?label=Shell)](https://github.com/ToxicantX/deepseek-harness-desktop/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/ToxicantX/deepseek-harness-desktop/total)](https://github.com/ToxicantX/deepseek-harness-desktop/releases)
+[![License](https://img.shields.io/github/license/ToxicantX/deepseek-harness-desktop)](https://github.com/ToxicantX/deepseek-harness-desktop/blob/main/LICENSE)
+[![Stars](https://img.shields.io/github/stars/ToxicantX/deepseek-harness-desktop)](https://github.com/ToxicantX/deepseek-harness-desktop/stargazers)
+[![Issues](https://img.shields.io/github/issues/ToxicantX/deepseek-harness-desktop)](https://github.com/ToxicantX/deepseek-harness-desktop/issues)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D24-brightgreen?logo=node.js)](https://nodejs.org/)
+[![DSH runtime](https://img.shields.io/github/v/release/deepseek-ai/deepseek-harness?include_prereleases&label=DSH)](https://github.com/deepseek-ai/deepseek-harness/releases)
 
 DeepSeek Harness Desktop 是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的 Windows 桌面客户端。它负责安装和切换 DSH Runtime，并补充版本、插件、MCP、个性化、桌面宠物、更新与故障恢复等原生桌面入口。
 
