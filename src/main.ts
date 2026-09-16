@@ -79,7 +79,7 @@ let personalizationWindow: BrowserWindow | undefined
 let updateWindow: BrowserWindow | undefined
 let usageMonitorWindow: BrowserWindow | undefined
 let usageMonitor: UsageMonitorService | undefined
-const runningSessions = new Map<string, { id: string; startedAt: number; requests: Set<string> }>()
+const runningSessions = new Map<string, { id: string; startedAt: number; requests: Set<string>; projectName?: string; output?: string; approval?: boolean }>()
 let latestUpdateProgress: ShellUpdateProgress | undefined
 let controller: RuntimeController | undefined
 let pluginManager: PluginManager | undefined
@@ -962,7 +962,7 @@ ipcMain.on('pond:dialogue', (event, sessionId: unknown, requestId: unknown) => {
   void koiPond?.recordDialogue(sessionId, requestId).catch(logFatalError)
 })
 
-ipcMain.on('pond:session-running', (event, sessionId: unknown, requestId: unknown, running: unknown) => {
+ipcMain.on('pond:session-running', (event, sessionId: unknown, requestId: unknown, running: unknown, projectName: unknown, output: unknown, approval: unknown) => {
   if (!fromTrustedDshWindow(event) || event.senderFrame !== event.sender.mainFrame
     || typeof sessionId !== 'string' || !/^[0-9A-Za-z._~-]{1,128}$/u.test(sessionId)
     || typeof requestId !== 'string' || !/^[0-9A-Za-z._~-]{1,128}$/u.test(requestId)
@@ -970,13 +970,21 @@ ipcMain.on('pond:session-running', (event, sessionId: unknown, requestId: unknow
   const current = runningSessions.get(sessionId)
   if (running) {
     const next = current ?? { id: sessionId, startedAt: Date.now(), requests: new Set<string>() }
+    if (typeof projectName === 'string' && projectName.trim().length > 0) next.projectName = projectName.trim().slice(0, 120)
+    if (typeof output === 'string' && output.trim().length > 0) next.output = output.trim().slice(0, 240)
+    if (typeof approval === 'boolean') next.approval = approval
     next.requests.add(requestId)
     runningSessions.set(sessionId, next)
   } else if (current !== undefined) {
     current.requests.delete(requestId)
     if (current.requests.size === 0) runningSessions.delete(sessionId)
   }
-  koiPond?.setRunningSessions([...runningSessions.values()].map(({ id, startedAt }) => ({ id, startedAt })))
+  koiPond?.setRunningSessions([...runningSessions.values()].map(({ id, startedAt, projectName, output, approval }) => ({
+    id, startedAt,
+    ...(projectName === undefined ? {} : { projectName }),
+    ...(output === undefined ? {} : { output }),
+    ...(approval === undefined ? {} : { approval }),
+  })))
 })
 
 ipcMain.on('pet:set-active-session', (event, value: unknown) => {

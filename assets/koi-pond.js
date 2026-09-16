@@ -1100,9 +1100,12 @@
     $('running-count').textContent = String(valid.length)
     runningList.replaceChildren(...valid.map(item => {
       const row = document.createElement('div'); row.className = 'running-item'
-      const name = document.createElement('strong'); name.textContent = '会话 ' + item.id.slice(0, 8)
-      const state = document.createElement('span'); state.textContent = '执行中'
-      row.append(name, state); return row
+      const copy = document.createElement('div'); copy.className = 'running-copy'
+      const name = document.createElement('strong'); name.textContent = item.projectName || ('会话 ' + item.id.slice(0, 8))
+      const output = document.createElement('small'); output.textContent = item.approval ? '等待审批' : (item.output || '执行中')
+      copy.append(name, output)
+      const state = document.createElement('span'); state.className = item.approval ? 'running-approval' : ''; state.textContent = item.approval ? '审批' : '运行中'
+      row.append(copy, state); return row
     }))
   }
   $('rename-form').onsubmit = async e => {

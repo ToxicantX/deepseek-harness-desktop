@@ -12,17 +12,20 @@ export function injectKoiPondDialogue(source: string): { source: string; changed
         const requestId = typeof args[3] === "string" ? args[3] : crypto.randomUUID();
         let releaseRunning;
         let running = false;
-        const notifyRunning = value => {
+        const notifyRunning = (value, output) => {
           if (running === value) return;
           running = value;
-          try { window.postMessage({ type: "dsh/session-running", sessionId, requestId, running: value }, window.location.origin); } catch {}
+          try {
+            const projectName = this.projectName || this.workspaceName || this.sessionLabel || this.sessionId;
+            window.postMessage({ type: "dsh/session-running", sessionId, requestId, running: value, projectName, output }, window.location.origin);
+          } catch {}
         };
         const stopRunning = () => {
           const release = releaseRunning;
           releaseRunning = undefined;
           if (typeof release === "function") release();
         };
-        notifyRunning(true);
+        notifyRunning(true, "正在生成输出…");
         if (typeof this.subscribe === "function" && typeof this.getSnapshot === "function") {
           let observedRunning = false;
           const syncRunning = () => {
@@ -30,7 +33,7 @@ export function injectKoiPondDialogue(source: string): { source: string; changed
             try { active = this.getSnapshot().running === true; } catch {}
             if (active) {
               observedRunning = true;
-              notifyRunning(true);
+              notifyRunning(true, "正在生成输出…");
             } else if (observedRunning) {
               notifyRunning(false);
               stopRunning();
@@ -45,12 +48,12 @@ export function injectKoiPondDialogue(source: string): { source: string; changed
         try {
           result = await this.__dshPondOriginalPrompt(...args);
         } catch (error) {
-          notifyRunning(false);
+          notifyRunning(false, "执行失败");
           stopRunning();
           throw error;
         }
         if (result?.ok !== true) {
-          notifyRunning(false);
+          notifyRunning(false, result?.error?.message || "已完成");
           stopRunning();
         } else if (releaseRunning === undefined) {
           notifyRunning(false);
