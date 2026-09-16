@@ -188,8 +188,8 @@ describe('koi dialogue observer', () => {
     session.sessionId = 'main'
     expect(await session.prompt('hello', 'queue', undefined, 'request')).toEqual({ ok: true })
     expect(postMessage).toHaveBeenCalledWith({ type: 'dsh/pond-dialogue', sessionId: 'main', requestId: 'request' }, 'https://fixture.invalid')
-    expect(postMessage).toHaveBeenCalledWith({ type: 'dsh/session-running', sessionId: 'main', requestId: 'request', running: true }, 'https://fixture.invalid')
-    expect(postMessage).toHaveBeenCalledWith({ type: 'dsh/session-running', sessionId: 'main', requestId: 'request', running: false }, 'https://fixture.invalid')
+    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'dsh/session-running', sessionId: 'main', requestId: 'request', running: true, subAgent: false }), 'https://fixture.invalid')
+    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'dsh/session-running', sessionId: 'main', requestId: 'request', running: false }), 'https://fixture.invalid')
   })
 
   it('does not count failed or child-session prompts; preserves errors and arguments', async () => {
@@ -218,10 +218,10 @@ describe('koi dialogue observer', () => {
     expect(transformed.changed).toBe(true)
     const session = new (Function(`return (${transformed.source})`)()())()
     await session.prompt('hello', 'queue', undefined, 'request')
-    expect(postMessage).toHaveBeenCalledWith({ type: 'dsh/session-running', sessionId: 'running-session', requestId: 'request', running: true }, 'https://fixture.invalid')
+    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'dsh/session-running', sessionId: 'running-session', requestId: 'request', running: true, subAgent: false }), 'https://fixture.invalid')
     session.running = false
     session.listener()
-    expect(postMessage).toHaveBeenCalledWith({ type: 'dsh/session-running', sessionId: 'running-session', requestId: 'request', running: false }, 'https://fixture.invalid')
+    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'dsh/session-running', sessionId: 'running-session', requestId: 'request', running: false }), 'https://fixture.invalid')
   })
 
   it('keeps accepted messages successful if the pond observer breaks', async () => {
