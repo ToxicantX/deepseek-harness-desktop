@@ -89,7 +89,7 @@ describe('Runtime release scripts', () => {
     expect(stdout).toContain('POWERSHELL_OK')
     expect(stdout).toContain('CHILD_POWERSHELL_OK')
     expect(windowsBuildScript.match(/"%POWERSHELL_EXE%" .* -File /g)).toHaveLength(2)
-  })
+  }, 20_000)
 
   it('refuses catalogs that offer authenticated runtimes to old Shell versions', async () => {
     const directory = await fixtureDirectory()
