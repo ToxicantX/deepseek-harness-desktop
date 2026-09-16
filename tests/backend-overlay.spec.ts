@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events'
 import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
 import { describe, expect, it, vi } from 'vitest'
-import { backendArguments, parseBackendUrl, startBackend } from '../src/backend.ts'
+import { backendArguments, desktopEnvironment, parseBackendUrl, startBackend } from '../src/backend.ts'
 
 function runtime(version = '0.1.0-rc.8') {
   return {
@@ -40,6 +40,15 @@ function forkWith(child: FakeChild, args: string[][]) {
 }
 
 describe('backend overlay integration', () => {
+  it('selects the Runtime Session replacement format without trusting inherited flags', () => {
+    for (const [version, format] of [
+      ['0.1.3-alpha.2', 'legacy'], ['0.1.5-rc.2', 'seq'], ['0.1.6-alpha.1', 'seq'],
+    ]) {
+      expect(desktopEnvironment(runtime(version), { DSH_DESKTOP_REPLAY_SURFACE_FORMAT: 'legacy' })
+        .DSH_DESKTOP_REPLAY_SURFACE_FORMAT).toBe(format)
+    }
+  })
+
   it('accepts only loopback root readiness URLs with an optional single launch token', () => {
     expect(parseBackendUrl('dsh web: http://127.0.0.1:43123/')).toBe('http://127.0.0.1:43123/')
     expect(parseBackendUrl('dsh web: http://127.0.0.1:43123/?token=test_token-123')).toBe('http://127.0.0.1:43123/?token=test_token-123')

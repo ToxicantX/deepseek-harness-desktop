@@ -263,6 +263,21 @@ function toolFixture(ctx) {
 `
 
 describe('grep compatibility', () => {
+  it('keeps upstream scoped prompts conditional when adding literal-search guidance', () => {
+    const scoped = grepFixture.replace(
+      'text: "Use the grep tool — not shell grep or rg — to search file contents. Use read on a matched file when you need surrounding context."',
+      'text: ({ scope }) => ctx.tools.get("grep", scope) === void 0 ? "" : "Use the grep tool — not shell grep or rg — to search file contents." + (ctx.tools.get("read", scope) === void 0 ? "" : " Use read on a matched file when you need surrounding context.")',
+    )
+    const result = adaptRuntimeGrep(scoped)
+    expect(result.changed).toBe(true)
+    const sections: any[] = []
+    const api = new Function(result.source + '; return toolFixture;')()
+    api({ systemPrompt: { section: (section: any) => sections.push(section) },
+      tools: { get: (name: string) => name === 'grep' ? {} : undefined } })
+    expect(sections[0].text({ scope: 'fixture' })).toContain('literal: true')
+    expect(adaptRuntimeGrep(result.source).changed).toBe(false)
+  })
+
   it('adds an explicit fixed-string route without changing regex defaults', () => {
     const result = adaptRuntimeGrep(grepFixture)
     expect(result.changed).toBe(true)
@@ -351,6 +366,19 @@ function run(content, edit) {
 `
 
 describe('duplicate edit selection', () => {
+  it('supports the upstream scoped edit prompt without losing occurrence guidance', () => {
+    const text = editToolFixture.match(/text: "(Use the edit tool[^"]*)"/u)?.[1]
+    expect(text).toBeDefined()
+    const scoped = editToolFixture.replace('text: "' + text + '"',
+      'text: ({ scope }) => ctx.tools.get("edit", scope) === void 0 ? "" : "' + text + '"')
+    const result = adaptRuntimeEditTool(scoped)
+    expect(result.changed).toBe(true)
+    const tool = new Function('const ctx = { tools: { get: () => ({}) } };' + result.source + ';return tool;')()
+    expect(tool.parameters.occurrence.description).toContain('1-based occurrence')
+    expect(tool.text({ scope: 'fixture' })).toContain('verified 1-based occurrence')
+    expect(adaptRuntimeEditTool(result.source).changed).toBe(false)
+  })
+
   it('adds a validated 1-based occurrence to the edit tool contract', () => {
     const result = adaptRuntimeEditTool(editToolFixture)
     expect(result.changed).toBe(true)

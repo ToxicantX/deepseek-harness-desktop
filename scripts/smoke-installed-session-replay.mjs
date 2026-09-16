@@ -6,12 +6,15 @@ import { readFile, mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { resolve, join, relative } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { tmpdir } from 'node:os'
+import { gte } from 'semver'
 import { runInNewContext } from 'node:vm'
 import { installDesktopReplayHostHook } from '../src/conversation-replay-host-injector.ts'
 import { injectDesktopReplayClient } from '../src/conversation-replay-client-injector.ts'
 
 assert(process.argv[2], 'Pass the installed Runtime directory explicitly')
 const runtime = resolve(process.argv[2])
+const manifest = JSON.parse(await readFile(join(runtime, 'runtime-manifest.json'), 'utf8'))
+process.env.DSH_DESKTOP_REPLAY_SURFACE_FORMAT = gte(manifest.dshVersion, '0.1.5-rc.2') ? 'seq' : 'legacy'
 const base = createRequire(join(runtime, 'app/node_modules/@deepseek-ai/dsh/package.json'))
 const load = name => import(pathToFileURL(base.resolve(name)).href)
 const controllerPath = base.resolve('@deepseek-ai/dsh-api-session-controller')
@@ -28,6 +31,7 @@ const expose = registerHooks({
   },
 })
 const { TestCommands } = await import(controllerUrl)
+assert(TestCommands.prototype.prompt.toString().includes('dshDesktopAdmitReplay'), 'Replay Host hook did not apply')
 const { TYPERT } = await import(new URL('./typert.host.js', controllerUrl))
 function findPrompt(value) {
   if (value?.method === 'prompt' && value?.namespace === 'session') return value
@@ -106,19 +110,25 @@ try {
     })
     assert.equal((await commands.prompt(request)).accepted, true)
     await agent.whenIdle()
+    const last = agent.session.snapshotEvents().at(-1)
+    if (last?.type === 'turn/end' && last.data.reason.kind === 'error') {
+      throw new Error('Runtime replay turn failed: ' + last.data.reason.error.message)
+    }
   }
   await send('first')
   await send('second')
   const target = agent.session.snapshotEvents().find(event => event.type === 'user/message' && event.data.content[0]?.text === 'second')
   await send('edited', target.seq)
-  const texts = request => request.messages.flatMap(message => message.content.filter(part => part.type === 'text').map(part => part.text))
-  assert.deepEqual(texts(adapter.requests.at(-1)), ['first', 'answer', 'edited'])
+  const conversationText = request => request.messages.filter(item => item.role !== 'system')
+    .flatMap(item => item.content.filter(part => part.type === 'text').map(part => part.text))
+  assert.deepEqual(conversationText(adapter.requests.at(-1)), ['first', 'answer', 'edited'])
   const first = agent.session.snapshotEvents().find(event => event.type === 'user/message' && event.data.content[0]?.text === 'first')
   await send('restart', first.seq)
-  assert.deepEqual(texts(adapter.requests.at(-1)), ['restart'])
+  assert.deepEqual(conversationText(adapter.requests.at(-1)), ['restart'])
   await ctx.sessions.flush(agent.session)
   const reader = await ctx.sessionPersistence.open(agent.id, 'read')
-  const stored = { events: await reader.read() }
+  const readResult = await reader.read()
+  const stored = { events: Array.isArray(readResult) ? readResult : readResult.events }
   await reader.close()
   assert.deepEqual(Session.create(agent.id, stored.events).deriveMessages(), agent.session.deriveMessages())
 

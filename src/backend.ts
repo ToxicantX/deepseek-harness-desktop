@@ -157,6 +157,8 @@ export function desktopEnvironment(runtime: InstalledRuntime, inherited: NodeJS.
     .join(delimiter)
   environment.Path = path
   environment.PATH = path
+  environment.DSH_DESKTOP_REPLAY_SURFACE_FORMAT =
+    gte(runtime.manifest.dshVersion, '0.1.5-rc.2') ? 'seq' : 'legacy'
   delete environment.ELECTRON_RUN_AS_NODE
   return environment
 }

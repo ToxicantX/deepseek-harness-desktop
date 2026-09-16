@@ -49,6 +49,25 @@ function clientClass() {
 }
 
 describe('shell-only same-session replay', () => {
+  it('uses sequence endpoints on runtimes with the new Session replacement contract', async () => {
+    const { session, agent, land } = fixture()
+    const append = session.append.bind(session)
+    let surfaceOp: any
+    session.append = ((type: any, data: any, options: any) => {
+      if (options?.surfaceOp?.op === 'replace') {
+        surfaceOp = options.surfaceOp
+        return append(type, data, { ...options, surfaceOp: {
+          op: 'replace', start: surfaceOp.startSeq, end: surfaceOp.endSeq,
+        } })
+      }
+      return append(type, data, options)
+    }) as typeof session.append
+    await admitDesktopReplay(agent, message('edited'), 1, true)
+    land()
+    expect(surfaceOp).toEqual({ op: 'replace', startSeq: 1, endSeq: 1 })
+    expect(session.deriveMessages().map(item => item.content)).toEqual([message('edited').content])
+  })
+
   it('uses existing replacement records readable by the unmodified core', async () => {
     const { session, agent, land } = fixture()
     const originalAppend = session.append

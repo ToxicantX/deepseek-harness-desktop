@@ -15,9 +15,10 @@ const root = process.argv[2]
 assert.ok(root, 'Pass the installed Runtime directory')
 const packages = join(root, 'app', 'node_modules', '@deepseek-ai', 'dsh', 'node_modules', '.pnpm')
 const entries = await readdir(packages)
+const hasLegacyCode = entries.some(entry => entry.startsWith('@deepseek-ai+dsh-code-runtime-worker-thread'))
 const modules = [
   ['dsh-pwsh-local', adaptRuntimePwsh],
-  ['dsh-code-runtime-worker-thread', adaptRuntimeCode],
+  ...(hasLegacyCode ? [['dsh-code-runtime-worker-thread', adaptRuntimeCode]] : []),
   ['dsh-tools', adaptRuntimeToolPrompt],
   ['dsh-tool-fs', adaptRuntimeFileTools],
   ['dsh-tool-fs-search', adaptRuntimeGrep],
@@ -45,6 +46,7 @@ for (const [name, adapt] of modules) {
 
 const hook = installRuntimeToolCompatibility()
 try {
+  const fileFor = name => verified.find(entry => entry.name === name)?.file
   const pwsh = await import(pathToFileURL(verified[0].file).href)
   const executable = pwsh.resolvePwshPath(undefined)
   const probe = spawnSync(executable, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', 'Write-Output DSH_TOOL_SMOKE'], {
@@ -58,7 +60,8 @@ try {
   assert.throws(() => pwsh.PwshLocalExecutor.prototype.resolve.call(executor, {
     command: 'never executed', workdir: 'E:AIproject',
   }), /分隔符/)
-  const code = await import(pathToFileURL(verified[1].file).href)
+  if (hasLegacyCode) {
+  const code = await import(pathToFileURL(fileFor('dsh-code-runtime-worker-thread')).href)
   let executions = 0
   let executedCode = ''
   const runtime = {
@@ -86,8 +89,11 @@ try {
   const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
   assert.equal(await new AsyncFunction(executedCode)(),
     "$ErrorActionPreference='Continue'\nWrite-Output \"HTTP=%{http_code} TOTAL=%{time_total}`n\"")
-  for (const entry of verified.slice(2)) await import(pathToFileURL(entry.file).href)
-  const fsTools = await import(pathToFileURL(verified[3].file).href)
+  }
+  for (const entry of verified.filter(entry => entry.name !== 'dsh-pwsh-local' && entry.name !== 'dsh-code-runtime-worker-thread')) {
+    await import(pathToFileURL(entry.file).href)
+  }
+  const fsTools = await import(pathToFileURL(fileFor('dsh-tool-fs')).href)
   const registered = new Map()
   let compressed = Buffer.concat([
     zstdCompressSync(Buffer.from('{"frame":1}\n')),
@@ -96,7 +102,7 @@ try {
   let byteReads = 0
   const ctx = {
     systemPrompt: { section() {}, getSectionOrder() { return 0 } },
-    tools: { register(tool) { registered.set(tool.name, tool) } },
+    tools: { register(tool) { registered.set(tool.name, tool) }, get(name) { return registered.get(name) } },
     inject() {}, emit() {},
     fs: {
       async resolve(path) { return { displayPath: path } },
@@ -146,7 +152,7 @@ try {
     file_path: 'fixture.php', old_string: 'TOKEN', new_string: 'CHANGED', occurrence: 2,
   }, {})
   assert.equal(editRequest.occurrence, 2)
-  const searchTools = await import(pathToFileURL(verified[4].file).href)
+  const searchTools = await import(pathToFileURL(fileFor('dsh-tool-fs-search')).href)
   assert.equal(searchTools.SEARCH_TIMEOUT_MS, 60_000)
   const literalPattern = String.raw`export function adaptRuntimeGrep(source: string)`
   const parsedGrep = searchTools.parseGrepArgs({ pattern: literalPattern, literal: true, path: 'src' })
@@ -162,7 +168,7 @@ try {
   const grepSections = []
   searchTools.applyGrepTool({
     systemPrompt: { section(value) { grepSections.push(value) }, getSectionOrder() { return 0 } },
-    tools: { register(tool) { grepDefinitions.set(tool.name, tool) } },
+    tools: { register(tool) { grepDefinitions.set(tool.name, tool) }, get(name) { return grepDefinitions.get(name) } },
     on() {},
   }, {
     maxMatches: 10, maxLineBytes: 2000, maxMetaBytes: 65536,
@@ -172,7 +178,9 @@ try {
   assert.ok(grep)
   assert.equal(grep.timeoutMs, 60_000)
   assert.match(grep.parameters.properties.literal.description, /exact fixed string/)
-  assert.match(grepSections[0].text, /Narrow path and include/)
+  const guidance = typeof grepSections[0].text === 'function'
+    ? grepSections[0].text({ scope: undefined }) : grepSections[0].text
+  assert.match(guidance, /Narrow path and include/)
   for (const entry of verified) {
     assert.equal(createHash('sha256').update(await readFile(entry.file)).digest('hex'), entry.hash)
   }

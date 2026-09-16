@@ -215,8 +215,10 @@ const EDIT_REQUEST = `\t\t\t\t\toldString: input.oldString,
 
 export function adaptRuntimeEditTool(source: string): { source: string; changed: boolean } {
   const prompt = 'text: "Use the edit tool for targeted changes to existing UTF-8 text files. It replaces literal old_string with new_string; by default old_string must appear exactly once. If old_string appears multiple times, provide a more specific old_string or set replace_all to true. Read the file first (the default fs-observation-policy requires it), unless you just created or edited it in this session."'
+  const scopedPrompt = 'text: ({ scope }) => ctx.tools.get("edit", scope) === void 0 ? "" : "Use the edit tool for targeted changes to existing UTF-8 text files. It replaces literal old_string with new_string; by default old_string must appear exactly once. If old_string appears multiple times, provide a more specific old_string or set replace_all to true. Read the file first (the default fs-observation-policy requires it), unless you just created or edited it in this session."'
+  const promptAnchor = source.includes(prompt) ? prompt : scopedPrompt
   if (!source.includes(EDIT_PARSE_RETURN) || !source.includes(EDIT_SCHEMA) || !source.includes(EDIT_REQUEST)
-    || !source.includes(prompt)) return { source, changed: false }
+    || !source.includes(promptAnchor)) return { source, changed: false }
   return {
     source: source.replace('if (args.old_string === args.new_string) throw new Error("old_string and new_string must differ");',
       'if (args.old_string === args.new_string) throw new Error("old_string and new_string must differ");\n\tif (args.occurrence !== void 0 && (!Number.isSafeInteger(args.occurrence) || args.occurrence < 1)) throw new Error("occurrence must be a positive integer when given");\n\tif (args.occurrence !== void 0 && args.replace_all === true) throw new Error("occurrence and replace_all cannot be used together");')
@@ -234,7 +236,9 @@ export function adaptRuntimeEditTool(source: string): { source: string; changed:
 ${EDIT_SCHEMA}`)
       .replace(EDIT_REQUEST, `${EDIT_REQUEST},
 \t\t\t\t\t...input.occurrence !== void 0 ? { occurrence: input.occurrence } : {}`)
-      .replace(prompt, 'text: "Use the edit tool for targeted changes to existing UTF-8 text files. Read the current file first. Prefer a unique old_string with surrounding context. If the intended literal is duplicated and adding context would be noisy, pass its verified 1-based occurrence; the file version guard still applies. Use replace_all only when every match should change. After any edit, reread before another edit to the same region."'),
+      .replace(promptAnchor, promptAnchor === prompt
+        ? 'text: "Use the edit tool for targeted changes to existing UTF-8 text files. Read the current file first. Prefer a unique old_string with surrounding context. If the intended literal is duplicated and adding context would be noisy, pass its verified 1-based occurrence; the file version guard still applies. Use replace_all only when every match should change. After any edit, reread before another edit to the same region."'
+        : 'text: ({ scope }) => ctx.tools.get("edit", scope) === void 0 ? "" : "Use the edit tool for targeted changes to existing UTF-8 text files. Read the current file first. Prefer a unique old_string with surrounding context. If the intended literal is duplicated and adding context would be noisy, pass its verified 1-based occurrence; the file version guard still applies. Use replace_all only when every match should change. After any edit, reread before another edit to the same region."'),
     changed: true,
   }
 }
@@ -301,8 +305,10 @@ export function adaptRuntimeGrep(source: string): { source: string; changed: boo
   const command = 'const parts = ["--json", `--regexp=${input.pattern}`];'
   const invalidPattern = 'return new SearchError(`${toolName} pattern rejected by ripgrep: ${stderr}`, "SEARCH_INVALID_PATTERN");'
   const prompt = 'text: "Use the grep tool — not shell grep or rg — to search file contents. Use read on a matched file when you need surrounding context."'
+  const scopedPrompt = 'text: ({ scope }) => ctx.tools.get("grep", scope) === void 0 ? "" : "Use the grep tool — not shell grep or rg — to search file contents." + (ctx.tools.get("read", scope) === void 0 ? "" : " Use read on a matched file when you need surrounding context.")'
+  const promptAnchor = source.includes(prompt) ? prompt : scopedPrompt
   if (!source.includes(GREP_PARSE_RETURN) || !source.includes(command) || !source.includes(GREP_SCHEMA)
-    || !source.includes(invalidPattern) || !source.includes(prompt)
+    || !source.includes(invalidPattern) || !source.includes(promptAnchor)
     || !source.includes('const SEARCH_TIMEOUT_MS = 3e4;')) return { source, changed: false }
   return {
     source: source.replace('const SEARCH_TIMEOUT_MS = 3e4;', 'const SEARCH_TIMEOUT_MS = 6e4;')
@@ -324,7 +330,9 @@ export function adaptRuntimeGrep(source: string): { source: string; changed: boo
 \t\t\t\tdescription: "Treat pattern as one exact fixed string instead of a regular expression. For multiple exact alternatives, issue separate grep calls. Defaults to false."
 \t\t\t},
 \t\t\tpath: {`)
-      .replace(prompt, 'text: "Use the grep tool — not shell grep or rg — to search file contents. Prefer literal: true for exact source text containing backslashes or parentheses. Use simple regex only when regex behavior is needed; do not copy source-code escaping directly into a regex. Narrow path and include before retrying a broad or timed-out search. Use read on a matched file when you need surrounding context."'),
+      .replace(promptAnchor, promptAnchor === prompt
+        ? 'text: "Use the grep tool — not shell grep or rg — to search file contents. Prefer literal: true for exact source text containing backslashes or parentheses. Use simple regex only when regex behavior is needed; do not copy source-code escaping directly into a regex. Narrow path and include before retrying a broad or timed-out search. Use read on a matched file when you need surrounding context."'
+        : 'text: ({ scope }) => ctx.tools.get("grep", scope) === void 0 ? "" : "Use the grep tool — not shell grep or rg — to search file contents. Prefer literal: true for exact source text containing backslashes or parentheses. Use simple regex only when regex behavior is needed; do not copy source-code escaping directly into a regex. Narrow path and include before retrying a broad or timed-out search." + (ctx.tools.get("read", scope) === void 0 ? "" : " Use read on a matched file when you need surrounding context.")'),
     changed: true,
   }
 }

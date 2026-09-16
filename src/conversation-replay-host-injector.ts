@@ -7,7 +7,10 @@ import { dirname, join } from 'node:path'
  * Serialized into the host module. The Runtime owns these objects; their layout is
  * checked at admission rather than coupled to the shell's installed SDK types.
  */
-export async function admitDesktopReplay(agent: any, message: any, targetSeq: number): Promise<void> {
+export async function admitDesktopReplay(
+  agent: any, message: any, targetSeq: number,
+  modernSurfaceOp = process.env.DSH_DESKTOP_REPLAY_SURFACE_FORMAT === 'seq',
+): Promise<void> {
   if (typeof agent.runMaintenance !== 'function' || typeof agent.whenIdle !== 'function') {
     throw new Error('当前 Runtime 不支持原会话重试维护阶段')
   }
@@ -43,7 +46,9 @@ export async function admitDesktopReplay(agent: any, message: any, targetSeq: nu
         // admission drops the message or replacement validation rejects.
         return original.call(this, type, data, {
           ...options,
-          surfaceOp: { op: 'replace', start: targetSeq, end: sourceEventSeqs.at(-1) },
+          surfaceOp: modernSurfaceOp
+            ? { op: 'replace', startSeq: targetSeq, endSeq: sourceEventSeqs.at(-1) }
+            : { op: 'replace', start: targetSeq, end: sourceEventSeqs.at(-1) },
           sourceEventSeqs,
         })
       }
