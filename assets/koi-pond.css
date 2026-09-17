@@ -14,9 +14,9 @@
 body { margin: 0; overflow: hidden; }
 body.night { --panel: #031e29fa; --muted: #b4c5c4; background: #062339; }
 body[data-period="dawn"] { --scene-glow: #f8d9ae32; }
-body[data-period="dusk"] { --scene-glow: #e58d4a35; }
+body[data-period="dusk"] { --scene-glow: #ffb3686b; }
 body[data-period="night"] { --scene-glow: #6da3bd1b; }
-body.night aside { top: 15.3%; }
+body.night aside { top: 15.3%; max-height: calc(100vh - 15.3% - 5.3% - 60px); }
 button, input, summary { font: inherit; }
 button, summary { cursor: pointer; }
 main { height: 100vh; position: relative; isolation: isolate; }
@@ -72,12 +72,13 @@ button:focus-visible, summary:focus-visible, input:focus-visible { outline: 2px 
 #return { min-width: calc(86 * var(--unit)); font-family: "SimSun", serif; font-weight: bold; letter-spacing: 2px; }
 aside {
   position: absolute; top: 17.2%; right: 1.75%; width: calc(260 * var(--unit));
-  max-height: calc(100vh - 240 * var(--unit)); padding: calc(24 * var(--unit));
+  max-height: calc(100vh - 17.2% - 5.3% - 60px); padding: calc(24 * var(--unit));
   background: linear-gradient(140deg, var(--panel), #031f20f2), url("koi-pond-washi.webp") center / 360px auto;
   background-blend-mode: normal, soft-light;
   border: 1px solid var(--gold); border-radius: 14px;
   box-shadow: inset 0 0 0 3px #c9bd8220, inset 0 1px #fff2c51a, 0 18px 45px #00151572;
   z-index: 3;
+  overflow-y: auto; overflow-x: hidden;
   scrollbar-width: thin; scrollbar-color: #78947a #0b2925;
 }
 aside::before, .tools::before {
@@ -104,14 +105,16 @@ h2 { font: calc(21 * var(--unit)) "SimSun", serif; margin: 0 0 calc(10 * var(--u
 .fish-copy small { display: block; font: calc(10 * var(--unit)) "Microsoft YaHei", sans-serif; color: var(--muted); margin-top: calc(5 * var(--unit)); }
 .fish-card b { font: bold calc(14 * var(--unit)) Georgia, serif; white-space: nowrap; color: #efe9bb; }
 #profile { border-top: 1px solid #b5b28a40; margin-top: 12px; padding: 15px 8px 0; background: linear-gradient(180deg, #e5dfab08, transparent 72%); }
+.profile-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px; }
+#close-profile { background: transparent; border: none; color: var(--muted); font-size: calc(12 * var(--unit)); padding: 2px 6px; border-radius: 4px; line-height: 1; min-width: auto; }
+#close-profile:hover { color: #fff; background: #ffffff18; transform: none; }
 label { font-size: calc(12 * var(--unit)); color: var(--muted); }
-.name-row { display: flex; gap: 5px; margin-top: 8px; }
+.name-row { display: flex; gap: 5px; margin-top: 6px; }
 input { width: 100%; min-width: 0; background: #021d1db0; border: 1px solid #9b9e6c80; border-radius: 4px; color: var(--ivory); padding: 8px; font-size: 12px; }
 .name-row button { padding: 7px; white-space: nowrap; font-size: 11px; }
 #eggs { white-space: pre-line; margin: 0; }
 #eggs:not(:empty) { margin-top: 12px; }
 details { border-top: 1px solid #aaa87670; padding-top: calc(14 * var(--unit)); margin-top: calc(15 * var(--unit)); }
-details[open] { max-height: 24vh; overflow-y: auto; scrollbar-width: thin; }
 summary { font: calc(12 * var(--unit)) "SimSun", serif; color: #d8dfc3; }
 footer { position: absolute; z-index: 3; bottom: 5.3%; left: 2%; right: 1.8%; display: flex; align-items: center; gap: calc(22 * var(--unit)); pointer-events: none; }
 .tools { display: flex; position: relative; pointer-events: auto; padding: 4px; border: 1px solid var(--gold); border-radius: 17px; background: linear-gradient(145deg, #073c35f2, #021e1cef), url("koi-pond-washi.webp") center / 280px auto; background-blend-mode: normal, soft-light; box-shadow: inset 0 0 0 3px #ac9c6030, inset 0 1px #fff4ca18, 0 8px 25px #001b176e; }

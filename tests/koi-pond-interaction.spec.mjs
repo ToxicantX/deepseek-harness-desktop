@@ -25,24 +25,24 @@ describe('pond interaction budget', () => {
     const p = pond()
     for (let i = 0; i < 1000; i++) p.interact(610, 400)
     expect(p.ripples).toHaveLength(1)
-    p.now = 499
+    p.now = 139
     p.interact(610, 400)
     expect(p.ripples).toHaveLength(1)
-    p.now = 500
+    p.now = 140
     p.interact(610, 400)
     expect(p.ripples).toHaveLength(2)
   })
 
-  it('caps active refraction waves at three and resumes after expiry', () => {
+  it('caps active refraction waves at six and resumes after expiry', () => {
     const p = pond()
     for (let i = 0; i < 10; i++) {
       p.now = i * 500
       p.interact(610, 400)
     }
-    expect(p.ripples).toHaveLength(3)
+    expect(p.ripples).toHaveLength(6)
     p.ripples[0].age = 2.5
     p.interact(610, 400)
-    expect(p.ripples.filter(r => r.age < 2.5)).toHaveLength(3)
+    expect(p.ripples.filter(r => r.age < 2.5)).toHaveLength(6)
   })
 
   it('shares cooldown across modes and rejects feeding before creating effects', () => {
@@ -51,7 +51,7 @@ describe('pond interaction budget', () => {
     p.mode = 'feed'
     p.interact(610, 400)
     expect(p.food).toHaveLength(0)
-    p.now = 500
+    p.now = 140
     p.interact(610, 400)
     expect(p.food).toHaveLength(5)
     expect(p.ripples).toHaveLength(2)
@@ -78,18 +78,18 @@ describe('pond interaction budget', () => {
   it('counts feeding waves in the shared cap across mode switches', () => {
     const p = pond()
     p.mode = 'feed'
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 6; i++) {
       p.now = i * 500
       p.interact(610, 400)
     }
-    expect(p.food).toHaveLength(15)
+    expect(p.food).toHaveLength(30)
     expect(p.ripples.every(r => !r.strong)).toBe(true)
-    p.now = 1500
+    p.now = 3000
     p.interact(610, 400)
-    expect(p.food).toHaveLength(15)
+    expect(p.food).toHaveLength(30)
     p.mode = 'ripple'
     p.interact(610, 400)
-    expect(p.ripples).toHaveLength(3)
+    expect(p.ripples).toHaveLength(6)
   })
 
   it('makes timid koi flee, curious koi inspect and the selected nearby koi bond', () => {

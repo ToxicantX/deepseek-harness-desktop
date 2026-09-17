@@ -1507,6 +1507,259 @@ Remove-Item -LiteralPath 'src/conversation-replay-host-injector.ts','src/convers
 - progress.md：追加本轮性能优化记录。
 - 回滚方式：按 git diff 撤销 assets/koi-pond.js 对应改动。
 
+
+## 2026-09-11 - Task: 更换雨天白天专属鱼塘背景图
+### What was done
+- 依据用户提供的雨天池塘高清参考图，生成并引入了雨天白天专属的高清 WebP 背景素材 `assets/koi-pond-rain-day.webp`（1723×913，与日间场景无缝对齐）。
+- 在 `assets/koi-pond.html` 中增加该背景图的预加载链接，确保切换天气时即时生效不闪白。
+- 在 `assets/koi-pond.js` 中扩充背景图状态机：
+  1. `sceneImages` 引入 `rainDay` 独立图片加载；
+  2. 天气变更（无论是自动同步或手动切换为小雨/中雨/暴雨等雨天状态）时，日间时段自动激活雨天专属背景图；晴天/阴天/雪天继续呈现原经典日间背景，夜间保持夜间专属背景；
+  3. 天气变更事件联动触发底图重绘 `makeBackdrop()`，保证即切即显。
+### Testing
+- 单元测试：`pnpm test tests/koi-pond-weather.spec.ts` 4 项测试全部通过，覆盖天气代码映射、素材 WebP 格式与大小验证、HTML 预加载标签声明。
+- 全量自动化测试：`pnpm test` 42 个套件、283 项测试全部通过。
+- 类型检查：`pnpm run typecheck` 0 错误通过。
+- 语法与格式检查：`node --check assets/koi-pond.js`、`git diff --check` 通过。
+### Notes
+- assets/koi-pond-rain-day.webp：新增由用户参考图转换的雨天日间高清 WebP 背景图。
+- assets/koi-pond.html：增加 `koi-pond-rain-day.webp` 的预加载 link 标签。
+- assets/koi-pond.js：扩充背景图逻辑，支持在日间且降雨（drizzle/rain/storm）时自动切换为雨天专属背景，并联动天气切换即时重绘底图。
+- tests/koi-pond-weather.spec.ts：新增雨天日间背景图格式校验与预加载断言。
+- progress.md：追加本轮任务进度记录。
+- 回滚方式：执行 `git checkout -- assets/koi-pond.html assets/koi-pond.js tests/koi-pond-weather.spec.ts progress.md`，并执行 `Remove-Item assets/koi-pond-rain-day.webp`。
+
+## 2026-09-11 - Task: 更换雨天夜间专属鱼塘背景图
+### What was done
+- 依据用户提供的雨天夜间池塘水墨光影参考图，生成并引入了夜间雨天专属的高清 WebP 背景素材 assets/koi-pond-rain-night.webp（1723×913，具有夜色水光、灯影与浮萍倒影细节）。
+- 在 assets/koi-pond.html 中增加 koi-pond-rain-night.webp 的预加载 link 标签。
+- 在 assets/koi-pond.js 中扩充背景图逻辑：
+  1. sceneImages 引入 rainNight 图像；
+  2. 当处于夜间且处于降雨（drizzle/rain/storm）时，鱼塘底图自动呈现 rainNight 专属背景；非雨天夜间继续保持原夜景底图；
+  3. 切换天气与时段均即时更新底图。
+### Testing
+- 单元测试：pnpm test tests/koi-pond-weather.spec.ts 5 项测试全部通过。
+- 全量自动化测试：pnpm test 42 个套件、284 项测试全部通过。
+- 类型检查：pnpm run typecheck 0 错误。
+- 格式检查：git diff --check 通过。
+### Notes
+- assets/koi-pond-rain-night.webp：新增由用户参考图导出的雨天夜间专属高清 WebP 背景图。
+- assets/koi-pond.html：增加 koi-pond-rain-night.webp 的预加载声明。
+- assets/koi-pond.js：扩充背景图状态机，支持在夜间降雨状态下使用雨天夜景专属底图。
+- tests/koi-pond-weather.spec.ts：新增雨天夜间素材的有效性及 preload 标签测试。
+- progress.md：追加本轮修改记录。
+- 回滚方式：执行 git checkout -- assets/koi-pond.html assets/koi-pond.js tests/koi-pond-weather.spec.ts progress.md 并执行 Remove-Item assets/koi-pond-rain-night.webp。
+
+## 2026-09-11 - Task: 更换雪天白天专属鱼塘背景图
+### What was done
+- 依据用户提供的白雪皑皑、覆雪屋檐荷塘与晶莹剔透水面参考图，生成并引入了雪天白天专属的高清 WebP 背景素材 assets/koi-pond-snow-day.webp（1723×913）。
+- 在 assets/koi-pond.html 中增加 koi-pond-snow-day.webp 的预加载 link 标签。
+- 在 assets/koi-pond.js 中扩充背景图状态机：
+  1. sceneImages 引入 snowDay 图像；
+  2. 当处于日间且处于降雪（light_snow/snow/heavy_snow）天气时，鱼塘底图自动呈现 snowDay 专属覆雪水清背景；晴天/阴天保持经典日间背景，雨天日间保持雨天日景，夜间保持专属夜景；
+  3. 天气与时段切换即时重绘底图。
+### Testing
+- 单元测试：pnpm test tests/koi-pond-weather.spec.ts 6 项测试全部通过。
+- 全量自动化测试：pnpm test 42 个套件、285 项测试全部通过。
+- 类型检查：pnpm run typecheck 0 错误。
+- 格式检查：git diff --check 通过。
+### Notes
+- assets/koi-pond-snow-day.webp：新增由用户参考图导出的雪天日间专属高清 WebP 背景图。
+- assets/koi-pond.html：增加 koi-pond-snow-day.webp 的预加载声明。
+- assets/koi-pond.js：扩充背景图状态机，支持在日间降雪状态下使用雪天专属日间底图。
+- tests/koi-pond-weather.spec.ts：新增雪天日间素材有效性及 preload 标签测试。
+- progress.md：追加本轮修改记录。
+- 回滚方式：执行 git checkout -- assets/koi-pond.html assets/koi-pond.js tests/koi-pond-weather.spec.ts progress.md 并执行 Remove-Item assets/koi-pond-snow-day.webp。
+
+## 2026-09-11 - Task: 更换雪天夜间专属鱼塘背景图
+### What was done
+- 依据用户提供的雪夜月华、水光灯影与静谧覆雪庭院参考图，生成并引入了雪天夜间专属的高清 WebP 背景素材 assets/koi-pond-snow-night.webp（1723×913）。
+- 在 assets/koi-pond.html 中增加 koi-pond-snow-night.webp 的预加载 link 标签。
+- 在 assets/koi-pond.js 中扩充背景图状态机：
+  1. sceneImages 引入 snowNight 图像；
+  2. 当处于夜间且处于降雪（light_snow/snow/heavy_snow）天气时，鱼塘底图自动呈现 snowNight 专属静谧雪夜水墨背景；雨天夜景使用 rainNight，晴天夜景使用原 night，日间雪景使用 snowDay，日间雨景使用 rainDay，日间晴天使用原 day；
+  3. 天气与时段切换即时重绘底图。
+### Testing
+- 单元测试：pnpm test tests/koi-pond-weather.spec.ts 7 项测试全部通过。
+- 全量自动化测试：pnpm test 42 个套件、286 项测试全部通过。
+- 类型检查：pnpm run typecheck 0 错误。
+- 格式检查：git diff --check 通过。
+### Notes
+- assets/koi-pond-snow-night.webp：新增由用户参考图导出的雪天夜间专属高清 WebP 背景图。
+- assets/koi-pond.html：增加 koi-pond-snow-night.webp 的预加载声明。
+- assets/koi-pond.js：扩充背景图状态机，支持在夜间降雪状态下使用雪天夜间专属底图。
+- tests/koi-pond-weather.spec.ts：新增雪天夜间素材有效性及 preload 标签测试。
+- progress.md：追加本轮修改记录。
+- 回滚方式：执行 git checkout -- assets/koi-pond.html assets/koi-pond.js tests/koi-pond-weather.spec.ts progress.md 并执行 Remove-Item assets/koi-pond-snow-night.webp。
+
+## 2026-09-11 - Task: 彻底根治雨雪天气长时间运行后的卡顿问题
+### What was done
+- 深入诊断雨天/雪天长时间挂机后出现轻微卡顿与掉帧的本质原因：
+  1. 粒子生成循环中的几何射线投射累积：每当雨滴/雪花落水消融时，补齐粒子阶段以 80% 概率连续尝试最多 6 次 waterDistance 射线算法，在高频生成下累积大量 CPU 多边形交点计算；现改为 O(1) 直接基于水体核心区域分布生成，彻底消除粒子补齐时的 CPU 射线计算；
+  2. 雪花与消融粒子的频繁 Canvas 状态机切换开销：之前每一个雪花粒子和消融粒子都调用 ctx.save/restore、ctx.translate、ctx.rotate，每秒产生数百次状态机进出与矩阵计算；现改为批处理平移绘制与渐变透明度统一管理，移除全部无谓的 save/restore；
+  3. 调整波纹与消融池的上限阈值，将并发波纹控制在 10 个内、雪花消融控制在 6 个内，避免长时间运行下垃圾回收（GC）开销造成微卡顿。
+### Testing
+- 单元测试：pnpm test tests/koi-pond-weather.spec.ts 7 项测试全部通过。
+- 全量自动化测试：pnpm test 42 个套件、286 项测试全部通过。
+- 类型检查：pnpm run typecheck 0 错误。
+- 格式检查：git diff --check 通过。
+### Notes
+- assets/koi-pond.js：消除几何射线法生成开销、去除雪花/消融粒子单体 save/restore 状态机切换、微调粒子池并发上限。
+- progress.md：追加本轮性能彻底优化记录。
+- 回滚方式：执行 git checkout -- assets/koi-pond.js progress.md。
+
+## 2026-09-11 - Task: 更换晴天白天鱼塘专属背景图
+### What was done
+- 依据用户提供的阳光明媚、荷叶翠绿、水光粼粼与亭榭掩映参考图，高保真生成并更新 assets/koi-pond-day.webp（1723×913，标准 WebP 格式）。
+- 晴天/阴天日间时段底图自动采用该全新明媚水墨池塘背景。
+### Testing
+- 单元测试：pnpm test tests/koi-pond.spec.ts 15 项测试全部通过（包含 packaged assets 完整性断言）。
+- 全量自动化测试：pnpm test 42 个套件、286 项测试全部通过。
+- 类型检查：pnpm run typecheck 0 错误。
+- 格式检查：git diff --check 通过。
+### Notes
+- assets/koi-pond-day.webp：替换为用户提供的全新高清晴天白昼水光荷塘背景图。
+- progress.md：追加本轮修改记录。
+- 回滚方式：执行 git checkout -- assets/koi-pond-day.webp progress.md。
+
+## 2026-09-11 - Task: 更换晴天夜晚鱼塘专属背景图
+### What was done
+- 依据用户提供的深邃幽蓝水光、月色清辉、荷叶浮萍与亭台柔暖灯火的参考图，高保真生成并更新 assets/koi-pond-night.webp（1723×913，标准 WebP 格式）。
+- 夜间晴朗/阴天场景下底图自动呈现该全新静谧深邃的水墨月夜背景。
+### Testing
+- 单元测试：pnpm test tests/koi-pond.spec.ts 15 项测试全部通过（包含 packaged assets 完整性断言）。
+- 全量自动化测试：pnpm test 42 个套件、286 项测试全部通过。
+- 类型检查：pnpm run typecheck 0 错误。
+- 格式检查：git diff --check 通过。
+### Notes
+- assets/koi-pond-night.webp：替换为用户提供的全新高清晴天夜晚深蓝月影荷塘背景图。
+- progress.md：追加本轮修改记录。
+- 回滚方式：执行 git checkout -- assets/koi-pond-night.webp progress.md。
+
+## 2026-09-11 - Task: 缩短投喂与玩水点击间隔提升交互流畅度
+### What was done
+- 将水面投喂与玩水互动的点击冷却时间由 500ms 缩短至 240ms，让连续轻点交互更敏捷自如，交互响应速度提升一倍以上。
+- 维持最大并发波纹（max 3）与水面鱼食上限（45 粒）严格受控，CPU 局部折射算法在多重点击下依然保持局部采样与合并双线性插值，杜绝因高频点击导致主线程帧率下降。
+- 同步更新交互单元测试断言，确保 240ms 冷却边界与波纹预算测试全绿。
+### Testing
+- 单元测试：pnpm test tests/koi-pond-interaction.spec.mjs 6 项测试全部通过。
+- 全量自动化测试：pnpm test 42 个套件、286 项测试全部通过。
+- 类型检查：pnpm run typecheck 0 错误。
+- 格式检查：git diff --check 通过。
+### Notes
+- assets/koi-pond.js：将点击冷却时间从 500ms 优化为 240ms。
+- tests/koi-pond-interaction.spec.mjs：同步更新冷却时间临界测试值。
+- progress.md：追加本轮交互优化记录。
+- 回滚方式：执行 git checkout -- assets/koi-pond.js tests/koi-pond-interaction.spec.mjs progress.md。
+
+## 2026-09-11 - Task: 调整傍晚（夕阳）时段色调为暖光
+### What was done
+- 傍晚时段此前叠加的两层色调偏冷紫（#51283655 与 #ed964a99），与夕阳橙暖的视觉直觉不符。
+- 现将傍晚遮罩叠加层调整为标准夕阳橙调：
+  1. 基础着色层由 #51283655（冷紫红）调整为 #f59c3a40（橙黄暖光），自然光基底更暖；
+  2. 软光混合的强光层由 #ed964a99（橙偏暗）调整为 #ffb368b8（明亮夕阳橙），模拟夕阳暖辉笼罩。
+- 同时将 CSS 中 dusk 时段的场景辉光（--scene-glow）由 #e58d4a35 调整为 #ffb3686b，确保整体页面辉光与底部覆盖层一致。
+- 仅调整颜色与不透明度参数，未改动任何渲染逻辑或管线，性能不变。
+### Testing
+- 单元测试：pnpm test tests/koi-pond-time.spec.mjs 8 项测试全部通过。
+- 全量自动化测试：pnpm test 42 个套件、286 项测试全部通过。
+- 类型检查：pnpm run typecheck 0 错误。
+- 格式检查：git diff --check 通过。
+### Notes
+- assets/koi-pond.js：调整 makeBackdrop 中傍晚时段的两层叠加色调为暖夕阳橙。
+- assets/koi-pond.css：将 dusk 时段场景辉光调整为高强度夕阳橙光。
+- progress.md：追加本轮傍晚暖色调优化记录。
+- 回滚方式：执行 git checkout -- assets/koi-pond.js assets/koi-pond.css progress.md。
+
+## 2026-09-11 - Task: 进一步缩短投喂与玩水点击间隔并保障性能
+### What was done
+- 依据用户关于“投喂、玩水的点击间隔限制设置的稍微有点长，用户交互时感觉不够流畅，需要缩短并兼顾性能优化”的反馈：
+  1. 将投喂与玩水交互的点击冷却时间从 240ms 进一步缩短至 140ms（轻点交互更敏捷、跟手感显著提升）；
+  2. 性能保障机制：
+     - 保留活动折射波上限过滤（最多 3 个），超出的高频点击仅创建轻量实体，不堆叠 CPU 径向折射计算；
+     - 投喂满额校验（上限 45 粒）保持在波纹生成之前执行，超额快速退出；
+     - 双线性插值折射保持合并采样（touched set 避免重复采样与重绘）；
+  3. 同步更新 docs/koi-pond.md 文档中的参数描述与 tests/koi-pond-interaction.spec.mjs 单元测试断言。
+### Testing
+- 单元测试：pnpm test tests/koi-pond-interaction.spec.mjs 全部通过。
+- 全量自动化测试：pnpm test 42 个套件、286 项测试全部通过。
+- 类型检查：pnpm run typecheck 0 错误。
+- 格式检查：git diff --check 通过。
+### Notes
+- assets/koi-pond.js：点击冷却时间调整为 140ms。
+- docs/koi-pond.md：同步更新冷却间隔为 140ms。
+- tests/koi-pond-interaction.spec.mjs：同步更新 140ms 临界测试断言。
+- progress.md：追加本轮优化记录。
+- 回滚方式：执行 git checkout -- assets/koi-pond.js docs/koi-pond.md tests/koi-pond-interaction.spec.mjs progress.md。
+
+## 2026-09-11 - Task: 将最大活动折射波上限从 3 个调整为 6 个
+### What was done
+- 依据用户要求将水面最大活动折射波数量从 3 个放宽到 6 个：
+  1. 在 assets/koi-pond.js 中，将交互入水检查、锦鲤跃水事件与锦鲤进食产生折射波的并发波纹上限由 3 提升至 6（ripples.filter(r => r.age < window.koiWater.duration).length < 6）；
+  2. 连续快速轻点玩水或投喂时，最多可同时展现 6 圈层叠涟漪与水波折射，视觉动态感更丰富更具沉浸感；
+  3. 同步更新单元测试 tests/koi-pond-interaction.spec.mjs、冒烟测试 scripts/smoke-koi-pond.mjs 以及产品说明文档 docs/koi-pond.md 中的波纹预算上限断言与说明。
+### Testing
+- 单元测试：pnpm test tests/koi-pond-interaction.spec.mjs 6 项测试全部通过。
+- 全量自动化测试：pnpm test 42 个套件、286 项测试全部通过。
+- 类型检查：pnpm run typecheck 0 错误。
+- 格式检查：git diff --check 通过。
+### Notes
+- assets/koi-pond.js：波纹上限从 3 提升至 6。
+- tests/koi-pond-interaction.spec.mjs：波纹上限测试调整为 6。
+- scripts/smoke-koi-pond.mjs：冒烟测试波纹预算上限与断言调整为 6。
+- docs/koi-pond.md：文档更新为最多保留 6 个活动折射波。
+- progress.md：追加本轮修改记录。
+- 回滚方式：执行 git checkout -- assets/koi-pond.js tests/koi-pond-interaction.spec.mjs scripts/smoke-koi-pond.mjs docs/koi-pond.md progress.md。
+
+## 2026-09-13 - Task: 更换阴天白天鱼塘专属背景图
+### What was done
+- 依据用户提供的阴天清幽池塘参考图，高保真生成并引入了阴天白昼专属的高清 WebP 背景素材 `assets/koi-pond-overcast-day.webp`（1723×913，无缝贴合水池场景）。
+- 在 `assets/koi-pond.html` 头部加入 `koi-pond-overcast-day.webp` 的 preload 预加载声明，杜绝天气切换时的底图闪烁。
+- 在 `assets/koi-pond.js` 中扩充背景图逻辑：
+  1. `sceneImages` 中引入 `overcastDay` 图片实例与解码加载；
+  2. 当处于白昼且天气为阴天（`currentWeather === 'overcast'`）时，底图自动渲染 `overcastDay` 专属背景；雨雪与夜间各天气保持各自专属底图；
+  3. 天气切换时联动 `makeBackdrop()` 即时重绘。
+- 在 `tests/koi-pond-weather.spec.ts` 中补充阴天日间背景图资产完整性、WEBP/RIFF 格式校验及 HTML preload 声明断言。
+### Testing
+- 单元测试：`pnpm test tests/koi-pond-weather.spec.ts` 8 项测试全数通过。
+- 全量自动化测试：`pnpm test` 42 个套件、287 项测试全部通过。
+- 类型检查：`pnpm run typecheck` 0 错误。
+- 格式检查：`git diff --check` 通过。
+### Notes
+- assets/koi-pond-overcast-day.webp：新增由用户参考图导出的阴天白天专属高清 WebP 背景图。
+- assets/koi-pond.html：添加 `koi-pond-overcast-day.webp` 的 preload 标签。
+- assets/koi-pond.js：扩充背景图状态机，支持在日间阴天状态下使用 overcastDay 专属底图。
+- tests/koi-pond-weather.spec.ts：新增阴天白天素材有效性及 preload 标签测试。
+- progress.md：追加本轮修改记录。
+- 回滚方式：执行 `git checkout -- assets/koi-pond.html assets/koi-pond.js tests/koi-pond-weather.spec.ts progress.md` 并执行 `Remove-Item assets/koi-pond-overcast-day.webp`。
+
+## 2026-09-13 - Task: 更换雨天白天专属鱼塘背景图
+### What was done
+- 依据用户最新指示，将带有透亮细腻水波纹理的碧波池塘参考图转换为 1723×913 规格的标准 WebP 资产，更新替换雨天白天专属背景图 `assets/koi-pond-rain-day.webp`（文件大小 371KB）。
+- 同时将上一轮幽深静谧的水墨荷塘图保留为阴天白天的专属背景图 `assets/koi-pond-overcast-day.webp`（文件大小 333KB）。
+- 保持 `assets/koi-pond.html` 中的 preload 预加载配置与 `assets/koi-pond.js` 中的背景图加载状态机正常生效。
+### Testing
+- 单元测试：`pnpm test tests/koi-pond-weather.spec.ts` 8 项测试全部通过。
+- 打包资产测试：`pnpm test tests/koi-pond.spec.ts` 15 项测试全部通过。
+- 格式检查：`git diff --check` 通过。
+### Notes
+- assets/koi-pond-rain-day.webp：替换为用户提供的水波纹细腻的高清雨天白昼背景图。
+- assets/koi-pond-overcast-day.webp：保留为清幽平静的阴天白昼专属背景图。
+- progress.md：追加本轮素材配置修正记录。
+- 回滚方式：按 git 恢复对应资产文件。
+
+## 2026-09-13 - Task: 更换雨天夜晚专属鱼塘背景图
+### What was done
+- 依据用户提供的雨夜清澈水光、灯影婆娑且倒影细腻的参考图，高保真重新转换为 1723×913 规格的高清 WebP 资产 `assets/koi-pond-rain-night.webp`（文件大小 284KB）。
+- 保持 `assets/koi-pond.html` 的 preload 预加载配置以及 `assets/koi-pond.js` 中的雨夜渲染逻辑无缝生效。
+### Testing
+- 单元测试：`pnpm test tests/koi-pond-weather.spec.ts` 8 项测试全部通过。
+- 打包资产测试：`pnpm test tests/koi-pond.spec.ts` 15 项测试全部通过。
+- 格式检查：`git diff --check` 通过。
+### Notes
+- assets/koi-pond-rain-night.webp：替换为用户提供的全新高清雨天夜景背景图。
+- progress.md：追加本轮素材更新记录。
+- 回滚方式：按 git 检出或重新替换对应素材。
 ## 2026-09-14 - Task: 发布 Desktop Shell 0.1.39
 ### What was done
 - 将 Desktop Shell 发布版本从 0.1.38 升级至 0.1.39，为基于最新远端 main 的 GitHub Actions 远端构建与 Release 发布准备版本标识。

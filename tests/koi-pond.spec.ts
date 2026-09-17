@@ -162,6 +162,8 @@ describe('koi dialogue observer', () => {
     const html = await readFile(new URL('../assets/koi-pond.html', import.meta.url), 'utf8')
     expect(html).toContain('src="koi-pond.js"')
     expect(html).toContain('href="koi-pond.css"')
+    const css = await readFile(new URL('../assets/koi-pond.css', import.meta.url), 'utf8')
+    expect(css).toMatch(/aside\s*\{[^}]*overflow-y:\s*auto/)
     expect(html).toContain('id="running-sessions"')
     expect(html).not.toContain('id="return"')
     expect(main).toContain("ipcMain.on('pond:session-running'")

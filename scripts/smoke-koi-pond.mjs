@@ -198,7 +198,7 @@ app.whenReady().then(async () => {
   for (let attempt = 0; attempt < 60 && await js('window.pellets') > 0; attempt++) await delay(250);
   assert.equal(await js('window.pellets'), 0, 'Fish must eat pellets before their 25-second expiry');
   assert((await js("Math.max(0, ...Object.values(JSON.parse(localStorage.getItem('koi-pond-bonds')).fish))")) >= 2, 'Eating one feeding batch must raise affinity once');
-  assert(await js('window.refractionHistory.every(sample => sample.waveCount <= 3)'), 'Feeding and eating must share the wave budget');
+  assert(await js('window.refractionHistory.every(sample => sample.waveCount <= 6)'), 'Feeding and eating must share the wave budget');
   await delay(2700);
   for (const theme of ['day', 'night']) {
     if (theme === 'night') await js("window.setPondHour(document.body.dataset.period === 'night' ? 12 : 20)");
@@ -221,12 +221,12 @@ app.whenReady().then(async () => {
   await js("for (let i = 0; i < 200; i++) document.getElementById('pond').dispatchEvent(new PointerEvent('pointerdown', {clientX:610,clientY:400}));");
   await delay(100);
   assert.equal(await js('window.latestRefraction.waveCount'), 1, 'Burst clicks must create only one wave');
-  for (let i = 0; i < 3; i++) {
-    await delay(510);
+  for (let i = 0; i < 6; i++) {
+    await delay(250);
     await js("document.getElementById('pond').dispatchEvent(new PointerEvent('pointerdown', {clientX:610,clientY:400}));");
   }
   await delay(100);
-  assert.equal(await js('window.latestRefraction.waveCount'), 3, 'Spaced clicks must respect the active wave cap');
+  assert.equal(await js('window.latestRefraction.waveCount'), 6, 'Spaced clicks must respect the active wave cap');
   await delay(2600);
   await js("document.getElementById('pond').dispatchEvent(new PointerEvent('pointerdown', {clientX:610,clientY:400}));");
   await delay(100);

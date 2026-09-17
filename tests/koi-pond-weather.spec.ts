@@ -61,10 +61,55 @@ describe('koi pond weather system', () => {
     expect(image.byteLength).toBeLessThan(250_000)
   })
 
+  it('ships nighttime snowy pond backdrop asset with valid webp format', () => {
+    const filename = 'koi-pond-snow-night.webp'
+    const image = readFileSync(new URL(`../assets/${filename}`, import.meta.url))
+    expect(image.toString('ascii', 0, 4)).toBe('RIFF')
+    expect(image.toString('ascii', 8, 12)).toBe('WEBP')
+    expect(image.byteLength).toBeGreaterThan(100_000)
+  })
+
+  it('ships nighttime rainy pond backdrop asset with valid webp format', () => {
+    const filename = 'koi-pond-rain-night.webp'
+    const image = readFileSync(new URL(`../assets/${filename}`, import.meta.url))
+    expect(image.toString('ascii', 0, 4)).toBe('RIFF')
+    expect(image.toString('ascii', 8, 12)).toBe('WEBP')
+    expect(image.byteLength).toBeGreaterThan(100_000)
+  })
+
+  it('ships daytime snowy pond backdrop asset with valid webp format', () => {
+    const filename = 'koi-pond-snow-day.webp'
+    const image = readFileSync(new URL(`../assets/${filename}`, import.meta.url))
+    expect(image.toString('ascii', 0, 4)).toBe('RIFF')
+    expect(image.toString('ascii', 8, 12)).toBe('WEBP')
+    expect(image.byteLength).toBeGreaterThan(100_000)
+  })
+
+  it('ships daytime rainy pond backdrop asset with valid webp format', () => {
+    const filename = 'koi-pond-rain-day.webp'
+    const image = readFileSync(new URL(`../assets/${filename}`, import.meta.url))
+    expect(image.toString('ascii', 0, 4)).toBe('RIFF')
+    expect(image.toString('ascii', 8, 12)).toBe('WEBP')
+    expect(image.byteLength).toBeGreaterThan(100_000)
+  })
+
+  it('ships daytime overcast pond backdrop asset with valid webp format', () => {
+    const filename = 'koi-pond-overcast-day.webp'
+    const image = readFileSync(new URL(`../assets/${filename}`, import.meta.url))
+    expect(image.toString('ascii', 0, 4)).toBe('RIFF')
+    expect(image.toString('ascii', 8, 12)).toBe('WEBP')
+    expect(image.byteLength).toBeGreaterThan(100_000)
+  })
+
   it('declares weather selector and preload links in HTML', () => {
     const html = readFileSync(new URL('../assets/koi-pond.html', import.meta.url), 'utf8')
     expect(html).toContain('id="weather-select"')
     expect(html).toContain('id="weather-name"')
     expect(html).toContain('koi-weather-snow.webp')
+    expect(html).toContain('koi-pond-overcast-day.webp')
+    expect(html).toContain('koi-pond-rain-day.webp')
+    expect(html).toContain('koi-pond-rain-night.webp')
+    expect(html).toContain('koi-pond-snow-day.webp')
+    expect(html).toContain('koi-pond-snow-night.webp')
   })
 })

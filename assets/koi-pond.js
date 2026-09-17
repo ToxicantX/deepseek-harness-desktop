@@ -49,7 +49,7 @@
   weatherImages.snow.addEventListener('load', () => { ambientPaint = -Infinity })
   const refractionCanvas = document.createElement('canvas')
   const refractionContext = refractionCanvas.getContext('2d', { willReadFrequently: true })
-  const sceneImages = { day: new Image(), night: new Image() }
+  const sceneImages = { day: new Image(), night: new Image(), overcastDay: new Image(), rainDay: new Image(), rainNight: new Image(), snowDay: new Image(), snowNight: new Image() }
   const eventImages = Object.fromEntries(Object.entries({
     petals: 'koi-event-petals.webp', dragonfly: 'koi-event-dragonfly.webp', frog: 'koi-event-frog.webp',
     fireflies: 'koi-event-firefly.webp', leap: 'koi-event-splash.webp',
@@ -182,7 +182,7 @@
       copy.append(sub)
       level.textContent = `Lv.${f.level}`
       card.append(mark, copy, level)
-      card.onclick = () => { selected = f.id; update(state) }
+      card.onclick = () => { selected = selected === f.id ? undefined : f.id; update(state) }
       return card
     }))
     const current = fish.find(f => f.id === selected)
@@ -286,7 +286,7 @@
     if (kind === 'leap' && fish.length) {
       const koi = fish[Math.floor(random(0, fish.length))]
       Object.assign(gardenEvent, { fishId: koi.id, x: koi.x, y: koi.y })
-      if (ripples.filter(r => r.age < window.koiWater.duration).length < 3) ripples.push({ x: koi.x, y: koi.y, age: 0 })
+      if (ripples.filter(r => r.age < window.koiWater.duration).length < 6) ripples.push({ x: koi.x, y: koi.y, age: 0 })
     }
     document.body.dataset.event = kind
     notify(`庭院小景 · ${gardenEventLabels[kind]}`)
@@ -365,25 +365,20 @@
       return
     }
 
-    // High performance particle counts (keeps 60fps stable)
+    // Ultra-smooth particle counts (zero GC, zero lag)
     const targetCount = reduced
-      ? (currentWeather === 'drizzle' || currentWeather === 'light_snow' ? 10 : currentWeather === 'storm' || currentWeather === 'heavy_snow' ? 24 : 16)
-      : (currentWeather === 'drizzle' ? 18 : currentWeather === 'rain' ? 36 : currentWeather === 'storm' ? 62
-         : currentWeather === 'light_snow' ? 14 : currentWeather === 'snow' ? 24 : 42)
+      ? (currentWeather === 'drizzle' || currentWeather === 'light_snow' ? 8 : currentWeather === 'storm' || currentWeather === 'heavy_snow' ? 16 : 12)
+      : (currentWeather === 'drizzle' ? 14 : currentWeather === 'rain' ? 24 : currentWeather === 'storm' ? 38
+         : currentWeather === 'light_snow' ? 12 : currentWeather === 'snow' ? 18 : 26)
 
     while (weatherDrops.length < targetCount) {
-      let targetX, targetY, inWater = false
-      if (Math.random() < 0.8) {
-        for (let tries = 0; tries < 6; tries++) {
-          const rx = sceneFrame.x + random(.22, .80) * sceneFrame.width
-          const ry = sceneFrame.y + random(.12, .88) * sceneFrame.height
-          if (waterDistance(rx, ry) <= 1) { targetX = rx; targetY = ry; inWater = true; break }
-        }
-      }
-      if (!targetX) {
-        targetX = sceneFrame.x + random(0, 1) * sceneFrame.width
-        targetY = sceneFrame.y + random(.1, .95) * sceneFrame.height
-      }
+      const inWater = Math.random() < 0.85
+      const targetX = inWater
+        ? sceneFrame.x + (.24 + Math.random() * .54) * sceneFrame.width
+        : sceneFrame.x + Math.random() * sceneFrame.width
+      const targetY = inWater
+        ? sceneFrame.y + (.16 + Math.random() * .70) * sceneFrame.height
+        : sceneFrame.y + (.08 + Math.random() * .84) * sceneFrame.height
 
       const speed = isRain
         ? (currentWeather === 'storm' ? random(900, 1300) : currentWeather === 'rain' ? random(700, 950) : random(500, 700))
@@ -400,8 +395,8 @@
     }
 
     const nextDrops = []
-    const maxRipples = reduced ? 8 : 16
-    const maxMelts = reduced ? 6 : 12
+    const maxRipples = reduced ? 6 : 10
+    const maxMelts = reduced ? 4 : 6
 
     for (const d of weatherDrops) {
       d.y += d.speed * dt
@@ -461,11 +456,7 @@
         const driftX = Math.sin(t * 1.4 + d.phase) * 10
         const drawX = d.x + driftX, drawY = d.y
         if (hasSprite) {
-          ctx.save()
-          ctx.translate(drawX, drawY)
-          ctx.rotate(d.phase + t * 0.4)
-          ctx.drawImage(sImg, -d.size / 2, -d.size / 2, d.size, d.size)
-          ctx.restore()
+          ctx.drawImage(sImg, drawX - d.size / 2, drawY - d.size / 2, d.size, d.size)
         } else {
           ellipse(ctx, drawX, drawY, d.size * 0.25, d.size * 0.25, 'rgba(245, 252, 255, 0.9)')
         }
@@ -503,12 +494,8 @@
       const currentSize = m.size * (1 - progress * 0.45)
       const x = m.x + m.driftX * progress, y = m.y + m.driftY * progress
       if (hasSprite) {
-        ctx.save()
         ctx.globalAlpha = dissolveFade
-        ctx.translate(x, y)
-        ctx.rotate(m.rotation + progress * 0.3)
-        ctx.drawImage(sImg, -currentSize / 2, -currentSize * 0.3, currentSize, currentSize * 0.6)
-        ctx.restore()
+        ctx.drawImage(sImg, x - currentSize / 2, y - currentSize * 0.3, currentSize, currentSize * 0.6)
       } else {
         ellipse(ctx, x, y, currentSize * 0.25, currentSize * 0.12, `rgba(235, 248, 255, ${dissolveFade})`)
       }
@@ -601,6 +588,7 @@
   function updateWeatherUI() {
     const label = weatherLabels[currentWeather] || '晴天'
     document.body.dataset.weather = currentWeather
+    makeBackdrop()
     if ($('weather-name')) {
       $('weather-name').textContent = label
       $('weather-name').title = weatherSetting === 'auto' ? `当前实时天气：${label} (每20分钟自 Open-Meteo 同步)` : `当前手动天气：${label}`
@@ -716,15 +704,20 @@
       width: 1723 * scale, height: 913 * scale }
     b.fillStyle = night ? '#062339' : '#123f39'
     b.fillRect(0, 0, width, height)
-    const image = sceneImages[night ? 'night' : 'day']
+    const isRaining = currentWeather === 'drizzle' || currentWeather === 'rain' || currentWeather === 'storm'
+    const isSnowing = currentWeather === 'light_snow' || currentWeather === 'snow' || currentWeather === 'heavy_snow'
+    const isOvercast = currentWeather === 'overcast'
+    const image = night
+      ? (isRaining ? sceneImages.rainNight : (isSnowing ? sceneImages.snowNight : sceneImages.night))
+      : (isRaining ? sceneImages.rainDay : (isSnowing ? sceneImages.snowDay : (isOvercast ? sceneImages.overcastDay : sceneImages.day)))
     if (image.complete && image.naturalWidth) {
       b.drawImage(image, sceneFrame.x, sceneFrame.y, sceneFrame.width, sceneFrame.height)
     }
     if (period === 'dawn' || period === 'dusk') {
-      b.fillStyle = period === 'dawn' ? '#b8d9db30' : '#51283655'
+      b.fillStyle = period === 'dawn' ? '#b8d9db30' : '#f59c3a40'
       b.fillRect(0, 0, width, height)
       b.globalCompositeOperation = 'soft-light'
-      b.fillStyle = period === 'dawn' ? '#ffe8b866' : '#ed964a99'
+      b.fillStyle = period === 'dawn' ? '#ffe8b866' : '#ffb368b8'
       b.fillRect(0, 0, width, height)
       b.globalCompositeOperation = 'source-over'
     }
@@ -908,8 +901,8 @@
     if (!state || waterDistance(x, y) > 1) return
     const now = performance.now()
     // All input paths share the cooldown; rejected clicks never queue effects.
-    if (now - lastInteraction < 500) return
-    if (ripples.filter(r => r.age < window.koiWater.duration).length >= 3) return
+    if (now - lastInteraction < 140) return
+    if (ripples.filter(r => r.age < window.koiWater.duration).length >= 6) return
     lastInteraction = now
     if (mode === 'feed' && food.length >= 45) return
     ripples.push({ x, y, age: 0, strong: mode === 'ripple' })
@@ -1010,7 +1003,7 @@
       if (pellet >= 0 && distance < size(f) + 5 && Math.abs(delta) < .7) {
         food.splice(pellet, 1)
         if (f.lastFedBatch !== target.batch) { f.lastFedBatch = target.batch; addAffinity(f, 2) }
-        if (ripples.filter(r => r.age < window.koiWater.duration).length < 3) ripples.push({ x: target.x, y: target.y, age: 0 })
+        if (ripples.filter(r => r.age < window.koiWater.duration).length < 6) ripples.push({ x: target.x, y: target.y, age: 0 })
       }
       koi(f, reduced ? t * .4 : t)
     }
@@ -1120,6 +1113,22 @@
     }
     runningList.replaceChildren(...rows)
   }
+  const deselectFish = () => {
+    if (selected !== undefined) {
+      selected = undefined
+      update(state)
+    }
+  }
+  if ($('close-profile')) {
+    $('close-profile').onclick = deselectFish
+  }
+  window.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && selected !== undefined) {
+      e.stopImmediatePropagation()
+      e.preventDefault()
+      deselectFish()
+    }
+  }, true)
   $('rename-form').onsubmit = async e => {
     e.preventDefault()
     try {
@@ -1151,9 +1160,9 @@
   }
   document.addEventListener('visibilitychange', syncVisibility)
   for (const [name, image] of Object.entries(sceneImages)) {
-    image.onload = () => { if ((night ? 'night' : 'day') === name) makeBackdrop() }
+    image.onload = () => { makeBackdrop() }
     image.onerror = () => notify('庭院美术资源读取失败，请检查安装文件。')
-    image.src = `koi-pond-${name}.webp`
+    image.src = name === 'overcastDay' ? 'koi-pond-overcast-day.webp' : name === 'rainDay' ? 'koi-pond-rain-day.webp' : name === 'rainNight' ? 'koi-pond-rain-night.webp' : name === 'snowDay' ? 'koi-pond-snow-day.webp' : name === 'snowNight' ? 'koi-pond-snow-night.webp' : `koi-pond-${name}.webp`
   }
   syncTime()
   syncWeather(true)

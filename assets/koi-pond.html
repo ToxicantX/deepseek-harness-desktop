@@ -8,6 +8,11 @@
   <link rel="stylesheet" href="koi-pond.css">
   <link rel="preload" as="image" href="koi-pond-day.webp">
   <link rel="preload" as="image" href="koi-pond-night.webp">
+  <link rel="preload" as="image" href="koi-pond-overcast-day.webp">
+  <link rel="preload" as="image" href="koi-pond-rain-day.webp">
+  <link rel="preload" as="image" href="koi-pond-rain-night.webp">
+  <link rel="preload" as="image" href="koi-pond-snow-day.webp">
+  <link rel="preload" as="image" href="koi-pond-snow-night.webp">
   <link rel="preload" as="image" href="koi-event-petals.webp">
   <link rel="preload" as="image" href="koi-event-dragonfly.webp">
   <link rel="preload" as="image" href="koi-event-frog.webp">
@@ -68,8 +73,11 @@
       <p id="journey">正在读取庭院手记…</p>
       <div id="fish-list"></div>
       <div id="profile" hidden>
-        <form id="rename-form">
+        <div class="profile-header">
           <label for="fish-name">给它一个名字</label>
+          <button type="button" id="close-profile" title="取消选中" aria-label="取消选中">✕</button>
+        </div>
+        <form id="rename-form">
           <div class="name-row"><input id="fish-name" required maxlength="32" autocomplete="off"><button>落款</button></div>
         </form>
         <p id="lineage"></p>
