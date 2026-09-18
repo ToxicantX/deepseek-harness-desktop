@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import { readFile, rename } from 'node:fs/promises'
 import { join } from 'node:path'
 
@@ -6,10 +6,6 @@ const PLUGIN_NAME = 'dsh-multi-model-orchestrator'
 const MARKER_NAME = '.dsh-multi-model-orchestrator.json'
 const PRESET_IDS = ['multi-model-orchestrator', 'orchestrator'] as const
 const MANAGED_FILES = ['agent.cordis.yml', 'preset.yml'] as const
-
-function hash(value: Buffer): string {
-  return createHash('sha256').update(value).digest('hex')
-}
 
 async function pluginIsInstalled(home: string): Promise<boolean> {
   try {
@@ -37,7 +33,7 @@ async function isManagedPreset(target: string): Promise<boolean> {
     for (const name of MANAGED_FILES) {
       const expected = hashes[name]
       if (typeof expected !== 'string' || !/^[a-f0-9]{64}$/u.test(expected)) return false
-      if (hash(await readFile(join(target, name))) !== expected) return false
+      await readFile(join(target, name))
     }
     return true
   } catch {
@@ -45,7 +41,7 @@ async function isManagedPreset(target: string): Promise<boolean> {
   }
 }
 
-/** Preserve unchanged plugin-owned presets as backups after package removal. */
+/** Preserve plugin-owned presets as backups after package removal. */
 export async function cleanupRemovedPluginPresets(home: string): Promise<string[]> {
   if (await pluginIsInstalled(home)) return []
   const root = join(home, '.agent-presets')

@@ -45,11 +45,14 @@ describe('removed plugin preset cleanup', () => {
     await expect(backups).resolves.toEqual([expect.stringContaining('multi-model-orchestrator.desktop-uninstalled-')])
   })
 
-  it('keeps customized presets and installed plugin profiles untouched', async () => {
+  it('backs up customized managed presets and leaves installed plugin profiles untouched', async () => {
     const value = await fixture()
     await writeFile(join(value.target, 'agent.cordis.yml'), value.agent + '# customized\n')
     await writeFile(join(value.home, 'profiles', 'web', 'package.json'), JSON.stringify({ dependencies: { 'dsh-multi-model-orchestrator': 'github:ToxicantX/dsh-multi-model-orchestrator' } }))
     await expect(cleanupRemovedPluginPresets(value.home)).resolves.toEqual([])
     await expect(readFile(value.target + '/agent.cordis.yml', 'utf8')).resolves.toContain('customized')
+    await writeFile(join(value.home, 'profiles', 'web', 'package.json'), JSON.stringify({ private: true }))
+    await expect(cleanupRemovedPluginPresets(value.home)).resolves.toEqual(['multi-model-orchestrator'])
+    await expect(access(value.target)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })
