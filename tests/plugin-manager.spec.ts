@@ -83,6 +83,7 @@ describe('plugin manager pnpm recovery', () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-plugin-manager-'))
     const profile = join(root, 'profiles', 'web')
     await mkdir(profile, { recursive: true })
+    await writeFile(join(profile, 'package.json'), JSON.stringify({ dsh: { profile: { bundles: ['@deepseek-ai/dsh-web-app'] } } }))
     let calls = 0
     const key = 'dsh-multi-model-orchestrator@https://codeload.github.com/ToxicantX/dsh-multi-model-orchestrator/tar.gz/commit'
     const manager = new PluginManager({
@@ -112,6 +113,34 @@ describe('plugin manager pnpm recovery', () => {
     }
     expect(calls).toBe(2)
     expect(await readFile(join(profile, 'pnpm-workspace.yaml'), 'utf8')).toContain(key + ': true')
+    expect(JSON.parse(await readFile(join(profile, 'package.json'), 'utf8')).dsh.profile.bundles)
+      .toEqual(['@deepseek-ai/dsh-web-app', 'dsh-multi-model-orchestrator'])
+  })
+
+  it('removes a plugin from the profile bundles after uninstall', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-plugin-manager-'))
+    const profile = join(root, 'profiles', 'web')
+    await mkdir(profile, { recursive: true })
+    await writeFile(join(profile, 'package.json'), JSON.stringify({ dsh: { profile: { bundles: ['dsh-multi-model-orchestrator'] } } }))
+    const manager = new PluginManager({
+      runtime: () => runtime(),
+      home: root,
+      runProcess: () => {
+        const child = new FakeProcess()
+        queueMicrotask(() => { child.stdout.end(); child.stderr.end(); child.emit('close', 0, null) })
+        return child as any
+      },
+    })
+    const started = await manager.start({ action: 'remove', packageName: 'dsh-multi-model-orchestrator' })
+    for (;;) {
+      const status = manager.status(started.operationId)
+      if (status.state !== 'preparing' && status.state !== 'running' && status.state !== 'repairing') {
+        expect(status.state).toBe('succeeded')
+        break
+      }
+      await new Promise(resolve => setTimeout(resolve, 5))
+    }
+    expect(JSON.parse(await readFile(join(profile, 'package.json'), 'utf8')).dsh.profile.bundles).toEqual([])
   })
 
   it('rolls back Profile files when a repaired plugin operation still fails', async () => {

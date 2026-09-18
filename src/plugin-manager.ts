@@ -249,6 +249,14 @@ function allowBuildsKey(output: string, input: PluginStartInput): string | undef
   return input.action === 'add' ? packageNameFromSpec(input.spec) : undefined
 }
 
+function packageNameForSpec(spec: string): string | undefined {
+  const github = packageNameFromSpec(spec)
+  if (github !== undefined) return github
+  const at = spec.startsWith('@') ? spec.indexOf('@', spec.indexOf('/') + 1) : spec.indexOf('@')
+  const name = at === -1 ? spec : spec.slice(0, at)
+  try { return validatePackageName(name) } catch { return undefined }
+}
+
 async function readInstalledPluginVersion(
   profilePath: string,
   name: string,
@@ -455,7 +463,10 @@ export class PluginManager {
           if (settled) return
           delete record.child
           if (code === 0) {
-            finish('succeeded')
+            void this.synchronizeProfileBundle(input).then(
+              () => finish('succeeded'),
+              (error: unknown) => fail('无法同步插件 Profile：' + (error instanceof Error ? error.message : String(error))),
+            )
             return
           }
           if (signal === null
@@ -622,6 +633,30 @@ export class PluginManager {
       await this.removeDirectory(join(profile, 'node_modules'))
       await this.removeFile(join(profile, 'pnpm-lock.yaml.tmp'))
     }
+  }
+
+  private async synchronizeProfileBundle(input: PluginStartInput): Promise<void> {
+    const packageFile = join(this.home, 'profiles', 'web', 'package.json')
+    let source: string
+    try { source = await readFile(packageFile, 'utf8') } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+      throw error
+    }
+    const manifest = object(JSON.parse(source) as unknown, 'plugin profile manifest')
+    const dsh = manifest.dsh === undefined ? {} : object(manifest.dsh, 'plugin profile dsh config')
+    const profile = dsh.profile === undefined ? {} : object(dsh.profile, 'plugin profile config')
+    const bundles = profile.bundles === undefined ? [] : profile.bundles
+    if (!Array.isArray(bundles) || bundles.some(value => typeof value !== 'string')) throw new Error('plugin profile bundles are invalid')
+    const packageName = input.action === 'add' ? packageNameForSpec(input.spec) : input.packageName
+    if (packageName === undefined) return
+    const next = input.action === 'remove'
+      ? bundles.filter(value => value !== packageName)
+      : bundles.includes(packageName) ? bundles : [...bundles, packageName]
+    if (next.length === bundles.length && next.every((value, index) => value === bundles[index])) return
+    profile.bundles = next
+    dsh.profile = profile
+    manifest.dsh = dsh
+    await writeFile(packageFile, JSON.stringify(manifest, null, 2) + '\n', 'utf8')
   }
 
   private async snapshotProfile(): Promise<ProfileBackup> {
