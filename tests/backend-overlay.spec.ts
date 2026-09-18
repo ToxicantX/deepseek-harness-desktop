@@ -42,7 +42,7 @@ function forkWith(child: FakeChild, args: string[][]) {
 describe('backend overlay integration', () => {
   it('selects the Runtime Session replacement format without trusting inherited flags', () => {
     for (const [version, format] of [
-      ['0.1.3-alpha.2', 'legacy'], ['0.1.5-rc.2', 'seq'], ['0.1.6-alpha.1', 'seq'],
+      ['0.1.3-alpha.2', 'legacy'], ['0.1.5-rc.2', 'seq'], ['0.1.6-alpha.1', 'seq'], ['0.1.6-alpha.2', 'seq'],
     ]) {
       expect(desktopEnvironment(runtime(version), { DSH_DESKTOP_REPLAY_SURFACE_FORMAT: 'legacy' })
         .DSH_DESKTOP_REPLAY_SURFACE_FORMAT).toBe(format)

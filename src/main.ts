@@ -41,6 +41,7 @@ import { RuntimeController, type RuntimeView } from './runtime-controller.ts'
 import { SessionRepairClient } from './session-repair.ts'
 import { SettingsDocumentClient } from './settings-document.ts'
 import { RuntimeStore } from './runtime-store.ts'
+import { pruneRuntimeAuthCookies } from './runtime-auth-cookies.ts'
 import { ShellUpdater, type ShellUpdateProgress } from './shell-updater.ts'
 import { createFileContextInjectorScript } from './file-context-injector.ts'
 import { createClientBundleAdapterScript, createSkinDisposerScript, createSkinMarketInjectorScript } from './skin-market-injector.ts'
@@ -903,6 +904,7 @@ async function startApplication(): Promise<void> {
       installTrayMenu()
       const window = mainWindow
       if (window === undefined) return
+      await pruneRuntimeAuthCookies(window.webContents.session.cookies, url)
       if (pluginIsolation?.supported(_runtime) && (await pluginIsolation.packages()).length > 0) {
         await loadAndValidatePlugins(window.webContents, url, async () => { await window.loadURL(url.href) })
       } else await window.loadURL(url.href)
