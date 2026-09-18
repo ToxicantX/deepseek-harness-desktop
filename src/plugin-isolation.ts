@@ -133,6 +133,15 @@ export class PluginIsolation {
     return true
   }
 
+  async forget(name: string): Promise<boolean> {
+    if (!thirdParty(name)) throw new Error('Invalid third-party plugin name')
+    const rows = await this.list()
+    const retained = rows.filter(row => row.name !== name)
+    if (retained.length === rows.length) return false
+    await this.save(retained)
+    return true
+  }
+
   async incompatible(runtime: InstalledRuntime): Promise<string[]> {
     if (!this.supported(runtime)) return []
     try { createRequire(runtime.dshBin).resolve(legacyClient + '/client'); return [] }

@@ -15,8 +15,10 @@ const OPERATION_TIMEOUT_MS = 15 * 60_000
 const UPDATE_CHECK_TIMEOUT_MS = 8_000
 const MAX_UPDATE_BYTES = 256 * 1024
 const VIRTUAL_STORE_MISMATCH = 'ERR_PNPM_VIRTUAL_STORE_DIR_MAX_LENGTH_DIFF'
+const UNEXPECTED_STORE = 'ERR_PNPM_UNEXPECTED_STORE'
 const EPERM_SYMLINK = /EPERM[^\n]*symlink/iu
 const ALLOW_BUILDS_HINT = /allowBuilds/iu
+const IGNORED_BUILDS = /Ignored build scripts:\s*([^\r\n]+)/iu
 
 export type PluginAction = 'add' | 'update' | 'remove'
 
@@ -241,6 +243,12 @@ function supportsManualUpdate(spec: string): boolean {
   return /^(?:github:|git(?:\+|:)|(?:git\+)?https:\/\/github\.com\/|file:|link:|workspace:)/u.test(spec)
 }
 
+function allowBuildsKey(output: string, input: PluginStartInput): string | undefined {
+  const key = IGNORED_BUILDS.exec(output)?.[1]?.trim()
+  if (key !== undefined && key.length > 0) return key
+  return input.action === 'add' ? packageNameFromSpec(input.spec) : undefined
+}
+
 async function readInstalledPluginVersion(
   profilePath: string,
   name: string,
@@ -454,7 +462,8 @@ export class PluginManager {
             && !repairAttempted
             && !this.disposed
             && this.activeOperationId === operationId
-            && (record.output.includes(VIRTUAL_STORE_MISMATCH) || EPERM_SYMLINK.test(record.output) || ALLOW_BUILDS_HINT.test(record.output))) {
+            && (record.output.includes(VIRTUAL_STORE_MISMATCH) || record.output.includes(UNEXPECTED_STORE)
+              || EPERM_SYMLINK.test(record.output) || ALLOW_BUILDS_HINT.test(record.output) || IGNORED_BUILDS.test(record.output))) {
             repairAttempted = true
             record.state = 'repairing'
             record.output = appendOutput(record.output, '\n正在修复 pnpm Profile 配置并重建插件目录后重试...\n')
@@ -599,8 +608,8 @@ export class PluginManager {
     try { workspaceText = await readFile(workspace, 'utf8') } catch (error: unknown) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     }
-    if (input.action === 'add' && (ALLOW_BUILDS_HINT.test(output) || EPERM_SYMLINK.test(output))) {
-      const packageName = packageNameFromSpec(input.spec)
+    if (input.action === 'add' && (ALLOW_BUILDS_HINT.test(output) || IGNORED_BUILDS.test(output) || EPERM_SYMLINK.test(output))) {
+      const packageName = allowBuildsKey(output, input)
       if (packageName !== undefined) workspaceText = updateAllowBuildsText(workspaceText, packageName)
     }
     if (workspaceText.length > 0 || input.action === 'add') await writeFile(workspace, workspaceText.length > 0 ? workspaceText : 'packages:\n  - .\n')
@@ -609,7 +618,7 @@ export class PluginManager {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     }
     await writeFile(npmrc, ensureNpmrcText(npmrcText))
-    if (EPERM_SYMLINK.test(output) || output.includes(VIRTUAL_STORE_MISMATCH)) {
+    if (EPERM_SYMLINK.test(output) || output.includes(VIRTUAL_STORE_MISMATCH) || output.includes(UNEXPECTED_STORE)) {
       await this.removeDirectory(join(profile, 'node_modules'))
       await this.removeFile(join(profile, 'pnpm-lock.yaml.tmp'))
     }

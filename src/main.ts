@@ -37,6 +37,7 @@ import { openExplorerDirectory } from './open-in-app-compatibility.ts'
 import type { UsageScanProgress } from './usage-monitor.ts'
 import { UsageMonitorService } from './usage-monitor-service.ts'
 import { PluginRestartCoordinator } from './plugin-restart.ts'
+import { cleanupRemovedPluginPresets } from './plugin-removal-cleanup.ts'
 import { RuntimeController, type RuntimeView } from './runtime-controller.ts'
 import { SessionRepairClient } from './session-repair.ts'
 import { SettingsDocumentClient } from './settings-document.ts'
@@ -1190,6 +1191,11 @@ ipcMain.handle('plugin-manager:restart', async (event, operationId: unknown) => 
   const service = pluginService(event)
   const runtimeController = controller
   if (runtimeController === undefined) throw new Error('DSH Runtime 控制器尚未初始化')
+  const operation = service.status(operationId)
+  if (operation.action === 'remove' && operation.packageName === 'dsh-multi-model-orchestrator') {
+    await cleanupRemovedPluginPresets(process.env.DSH_HOME ?? join(homedir(), '.dsh'))
+    await pluginIsolation?.forget(operation.packageName)
+  }
   return pluginRestartCoordinator.restart(operationId as string, {
     status: id => service.status(id),
     async showSetup() { if (mainWindow !== undefined) await showSetup(mainWindow) },

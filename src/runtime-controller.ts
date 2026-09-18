@@ -16,6 +16,7 @@ import { prepareGoalGuardOverlay } from './goal-guard-overlay.ts'
 import { PluginImportFailure, PluginIsolation } from './plugin-isolation.ts'
 import { inspectProfileBundleRecovery, type ProfileBundleRecoveryPlan } from './profile-bundle-recovery.ts'
 import { preparePluginPresetCompatibility, type PluginPresetCompatibilityInput } from './plugin-preset-compatibility.ts'
+import { cleanupRemovedPluginPresets } from './plugin-removal-cleanup.ts'
 import { inspectPluginPresetRecovery, type PluginPresetRecoveryPlan } from './plugin-preset-recovery.ts'
 import { inspectAgentPresetSchemaRecovery } from './agent-preset-schema-recovery.ts'
 import { RuntimeStore, type InstalledRuntime, type RuntimeState } from './runtime-store.ts'
@@ -427,6 +428,7 @@ export class RuntimeController {
     this.update('starting', message)
     const home = this.environment.DSH_HOME ?? join(homedir(), '.dsh')
     await mkdir(home, { recursive: true })
+    await cleanupRemovedPluginPresets(home)
     try {
       const compatiblePlugin = await this.preparePluginPresetCompatibility({ home, runtime })
       if (compatiblePlugin !== undefined) await this.pluginIsolation?.releaseRemovedClientRuntime(compatiblePlugin)

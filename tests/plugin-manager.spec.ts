@@ -79,6 +79,41 @@ describe('plugin manager pnpm recovery', () => {
     expect(await readFile(join(profile, '.npmrc'), 'utf8')).toContain('package-import-method=copy')
   })
 
+  it('uses pnpm 11 exact ignored-build keys when retrying a GitHub plugin install', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-plugin-manager-'))
+    const profile = join(root, 'profiles', 'web')
+    await mkdir(profile, { recursive: true })
+    let calls = 0
+    const key = 'dsh-multi-model-orchestrator@https://codeload.github.com/ToxicantX/dsh-multi-model-orchestrator/tar.gz/commit'
+    const manager = new PluginManager({
+      runtime: () => runtime(),
+      home: root,
+      runProcess: () => {
+        calls++
+        const child = new FakeProcess()
+        queueMicrotask(() => {
+          if (calls === 1) child.stderr.write('[ERR_PNPM_IGNORED_BUILDS] Ignored build scripts: ' + key + '\nRun "pnpm approve-builds" to pick which dependencies should be allowed to run scripts.')
+          child.stdout.end()
+          child.stderr.end()
+          child.emit('close', calls === 1 ? 1 : 0, null)
+        })
+        return child as any
+      },
+    })
+
+    const started = await manager.start({ action: 'add', spec: 'github:ToxicantX/dsh-multi-model-orchestrator' })
+    for (;;) {
+      const status = manager.status(started.operationId)
+      if (status.state !== 'preparing' && status.state !== 'running' && status.state !== 'repairing') {
+        expect(status.state).toBe('succeeded')
+        break
+      }
+      await new Promise(resolve => setTimeout(resolve, 5))
+    }
+    expect(calls).toBe(2)
+    expect(await readFile(join(profile, 'pnpm-workspace.yaml'), 'utf8')).toContain(key + ': true')
+  })
+
   it('rolls back Profile files when a repaired plugin operation still fails', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-plugin-manager-'))
     const profile = join(root, 'profiles', 'web')
