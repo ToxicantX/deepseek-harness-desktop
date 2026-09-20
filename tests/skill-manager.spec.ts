@@ -35,6 +35,8 @@ describe('SkillManager', () => {
     await writeFile(join(paths.agentsHome, 'skills', 'invalid.md'), 'not a skill')
     await mkdir(join(paths.geminiHome, 'skills', 'gemini-skill'), { recursive: true })
     await writeFile(join(paths.geminiHome, 'skills', 'gemini-skill', 'SKILL.md'), '---\nname: gemini-skill\ndescription: Gemini\n---\nbody\n')
+    await mkdir(join(paths.codexHome, 'skills'), { recursive: true })
+    await writeFile(join(paths.codexHome, 'skills', 'gemini-skill.md'), '---\nname: gemini-skill\ndescription: Gemini duplicate\n---\nbody\n')
     await mkdir(join(paths.antigravityHome, 'skills'), { recursive: true })
     await writeFile(join(paths.antigravityHome, 'skills', 'antigravity-skill.md'), '---\nname: antigravity-skill\ndescription: Antigravity\n---\nbody\n')
 
@@ -43,11 +45,13 @@ describe('SkillManager', () => {
       { name: 'antigravity-skill', source: 'user-antigravity', kind: 'file', managed: false },
       { name: 'bundle-skill', source: 'user-dsh', kind: 'bundle', modelInvocable: false, userInvocable: true },
       { name: 'flat-skill', source: 'user-agents', kind: 'file', modelInvocable: true, userInvocable: false },
-      { name: 'gemini-skill', source: 'user-gemini', kind: 'bundle', managed: false },
+      { name: 'gemini-skill', source: 'user-codex', kind: 'file', managed: false },
     ])
     expect(list.entries).toHaveLength(4)
     const gemini = list.entries.find(entry => entry.name === 'gemini-skill')
     if (gemini === undefined) throw new Error('Gemini fixture missing')
+    expect(gemini.sources).toEqual(['user-codex', 'user-gemini'])
+    expect(gemini.enabled).toBe(false)
     await expect(new SkillManager(paths).remove(gemini.id, list.revision)).rejects.toThrow('外部 Skill')
     const antigravity = list.entries.find(entry => entry.name === 'antigravity-skill')
     if (antigravity === undefined) throw new Error('Antigravity fixture missing')
@@ -62,6 +66,20 @@ describe('SkillManager', () => {
     const imported = await manager.import(join(paths.external, 'imported'))
     expect(imported.entries[0]).toMatchObject({ name: 'imported-skill', source: 'user-dsh', kind: 'bundle' })
     await expect(manager.import(join(paths.external, 'imported'))).rejects.toThrow('Skill 已存在')
+  })
+
+  it('enables an external skill in DSH and disables its managed copy', async () => {
+    const paths = await fixture()
+    await mkdir(join(paths.claudeHome, 'skills'), { recursive: true })
+    await writeFile(join(paths.claudeHome, 'skills', 'external-skill.md'), '---\nname: external-skill\ndescription: External\n---\nbody\n')
+    const manager = new SkillManager(paths)
+    const before = await manager.list()
+    const entry = before.entries[0]
+    if (entry === undefined) throw new Error('fixture missing')
+    const enabled = await manager.setEnabled({ id: entry.id, enabled: true, expectedRevision: before.revision })
+    expect(enabled.entries[0]).toMatchObject({ name: 'external-skill', source: 'user-dsh', managed: true, enabled: true })
+    const disabled = await manager.setEnabled({ id: entry.id, enabled: false, expectedRevision: enabled.revision })
+    expect(disabled.entries[0]).toMatchObject({ name: 'external-skill', source: 'user-claude', managed: false, enabled: false })
   })
 
   it('rejects stale and unsafe removals', async () => {

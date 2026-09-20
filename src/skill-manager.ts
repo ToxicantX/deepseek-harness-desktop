@@ -21,11 +21,19 @@ export interface SkillEntry {
   path: string
   kind: 'bundle' | 'file'
   managed: boolean
+  enabled: boolean
+  sources: SkillRootKind[]
 }
 
 export interface SkillList {
   revision: string
   entries: SkillEntry[]
+}
+
+export interface SkillSetEnabledInput {
+  id: string
+  enabled: boolean
+  expectedRevision: string
 }
 
 export interface SkillManagerOptions {
@@ -53,6 +61,10 @@ interface Candidate {
   kind: SkillEntry['kind']
   contentPath: string
   managed: boolean
+}
+
+interface DiscoveredCandidate extends Candidate, ParsedSkill {
+  contentHash: string
 }
 
 function text(value: unknown, label: string): string {
@@ -106,8 +118,8 @@ async function readSkill(path: string): Promise<ParsedSkill> {
   return parseSkill(source)
 }
 
-function entryId(candidate: Candidate): string {
-  return createHash('sha256').update(candidate.source).update('\0').update(candidate.path).digest('hex').slice(0, 24)
+function entryId(name: string): string {
+  return createHash('sha256').update('skill').update('\0').update(name).digest('hex').slice(0, 24)
 }
 
 function rootPaths(options: SkillManagerOptions): Array<{ source: SkillRootKind; root: string; managed: boolean }> {
@@ -142,8 +154,7 @@ export class SkillManager {
   }
 
   async list(): Promise<SkillList> {
-    const entries: SkillEntry[] = []
-    const contentHashes = new Map<string, string>()
+    const discovered = new Map<string, DiscoveredCandidate[]>()
     for (const { source, root, managed } of this.roots) {
       let items
       try { items = await readdir(root, { withFileTypes: true }) } catch { continue }
@@ -157,16 +168,42 @@ export class SkillManager {
         if (candidate === undefined) continue
         try {
           const parsed = await readSkill(candidate.contentPath)
-          contentHashes.set(candidate.path, createHash('sha256').update(await readFile(candidate.contentPath)).digest('hex'))
-          entries.push({ id: entryId(candidate), ...parsed, source, root, path, kind: candidate.kind, managed })
+          const contentHash = createHash('sha256').update(await readFile(candidate.contentPath)).digest('hex')
+          const siblings = discovered.get(parsed.name) ?? []
+          siblings.push({ ...candidate, ...parsed, contentHash })
+          discovered.set(parsed.name, siblings)
         } catch {
           // Invalid skills are ignored by DSH and should not block management of valid siblings.
         }
       }
     }
-    entries.sort((left, right) => left.name.localeCompare(right.name) || left.source.localeCompare(right.source))
+    const entries: SkillEntry[] = []
+    for (const [name, candidates] of discovered) {
+      const active = candidates.find(candidate => candidate.managed)
+      const primary = active ?? candidates[0]
+      if (primary === undefined) continue
+      entries.push({
+        id: entryId(name),
+        name: primary.name,
+        description: primary.description,
+        ...(primary.whenToUse === undefined ? {} : { whenToUse: primary.whenToUse }),
+        modelInvocable: primary.modelInvocable,
+        userInvocable: primary.userInvocable,
+        source: primary.source,
+        root: primary.root,
+        path: primary.path,
+        kind: primary.kind,
+        managed: active !== undefined,
+        enabled: active !== undefined,
+        sources: [...new Set(candidates.map(candidate => candidate.source))],
+      })
+    }
+    entries.sort((left, right) => left.name.localeCompare(right.name))
     const hash = createHash('sha256')
-    for (const entry of entries) hash.update(JSON.stringify(entry)).update(contentHashes.get(entry.path) ?? '')
+    for (const [name, candidates] of [...discovered.entries()].sort(([left], [right]) => left.localeCompare(right))) {
+      hash.update(name)
+      for (const candidate of candidates) hash.update(JSON.stringify(candidate)).update(candidate.contentHash)
+    }
     return { revision: hash.digest('hex'), entries }
   }
 
@@ -194,8 +231,79 @@ export class SkillManager {
     const entry = current.entries.find(item => item.id === id)
     if (entry === undefined) throw new Error('Skill 不存在或已变化')
     if (!entry.managed) throw new Error('外部 Skill 只能查看或导入，不能由壳删除')
-    if (!underRoot(entry.path, entry.root)) throw new Error('Skill 路径不在受管理目录内')
-    await rm(entry.path, { recursive: entry.kind === 'bundle', force: false })
+    await this.removeManagedCopies(entry.name)
     return this.list()
   }
+
+  async setEnabled(value: unknown): Promise<SkillList> {
+    const input = parseSetEnabledInput(value)
+    const current = await this.list()
+    if (current.revision !== input.expectedRevision) throw new Error('Skill 列表已变化，请刷新后重试')
+    const entry = current.entries.find(item => item.id === input.id)
+    if (entry === undefined) throw new Error('Skill 不存在或已变化')
+    if (entry.enabled === input.enabled) return current
+    if (!input.enabled) {
+      await this.removeManagedCopies(entry.name)
+      return this.list()
+    }
+    const candidate = await this.findExternalCandidate(entry.name)
+    if (candidate === undefined) throw new Error('没有可接入 DSH 的外部 Skill')
+    const targetRoot = this.roots.find(item => item.source === 'user-dsh')?.root
+    if (targetRoot === undefined) throw new Error('Skill 目标目录不可用')
+    await mkdir(targetRoot, { recursive: true })
+    const target = candidate.kind === 'bundle' ? join(targetRoot, entry.name) : join(targetRoot, entry.name + '.md')
+    try { await stat(target); throw new Error('Skill 已存在：' + entry.name) } catch (error: unknown) {
+      if (error instanceof Error && error.message.startsWith('Skill 已存在：')) throw error
+    }
+    await cp(candidate.path, target, { recursive: candidate.kind === 'bundle', errorOnExist: true, force: false })
+    return this.list()
+  }
+
+  private async findExternalCandidate(name: string): Promise<Candidate | undefined> {
+    for (const { source, root, managed } of this.roots) {
+      if (managed) continue
+      let items
+      try { items = await readdir(root, { withFileTypes: true }) } catch { continue }
+      for (const item of items) {
+        const path = join(root, item.name)
+        const candidate: Candidate | undefined = item.isDirectory()
+          ? { source, root, path, kind: 'bundle', contentPath: join(path, 'SKILL.md'), managed }
+          : item.isFile() && extname(item.name).toLocaleLowerCase('en-US') === '.md' && item.name !== 'SKILL.md'
+            ? { source, root, path, kind: 'file', contentPath: path, managed }
+            : undefined
+        if (candidate === undefined) continue
+        try {
+          const parsed = await readSkill(candidate.contentPath)
+          if (parsed.name === name) return candidate
+        } catch {}
+      }
+    }
+    return undefined
+  }
+
+  private async removeManagedCopies(name: string): Promise<void> {
+    for (const { root, managed } of this.roots) {
+      if (!managed) continue
+      let items
+      try { items = await readdir(root, { withFileTypes: true }) } catch { continue }
+      for (const item of items) {
+        const path = join(root, item.name)
+        const contentPath = item.isDirectory() ? join(path, 'SKILL.md') : path
+        if (item.isFile() && (extname(item.name).toLocaleLowerCase('en-US') !== '.md' || item.name === 'SKILL.md')) continue
+        let parsed: ParsedSkill
+        try { parsed = await readSkill(contentPath) } catch { continue }
+        if (parsed.name === name) await rm(path, { recursive: item.isDirectory(), force: false })
+      }
+    }
+  }
+}
+
+function parseSetEnabledInput(value: unknown): SkillSetEnabledInput {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('Skill 开关请求无效')
+  const input = value as Record<string, unknown>
+  if (typeof input.id !== 'string' || !/^[a-f0-9]{24}$/u.test(input.id)
+    || typeof input.enabled !== 'boolean' || typeof input.expectedRevision !== 'string' || !/^[a-f0-9]{64}$/u.test(input.expectedRevision)) {
+    throw new TypeError('Skill 开关请求无效')
+  }
+  return { id: input.id, enabled: input.enabled, expectedRevision: input.expectedRevision }
 }

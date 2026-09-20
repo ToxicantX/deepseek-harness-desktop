@@ -35,9 +35,17 @@
     .skill-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
     .skill-name { font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
     .badge { display: inline-flex; align-items: center; min-height: 21px; padding: 2px 7px; border: 1px solid #cfd4da; border-radius: 5px; background: #fff; color: #50565e; font-size: 11px; }
+    .badge.enabled { border-color: #a8cfb4; background: #edf8f0; color: #21683a; }
     .badge.off { border-color: #d6b7b7; background: #fff3f3; color: #973434; }
     .skill-description, .skill-meta { color: #676d75; font-size: 12px; overflow-wrap: anywhere; }
     .skill-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
+    .switch { position: relative; display: inline-flex; align-items: center; width: 42px; height: 24px; flex: 0 0 auto; }
+    .switch input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+    .switch-track { width: 42px; height: 24px; border: 1px solid #aeb4bc; border-radius: 12px; background: #c8cdd3; transition: background .12s ease, border-color .12s ease; }
+    .switch-track::after { content: ""; display: block; width: 18px; height: 18px; margin: 2px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / 22%); transition: transform .12s ease; }
+    .switch input:checked + .switch-track { border-color: #1769d2; background: #1769d2; }
+    .switch input:checked + .switch-track::after { transform: translateX(18px); }
+    .switch input:focus-visible + .switch-track { outline: 2px solid #1769d2; outline-offset: 2px; }
     #skill-empty { margin: 0; padding: 48px 16px; text-align: center; color: #737982; font-size: 13px; border-bottom: 1px solid #d9dde3; }
     @media (max-width: 680px) {
       body { min-width: 360px; }
@@ -51,7 +59,7 @@
 </head>
 <body>
   <main id="skill-manager-page">
-    <header><h1>Skill 管理</h1><span id="skill-count">0 个 Skill</span></header>
+    <header><h1>Skill 管理</h1><span id="skill-count">0 个 Skill · 0 个在 DSH 中启用</span></header>
     <section class="toolbar" aria-label="筛选 Skill">
       <input id="skill-search" class="search" type="search" maxlength="160" autocomplete="off" spellcheck="false" placeholder="搜索名称、描述或来源" aria-label="搜索 Skill">
       <button id="skill-import" class="primary" type="button">导入</button>

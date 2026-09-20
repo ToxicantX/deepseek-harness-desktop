@@ -569,6 +569,7 @@ function initializePluginManagerPage(): void {
       setStatus(label + '完成', 'success')
     } catch (error: unknown) {
       setStatus(errorMessage(error), 'error')
+      try { await loadEntries() } catch {}
     } finally {
       setBusy(false)
     }
@@ -610,15 +611,15 @@ function initializeSkillManagerPage(): void {
     importButton.disabled = value
     refreshButton.disabled = value
     progress.hidden = !value
-    for (const button of list.querySelectorAll<HTMLButtonElement>('button')) button.disabled = value
+    for (const control of list.querySelectorAll<HTMLInputElement | HTMLButtonElement>('input, button')) control.disabled = value
   }
-  const sourceLabel = (entry: SkillEntry): string => {
-    if (entry.source === 'user-dsh') return 'DSH 用户目录'
-    if (entry.source === 'user-agents') return 'Agent 用户目录'
-    if (entry.source === 'user-codex') return 'Codex 用户目录'
-    if (entry.source === 'user-claude') return 'Claude 用户目录'
-    if (entry.source === 'user-gemini') return 'Gemini 用户目录'
-    return 'Antigravity 用户目录'
+  const sourceLabel = (source: SkillEntry['source']): string => {
+    if (source === 'user-dsh') return 'DSH'
+    if (source === 'user-agents') return 'Agent'
+    if (source === 'user-codex') return 'Codex'
+    if (source === 'user-claude') return 'Claude'
+    if (source === 'user-gemini') return 'Gemini'
+    return 'Antigravity'
   }
   const visibleEntries = (): SkillEntry[] => {
     const query = search.value.trim().toLocaleLowerCase('zh-CN')
@@ -627,7 +628,8 @@ function initializeSkillManagerPage(): void {
   }
   const render = (): void => {
     const entries = snapshot?.entries ?? []
-    element('skill-count').textContent = String(entries.length) + ' 个 Skill'
+    const enabledCount = entries.filter(entry => entry.enabled).length
+    element('skill-count').textContent = String(entries.length) + ' 个 Skill · ' + String(enabledCount) + ' 个在 DSH 中启用'
     const visible = visibleEntries()
     list.replaceChildren()
     empty.hidden = visible.length !== 0
@@ -650,15 +652,31 @@ function initializeSkillManagerPage(): void {
         badge.textContent = label + (enabled ? '已开启' : '已关闭')
         title.append(badge)
       }
+      const state = document.createElement('span')
+      state.className = entry.enabled ? 'badge enabled' : 'badge off'
+      state.textContent = entry.enabled ? 'DSH 已启用' : 'DSH 未启用'
+      title.append(state)
       const description = document.createElement('div')
       description.className = 'skill-description'
       description.textContent = entry.description
       const meta = document.createElement('div')
       meta.className = 'skill-meta'
-      meta.textContent = sourceLabel(entry) + ' · ' + entry.kind + ' · ' + entry.root
+      meta.textContent = entry.sources.map(sourceLabel).join(' / ') + ' · ' + entry.kind + ' · ' + entry.root
       main.append(title, description, meta)
       const actions = document.createElement('div')
       actions.className = 'skill-actions'
+      const switchLabel = document.createElement('label')
+      switchLabel.className = 'switch'
+      const toggle = document.createElement('input')
+      toggle.type = 'checkbox'
+      toggle.checked = entry.enabled
+      toggle.setAttribute('aria-label', (entry.enabled ? '从 DSH 禁用 ' : '在 DSH 启用 ') + entry.name)
+      toggle.title = entry.enabled ? '从 DSH 禁用' : '在 DSH 启用'
+      const track = document.createElement('span')
+      track.className = 'switch-track'
+      switchLabel.append(toggle, track)
+      toggle.addEventListener('change', () => { void setEnabled(entry, toggle.checked) })
+      actions.append(switchLabel)
       if (entry.managed) {
         const remove = document.createElement('button')
         remove.type = 'button'
@@ -672,12 +690,28 @@ function initializeSkillManagerPage(): void {
       } else {
         const readonly = document.createElement('span')
         readonly.className = 'badge'
-        readonly.textContent = '外部只读'
+        readonly.textContent = '可接入 DSH'
         actions.append(readonly)
       }
       row.append(main, actions)
       list.append(row)
     }
+  }
+  async function setEnabled(entry: SkillEntry, enabled: boolean): Promise<void> {
+    const current = snapshot
+    if (busy || current === undefined) return
+    setBusy(true)
+    setStatus((enabled ? '正在接入 DSH ' : '正在从 DSH 禁用 ') + entry.name + '...')
+    try {
+      snapshot = await ipcRenderer.invoke('skill-manager:set-enabled', {
+        id: entry.id,
+        enabled,
+        expectedRevision: current.revision,
+      }) as SkillList
+      render()
+      setStatus(entry.name + (enabled ? ' 已在 DSH 中启用' : ' 已从 DSH 禁用'), 'success')
+    } catch (error: unknown) { setStatus(errorMessage(error), 'error'); render() }
+    finally { setBusy(false) }
   }
   const load = async (): Promise<void> => {
     if (busy) return

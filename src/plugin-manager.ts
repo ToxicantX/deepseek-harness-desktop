@@ -543,6 +543,11 @@ export class PluginManager {
     this.pendingRestartOperationId = undefined
   }
 
+  markRestartFailed(value: unknown): void {
+    const operation = this.status(value)
+    if (this.pendingRestartOperationId === operation.operationId) this.pendingRestartOperationId = undefined
+  }
+
   dispose(): void {
     if (this.disposed) return
     this.disposed = true

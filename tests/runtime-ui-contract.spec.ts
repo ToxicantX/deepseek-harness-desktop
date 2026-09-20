@@ -41,7 +41,7 @@ describe('runtime startup UI contract', () => {
     expect(html).not.toMatch(/<script| on[a-z]+=/iu)
   })
 
-  it('keeps the application menu hidden until the trusted DSH page finishes loading', () => {
+  it('keeps the application menu hidden until the trusted DSH page finishes loading, then exposes recovery controls on failure', () => {
     const createWindow = main.slice(main.indexOf('function createWindow'), main.indexOf('function showMainWindow'))
     const setup = main.slice(main.indexOf('async function showSetup'), main.indexOf('function sendView'))
     const sync = main.slice(main.indexOf('function syncMainMenuVisibility'), main.indexOf('function createWindow'))
@@ -52,11 +52,16 @@ describe('runtime startup UI contract', () => {
     expect(sync).toContain("mainUiLoaded && latestView?.phase === 'ready'")
     expect(sync).toContain('new URL(window.webContents.getURL()).origin === trustedOrigin')
     expect(sync).toContain('window.setMenuBarVisibility(trustedPageLoaded)')
+    expect(sync).toContain('if (mainUiRecovery)')
     expect(setup).toContain('mainUiLoaded = false')
+    expect(main).toContain('let mainUiRecovery = false')
+    expect(main).toContain("window.webContents.on('render-process-gone'")
+    expect(main).toContain("window.on('unresponsive'")
+    expect(main).toContain('function recoverMainUi(reason: string)')
     expect(main).toContain('await window.loadURL(url.href)')
-    expect(main).toContain('mainUiLoaded = true\n      installMenu()')
+    expect(main).toContain('mainUiLoaded = true\n      mainUiRecovery = false\n      installMenu()')
     expect(main).toContain('Menu.setApplicationMenu(null)')
-    expect(main).toContain('if (!mainUiLoaded) {\n    clearMainMenu()\n    return')
+    expect(main).toContain('if (!mainUiLoaded && !mainUiRecovery) {\n    clearMainMenu()\n    return')
     expect(main).toContain('Menu.setApplicationMenu(Menu.buildFromTemplate(template))\n  syncMainMenuVisibility()')
   })
 
@@ -88,6 +93,11 @@ describe('runtime startup UI contract', () => {
     expect(main).toContain('void openTerminal(cliDirectory, home)')
     expect(main).toContain("dialog.showErrorBox('无法打开终端'")
     expect(main).not.toContain('打开插件管理终端')
+  })
+
+  it('releases the plugin operation lock when Runtime restart fails', () => {
+    expect(main).toContain('service.markRestartFailed(operationId)')
+    expect(main).toContain('return await pluginRestartCoordinator.restart')
   })
 
   it('exposes a manual model catalog connection repair action in Help', () => {

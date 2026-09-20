@@ -108,6 +108,7 @@ let latestView: RuntimeView | undefined
 let cliDirectory: string | undefined
 let trustedOrigin: string | undefined
 let mainUiLoaded = false
+let mainUiRecovery = false
 let modelCatalogRecoveryAttempts = 0
 let shellSkinStore: ShellSkinStore | undefined
 let quitting = false
@@ -278,12 +279,30 @@ function clearMainMenu(): void {
 function syncMainMenuVisibility(): void {
   const window = mainWindow
   if (window === undefined || window.isDestroyed()) return
+  if (mainUiRecovery) {
+    window.setMenuBarVisibility(true)
+    return
+  }
   let trustedPageLoaded = false
   if (mainUiLoaded && latestView?.phase === 'ready' && trustedOrigin !== undefined) {
     try { trustedPageLoaded = new URL(window.webContents.getURL()).origin === trustedOrigin }
     catch { trustedPageLoaded = false }
   }
   window.setMenuBarVisibility(trustedPageLoaded)
+}
+
+function recoverMainUi(reason: string): void {
+  if (quitting || mainUiRecovery || mainWindow === undefined || mainWindow.isDestroyed()) return
+  mainUiLoaded = false
+  mainUiRecovery = true
+  if (latestView !== undefined) {
+    latestView = { ...latestView, phase: 'error', message: 'DSH 界面异常退出', error: reason }
+  }
+  activePetSession = undefined
+  petEvents?.setActiveSession(undefined)
+  petEvents?.stop()
+  installMenu()
+  void showSetup(mainWindow).catch(logFatalError)
 }
 
 function createWindow(options: { utility?: 'manager' | 'repair' | 'plugin' | 'mcp' | 'personalization' | 'update' | 'usage' | 'skill' } = {}): BrowserWindow {
@@ -352,6 +371,14 @@ function createWindow(options: { utility?: 'manager' | 'repair' | 'plugin' | 'mc
   })
   if (utility === undefined) window.setMenuBarVisibility(false)
   window.once('ready-to-show', () => { window.show() })
+  window.webContents.on('render-process-gone', (_event, details) => {
+    if (window !== mainWindow) return
+    recoverMainUi(`DSH 界面进程已退出：${details.reason}`)
+  })
+  window.on('unresponsive', () => {
+    if (window !== mainWindow) return
+    recoverMainUi('DSH 界面无响应')
+  })
   window.webContents.on('did-finish-load', () => {
     sendView(window)
     if (window === mainWindow) { syncMainMenuVisibility(); injectSkinMarket(window) }
@@ -388,7 +415,7 @@ function createTray(): void {
 async function showSetup(window: BrowserWindow): Promise<void> {
   if (window === mainWindow) {
     mainUiLoaded = false
-    clearMainMenu()
+    if (!mainUiRecovery) clearMainMenu()
   }
   const current = window.webContents.getURL()
   if (!current.startsWith('file:')) await window.loadFile(setupPage)
@@ -466,11 +493,13 @@ function broadcast(view: RuntimeView): void {
   latestView = view
   if (view.phase !== 'ready') {
     mainUiLoaded = false
-    mainWindow?.setMenuBarVisibility(false)
+    mainUiRecovery = view.phase === 'error'
+    if (!mainUiRecovery) mainWindow?.setMenuBarVisibility(false)
     activePetSession = undefined
     petEvents?.setActiveSession(undefined)
     petEvents?.stop()
   }
+  if (view.phase === 'ready') mainUiRecovery = false
   installMenu()
   if (mainWindow !== undefined && view.phase === 'error') void showSetup(mainWindow)
   if (mainWindow !== undefined) sendView(mainWindow)
@@ -752,7 +781,7 @@ async function setMcpEnabled(event: IpcMainInvokeEvent, value: unknown): Promise
 }
 
 function installMenu(): void {
-  if (!mainUiLoaded) {
+  if (!mainUiLoaded && !mainUiRecovery) {
     clearMainMenu()
     return
   }
@@ -943,6 +972,7 @@ async function startApplication(): Promise<void> {
       } else await window.loadURL(url.href)
       if (mainWindow !== window || window.isDestroyed()) return
       mainUiLoaded = true
+      mainUiRecovery = false
       installMenu()
     },
     onOpenSettingsDocument: openTextDocument,
@@ -1195,6 +1225,7 @@ ipcMain.handle('skill-manager:import', async (event, sourcePath: unknown) => {
   if (typeof sourcePath !== 'string' || sourcePath.trim().length === 0 || !isAbsolute(sourcePath)) throw new Error('Skill 导入路径无效')
   return skillService(event).import(sourcePath)
 })
+ipcMain.handle('skill-manager:set-enabled', async (event, value: unknown) => skillService(event).setEnabled(value))
 ipcMain.handle('skill-manager:remove', async (event, id: unknown, expectedRevision: unknown): Promise<SkillList> => {
   if (typeof id !== 'string' || !/^[a-f0-9]{24}$/u.test(id) || typeof expectedRevision !== 'string' || !/^[a-f0-9]{64}$/u.test(expectedRevision)) {
     throw new Error('Skill 删除参数无效')
@@ -1248,16 +1279,21 @@ ipcMain.handle('plugin-manager:restart', async (event, operationId: unknown) => 
   const runtimeController = controller
   if (runtimeController === undefined) throw new Error('DSH Runtime 控制器尚未初始化')
   const operation = service.status(operationId)
-  if (operation.action === 'remove' && operation.packageName === 'dsh-multi-model-orchestrator') {
-    await cleanupRemovedPluginPresets(process.env.DSH_HOME ?? join(homedir(), '.dsh'))
-    await pluginIsolation?.forget(operation.packageName)
+  try {
+    if (operation.action === 'remove' && operation.packageName === 'dsh-multi-model-orchestrator') {
+      await cleanupRemovedPluginPresets(process.env.DSH_HOME ?? join(homedir(), '.dsh'))
+      await pluginIsolation?.forget(operation.packageName)
+    }
+    return await pluginRestartCoordinator.restart(operationId as string, {
+      status: id => service.status(id),
+      async showSetup() { if (mainWindow !== undefined) await showSetup(mainWindow) },
+      async retry() { await runtimeController.retry() },
+      currentView: () => latestView,
+    }, id => { service.markRestarted(id) })
+  } catch (error: unknown) {
+    service.markRestartFailed(operationId)
+    throw error
   }
-  return pluginRestartCoordinator.restart(operationId as string, {
-    status: id => service.status(id),
-    async showSetup() { if (mainWindow !== undefined) await showSetup(mainWindow) },
-    async retry() { await runtimeController.retry() },
-    currentView: () => latestView,
-  }, id => { service.markRestarted(id) })
 })
 ipcMain.handle('session-repair:inspect', async (event, sessionId: unknown) => {
   return repairClient(event).inspect(sessionId)

@@ -141,6 +141,9 @@ describe('plugin manager pnpm recovery', () => {
       await new Promise(resolve => setTimeout(resolve, 5))
     }
     expect(JSON.parse(await readFile(join(profile, 'package.json'), 'utf8')).dsh.profile.bundles).toEqual([])
+    expect(manager.current()?.operationId).toBe(started.operationId)
+    manager.markRestartFailed(started.operationId)
+    expect(manager.current()).toBeUndefined()
   })
 
   it('rolls back Profile files when a repaired plugin operation still fails', async () => {
