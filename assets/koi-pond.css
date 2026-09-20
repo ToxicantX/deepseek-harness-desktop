@@ -47,11 +47,11 @@ h1 span { display: block; font: calc(13 * var(--unit)) "Microsoft YaHei", sans-s
 .window-tools { display: flex; align-items: center; gap: calc(8 * var(--unit)); margin-left: auto; margin-right: 0; align-self: flex-start; padding-top: calc(9 * var(--unit)); pointer-events: auto; }
 .running-sessions { position: absolute; z-index: 4; top: 18%; left: 2%; width: min(280px, 25vw); max-height: 48%; overflow: auto; padding: calc(16 * var(--unit)); background: #052e29a8; border: 1px solid #c3ae7566; border-radius: 10px; backdrop-filter: blur(8px); box-shadow: 0 8px 24px #00191555; }
 .running-sessions .eyebrow { margin: 0 0 calc(10 * var(--unit)); }
-.running-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: calc(9 * var(--unit)) 0; border-top: 1px solid #c3ae7538; font-size: calc(13 * var(--unit)); }
+.running-item { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: calc(9 * var(--unit)) 0; border-top: 1px solid #c3ae7538; font-size: calc(13 * var(--unit)); }
 .running-project { display: block; padding-top: calc(8 * var(--unit)); color: #f4dda0; font-size: calc(12 * var(--unit)); }
-.running-copy { min-width: 0; display: grid; gap: 3px; }
+.running-copy { min-width: 0; flex: 1 1 auto; display: grid; gap: 3px; }
 .running-item strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.running-item small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #d9d6b8; font-size: calc(11 * var(--unit)); }
+.running-item small { display: -webkit-box; overflow: hidden; text-overflow: ellipsis; -webkit-box-orient: vertical; -webkit-line-clamp: 2; color: #d9d6b8; font-size: calc(11 * var(--unit)); line-height: 1.35; }
 .running-item span { flex: none; color: #b9e6c0; font-size: calc(11 * var(--unit)); }
 .running-item .running-approval { color: #ffd36e; }
 button {

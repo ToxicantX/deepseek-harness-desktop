@@ -1099,15 +1099,20 @@
     }
     const rows = []
     for (const [project, items] of groups) {
-      const heading = document.createElement('strong'); heading.className = 'running-project'; heading.textContent = project
-      rows.push(heading)
+      // A project with one active conversation is clearer as a single project row.
+      // Once several conversations share it, keep the project heading and identify each row.
+      if (items.length > 1) {
+        const heading = document.createElement('strong'); heading.className = 'running-project'; heading.textContent = project
+        rows.push(heading)
+      }
       for (const item of items) rows.push((() => {
       const row = document.createElement('div'); row.className = 'running-item'
       const copy = document.createElement('div'); copy.className = 'running-copy'
-      const name = document.createElement('strong'); name.textContent = (item.sessionLabel || ('会话 ' + item.id.slice(0, 8))) + (item.subAgent ? ' · 子 agent' : '')
+      const title = items.length === 1 ? project : (item.sessionLabel || ('会话 ' + item.id.slice(0, 8)))
+      const name = document.createElement('strong'); name.textContent = title + (item.subAgent ? ' · 子 agent' : '')
       const output = document.createElement('small'); output.textContent = item.approval ? '等待审批' : (item.output || '执行中')
       copy.append(name, output)
-      const state = document.createElement('span'); state.className = item.approval ? 'running-approval' : ''; state.textContent = item.approval ? '审批' : '运行中'
+      const state = document.createElement('span'); state.className = item.approval ? 'running-approval' : ''; state.textContent = item.approval ? '审批' : '正在思考'
       row.append(copy, state); return row
       })())
     }

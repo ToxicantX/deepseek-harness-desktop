@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Skill 管理</title>
+  <style>
+    :root { color-scheme: light; font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif; color: #202124; background: #f5f6f8; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 420px; background: #f5f6f8; }
+    button, input { font: inherit; letter-spacing: 0; }
+    button { min-height: 34px; padding: 6px 13px; border: 1px solid #c8ccd2; border-radius: 6px; background: #fff; color: #202124; cursor: pointer; }
+    button:hover:not(:disabled) { background: #eef1f4; }
+    button:focus-visible, input:focus-visible { outline: 2px solid #1769d2; outline-offset: 2px; }
+    button:disabled, input:disabled { cursor: default; opacity: .55; }
+    button.primary { border-color: #1769d2; background: #1769d2; color: #fff; }
+    button.primary:hover:not(:disabled) { background: #125ab6; }
+    button.danger { border-color: #c63838; color: #a92323; background: #fff; }
+    [hidden] { display: none !important; }
+    main { width: min(100%, 920px); margin: 0 auto; padding: 22px 26px 28px; }
+    header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+    h1 { margin: 0; font-size: 22px; font-weight: 650; }
+    #skill-count { color: #626870; font-size: 13px; white-space: nowrap; }
+    .toolbar { display: grid; grid-template-columns: minmax(180px, 1fr) auto auto; gap: 10px; align-items: center; padding-bottom: 16px; border-bottom: 1px solid #d9dde3; }
+    .search { width: 100%; min-height: 36px; padding: 7px 10px; border: 1px solid #b9bec6; border-radius: 6px; background: #fff; color: #202124; }
+    .status-band { min-height: 58px; padding: 13px 0; display: grid; gap: 8px; align-content: center; }
+    #skill-status { min-height: 20px; font-size: 13px; color: #4c5158; overflow-wrap: anywhere; }
+    #skill-status[data-kind="success"] { color: #1f6b3a; }
+    #skill-status[data-kind="error"] { color: #a92323; }
+    progress { width: 100%; height: 6px; accent-color: #1769d2; }
+    #skill-list { border-top: 1px solid #d9dde3; }
+    .skill-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; align-items: center; min-height: 88px; padding: 13px 0; border-bottom: 1px solid #d9dde3; }
+    .skill-main { min-width: 0; display: grid; gap: 5px; }
+    .skill-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .skill-name { font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
+    .badge { display: inline-flex; align-items: center; min-height: 21px; padding: 2px 7px; border: 1px solid #cfd4da; border-radius: 5px; background: #fff; color: #50565e; font-size: 11px; }
+    .badge.off { border-color: #d6b7b7; background: #fff3f3; color: #973434; }
+    .skill-description, .skill-meta { color: #676d75; font-size: 12px; overflow-wrap: anywhere; }
+    .skill-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
+    #skill-empty { margin: 0; padding: 48px 16px; text-align: center; color: #737982; font-size: 13px; border-bottom: 1px solid #d9dde3; }
+    @media (max-width: 680px) {
+      body { min-width: 360px; }
+      main { padding: 18px 16px 24px; }
+      .toolbar { grid-template-columns: 1fr auto; }
+      .search { grid-column: 1 / -1; }
+      .skill-row { grid-template-columns: 1fr; gap: 10px; }
+      .skill-actions { justify-content: flex-start; }
+    }
+  </style>
+</head>
+<body>
+  <main id="skill-manager-page">
+    <header><h1>Skill 管理</h1><span id="skill-count">0 个 Skill</span></header>
+    <section class="toolbar" aria-label="筛选 Skill">
+      <input id="skill-search" class="search" type="search" maxlength="160" autocomplete="off" spellcheck="false" placeholder="搜索名称、描述或来源" aria-label="搜索 Skill">
+      <button id="skill-import" class="primary" type="button">导入</button>
+      <button id="skill-refresh" type="button">刷新</button>
+    </section>
+    <div class="status-band"><div id="skill-status" role="status" aria-live="polite">正在读取 Skill 列表...</div><progress id="skill-progress" hidden></progress></div>
+    <section aria-label="Skill 列表"><div id="skill-list" role="list"></div><p id="skill-empty" hidden>没有识别到用户 Skill</p></section>
+  </main>
+</body>
+</html>

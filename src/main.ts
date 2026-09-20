@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   app,
@@ -25,6 +25,7 @@ import { DesktopPetController as PetEventController, type PetRendererState as Pe
 import { openTerminal } from './cli-shell.ts'
 import { KoiPondWindow } from './koi-pond-window.ts'
 import { McpManager, npmGlobalRootsFromEnvironment, type McpList } from './mcp-manager.ts'
+import { SkillManager, type SkillList } from './skill-manager.ts'
 import { mutateMcpWithRuntime } from './mcp-restart.ts'
 import { PersonalizationManager } from './personalization-manager.ts'
 import { parsePetWindowShape, PetWindowController, type PetRendererState as PetWindowState } from './pet-window.ts'
@@ -57,11 +58,12 @@ const setupPage = join(app.getAppPath(), 'assets', 'runtime.html')
 const repairPage = join(app.getAppPath(), 'assets', 'session-repair.html')
 const pluginManagerPage = join(app.getAppPath(), 'assets', 'plugin-manager.html')
 const mcpManagerPage = join(app.getAppPath(), 'assets', 'mcp-manager.html')
+const skillManagerPage = join(app.getAppPath(), 'assets', 'skill-manager.html')
 const personalizationPage = join(app.getAppPath(), 'assets', 'personalization.html')
 const shellUpdatePage = join(app.getAppPath(), 'assets', 'shell-update.html')
 const petPage = join(app.getAppPath(), 'assets', 'pet.html')
 const usageMonitorPage = join(app.getAppPath(), 'assets', 'usage-monitor.html')
-const allowedLocalPages = new Set([setupPage, repairPage, pluginManagerPage, mcpManagerPage, personalizationPage, shellUpdatePage, petPage, usageMonitorPage])
+const allowedLocalPages = new Set([setupPage, repairPage, pluginManagerPage, mcpManagerPage, skillManagerPage, personalizationPage, shellUpdatePage, petPage, usageMonitorPage])
 const preload = join(moduleDirectory, 'preload.cjs')
 const petPreload = join(moduleDirectory, 'pet-preload.cjs')
 const shutdownHook = app.isPackaged
@@ -77,6 +79,7 @@ let managerWindow: BrowserWindow | undefined
 let repairWindow: BrowserWindow | undefined
 let pluginWindow: BrowserWindow | undefined
 let mcpWindow: BrowserWindow | undefined
+let skillWindow: BrowserWindow | undefined
 let personalizationWindow: BrowserWindow | undefined
 let updateWindow: BrowserWindow | undefined
 let usageMonitorWindow: BrowserWindow | undefined
@@ -88,6 +91,7 @@ let pluginManager: PluginManager | undefined
 let pluginIsolation: PluginIsolation | undefined
 let pluginIsolationActive = false
 let mcpManager: McpManager | undefined
+let skillManager: SkillManager | undefined
 let personalizationManager: PersonalizationManager | undefined
 let personalizationDirty = false
 let personalizationClosePrompt = false
@@ -282,21 +286,22 @@ function syncMainMenuVisibility(): void {
   window.setMenuBarVisibility(trustedPageLoaded)
 }
 
-function createWindow(options: { utility?: 'manager' | 'repair' | 'plugin' | 'mcp' | 'personalization' | 'update' | 'usage' } = {}): BrowserWindow {
+function createWindow(options: { utility?: 'manager' | 'repair' | 'plugin' | 'mcp' | 'personalization' | 'update' | 'usage' | 'skill' } = {}): BrowserWindow {
   const utility = options.utility
   const manager = utility === 'manager'
   const repair = utility === 'repair'
   const plugin = utility === 'plugin'
   const mcp = utility === 'mcp'
+  const skill = utility === 'skill'
   const personalization = utility === 'personalization'
   const update = utility === 'update'
   const usage = utility === 'usage'
   const window = new BrowserWindow({
     ...(update && mainWindow !== undefined ? { parent: mainWindow, modal: true } : {}),
-    width: manager ? 700 : repair ? 760 : plugin ? 740 : mcp ? 860 : personalization ? 800 : update ? 480 : usage ? 1000 : 1240,
-    height: manager ? 720 : repair ? 780 : plugin ? 700 : mcp ? 760 : personalization ? 720 : update ? 250 : usage ? 780 : 820,
-    minWidth: manager || repair ? 480 : plugin ? 420 : mcp ? 600 : personalization ? 520 : update ? 420 : usage ? 640 : 820,
-    minHeight: manager ? 560 : plugin ? 520 : mcp || personalization ? 560 : update ? 220 : 600,
+    width: manager ? 700 : repair ? 760 : plugin ? 740 : mcp ? 860 : skill ? 900 : personalization ? 800 : update ? 480 : usage ? 1000 : 1240,
+    height: manager ? 720 : repair ? 780 : plugin ? 700 : mcp ? 760 : skill ? 760 : personalization ? 720 : update ? 250 : usage ? 780 : 820,
+    minWidth: manager || repair ? 480 : plugin ? 420 : mcp ? 600 : skill ? 600 : personalization ? 520 : update ? 420 : usage ? 640 : 820,
+    minHeight: manager ? 560 : plugin ? 520 : mcp || personalization || skill ? 560 : update ? 220 : 600,
     ...(update ? { closable: false, minimizable: false, maximizable: false, resizable: false } : {}),
     show: false,
     autoHideMenuBar: utility !== undefined,
@@ -530,6 +535,20 @@ async function openMcpManager(): Promise<void> {
   await mcpWindow.loadFile(mcpManagerPage)
 }
 
+async function openSkillManager(): Promise<void> {
+  if (controller?.installedRuntime() === undefined) {
+    await dialog.showMessageBox({ type: 'warning', title: 'Skill 管理', message: 'DSH Runtime 尚未安装。' })
+    return
+  }
+  if (skillWindow !== undefined && !skillWindow.isDestroyed()) {
+    skillWindow.focus()
+    return
+  }
+  skillWindow = createWindow({ utility: 'skill' })
+  skillWindow.on('closed', () => { skillWindow = undefined })
+  await skillWindow.loadFile(skillManagerPage)
+}
+
 async function openUsageMonitor(): Promise<void> {
   if (usageMonitorWindow !== undefined && !usageMonitorWindow.isDestroyed()) {
     if (usageMonitorWindow.isMinimized()) usageMonitorWindow.restore()
@@ -679,6 +698,14 @@ function mcpService(event: IpcMainInvokeEvent): McpManager {
   return mcpManager
 }
 
+function skillService(event: IpcMainInvokeEvent): SkillManager {
+  if (skillWindow === undefined || skillWindow.isDestroyed() || event.sender !== skillWindow.webContents) {
+    throw new Error('Skill 管理请求来源无效')
+  }
+  if (skillManager === undefined) throw new Error('Skill 管理器尚未初始化')
+  return skillManager
+}
+
 function usageMonitorClient(event: IpcMainInvokeEvent): void {
   if (usageMonitorWindow === undefined || usageMonitorWindow.isDestroyed() || event.sender !== usageMonitorWindow.webContents || event.senderFrame !== event.sender.mainFrame) throw new Error('用量监控请求来源无效')
   const url = new URL(event.sender.getURL())
@@ -769,6 +796,11 @@ function installMenu(): void {
           label: '管理 MCP',
           enabled: controller?.installedRuntime() !== undefined,
           click: () => { void openMcpManager() },
+        },
+        {
+          label: '管理 Skill',
+          enabled: controller?.installedRuntime() !== undefined,
+          click: () => { void openSkillManager() },
         },
         {
           label: '打开终端',
@@ -938,6 +970,10 @@ async function startApplication(): Promise<void> {
         ...(runtime === undefined ? [] : [join(dirname(runtime.nodeExecutable), 'node_modules')]),
       ]
     },
+  })
+  skillManager = new SkillManager({
+    dshHome: home,
+    agentsHome: process.env.DSH_AGENTS_HOME ?? join(homedir(), '.agents'),
   })
   updater = new ShellUpdater(mainWindow, async () => {
     pluginManager?.dispose()
@@ -1144,6 +1180,26 @@ ipcMain.handle('mcp-manager:list', async (event) => {
 })
 ipcMain.handle('mcp-manager:set-enabled', async (event, value: unknown) => {
   return setMcpEnabled(event, value)
+})
+ipcMain.handle('skill-manager:list', async event => skillService(event).list())
+ipcMain.handle('skill-manager:choose-import', async event => {
+  skillService(event)
+  const result = await dialog.showOpenDialog(skillWindow!, {
+    title: '选择 Skill 文件或目录',
+    properties: ['openFile', 'openDirectory'],
+    filters: [{ name: 'Skill Markdown', extensions: ['md'] }],
+  })
+  return result.canceled ? undefined : result.filePaths[0]
+})
+ipcMain.handle('skill-manager:import', async (event, sourcePath: unknown) => {
+  if (typeof sourcePath !== 'string' || sourcePath.trim().length === 0 || !isAbsolute(sourcePath)) throw new Error('Skill 导入路径无效')
+  return skillService(event).import(sourcePath)
+})
+ipcMain.handle('skill-manager:remove', async (event, id: unknown, expectedRevision: unknown): Promise<SkillList> => {
+  if (typeof id !== 'string' || !/^[a-f0-9]{24}$/u.test(id) || typeof expectedRevision !== 'string' || !/^[a-f0-9]{64}$/u.test(expectedRevision)) {
+    throw new Error('Skill 删除参数无效')
+  }
+  return skillService(event).remove(id, expectedRevision)
 })
 ipcMain.handle('plugin-manager:list', async (event) => {
   const list = await pluginService(event).list()

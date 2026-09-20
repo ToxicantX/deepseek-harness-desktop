@@ -9,6 +9,7 @@ import { installKoiPondToggle } from './koi-pond-toggle.ts'
 import type { UsageScanProgress } from './usage-monitor.ts'
 import type { RuntimePreference } from './catalog.ts'
 import type { McpEndpointView, McpEntryView, McpList } from './mcp-manager.ts'
+import type { SkillEntry, SkillList } from './skill-manager.ts'
 import type { PluginEntry, PluginList, PluginOperationStatus, PluginStartInput, PluginUpdateList } from './plugin-manager.ts'
 import type { RuntimeView } from './runtime-controller.ts'
 import type { SessionRepairAnomalyKind, SessionRepairInspection, SessionRepairResult, SessionRepairRollbackResult } from './session-repair.ts'
@@ -586,6 +587,138 @@ function initializePluginManagerPage(): void {
     void resumeOrRefresh()
   })
   void resumeOrRefresh()
+}
+
+function initializeSkillManagerPage(): void {
+  const search = element<HTMLInputElement>('skill-search')
+  const importButton = element<HTMLButtonElement>('skill-import')
+  const refreshButton = element<HTMLButtonElement>('skill-refresh')
+  const status = element('skill-status')
+  const progress = element<HTMLProgressElement>('skill-progress')
+  const list = element('skill-list')
+  const empty = element('skill-empty')
+  let snapshot: SkillList | undefined
+  let busy = false
+
+  const setStatus = (message: string, kind: 'normal' | 'success' | 'error' = 'normal'): void => {
+    status.textContent = message
+    status.dataset.kind = kind
+  }
+  const setBusy = (value: boolean): void => {
+    busy = value
+    search.disabled = value
+    importButton.disabled = value
+    refreshButton.disabled = value
+    progress.hidden = !value
+    for (const button of list.querySelectorAll<HTMLButtonElement>('button')) button.disabled = value
+  }
+  const sourceLabel = (entry: SkillEntry): string => {
+    if (entry.source === 'user-dsh') return 'DSH 用户目录'
+    if (entry.source === 'user-agents') return 'Agent 用户目录'
+    if (entry.source === 'user-codex') return 'Codex 用户目录'
+    if (entry.source === 'user-claude') return 'Claude 用户目录'
+    if (entry.source === 'user-gemini') return 'Gemini 用户目录'
+    return 'Antigravity 用户目录'
+  }
+  const visibleEntries = (): SkillEntry[] => {
+    const query = search.value.trim().toLocaleLowerCase('zh-CN')
+    return (snapshot?.entries ?? []).filter(entry => query.length === 0
+      || [entry.name, entry.description, entry.whenToUse ?? '', entry.root].join(' ').toLocaleLowerCase('zh-CN').includes(query))
+  }
+  const render = (): void => {
+    const entries = snapshot?.entries ?? []
+    element('skill-count').textContent = String(entries.length) + ' 个 Skill'
+    const visible = visibleEntries()
+    list.replaceChildren()
+    empty.hidden = visible.length !== 0
+    empty.textContent = entries.length === 0 ? '没有识别到用户 Skill' : '没有匹配当前搜索的 Skill'
+    for (const entry of visible) {
+      const row = document.createElement('article')
+      row.className = 'skill-row'
+      row.setAttribute('role', 'listitem')
+      const main = document.createElement('div')
+      main.className = 'skill-main'
+      const title = document.createElement('div')
+      title.className = 'skill-title'
+      const name = document.createElement('span')
+      name.className = 'skill-name'
+      name.textContent = entry.name
+      title.append(name)
+      for (const [label, enabled] of [['模型调用', entry.modelInvocable], ['用户调用', entry.userInvocable]] as const) {
+        const badge = document.createElement('span')
+        badge.className = enabled ? 'badge' : 'badge off'
+        badge.textContent = label + (enabled ? '已开启' : '已关闭')
+        title.append(badge)
+      }
+      const description = document.createElement('div')
+      description.className = 'skill-description'
+      description.textContent = entry.description
+      const meta = document.createElement('div')
+      meta.className = 'skill-meta'
+      meta.textContent = sourceLabel(entry) + ' · ' + entry.kind + ' · ' + entry.root
+      main.append(title, description, meta)
+      const actions = document.createElement('div')
+      actions.className = 'skill-actions'
+      if (entry.managed) {
+        const remove = document.createElement('button')
+        remove.type = 'button'
+        remove.className = 'danger'
+        remove.textContent = '删除'
+        remove.addEventListener('click', () => {
+          if (!window.confirm('确认删除 Skill ' + entry.name + '？')) return
+          void removeSkill(entry)
+        })
+        actions.append(remove)
+      } else {
+        const readonly = document.createElement('span')
+        readonly.className = 'badge'
+        readonly.textContent = '外部只读'
+        actions.append(readonly)
+      }
+      row.append(main, actions)
+      list.append(row)
+    }
+  }
+  const load = async (): Promise<void> => {
+    if (busy) return
+    setBusy(true)
+    setStatus('正在读取 Skill 列表...')
+    try {
+      snapshot = await ipcRenderer.invoke('skill-manager:list') as SkillList
+      render()
+      setStatus('Skill 列表已刷新', 'success')
+    } catch (error: unknown) { setStatus(errorMessage(error), 'error') }
+    finally { setBusy(false) }
+  }
+  const removeSkill = async (entry: SkillEntry): Promise<void> => {
+    const current = snapshot
+    if (busy || current === undefined) return
+    setBusy(true)
+    setStatus('正在删除 ' + entry.name + '...')
+    try {
+      snapshot = await ipcRenderer.invoke('skill-manager:remove', entry.id, current.revision) as SkillList
+      render()
+      setStatus(entry.name + ' 已删除', 'success')
+    } catch (error: unknown) { setStatus(errorMessage(error), 'error'); await load() }
+    finally { setBusy(false) }
+  }
+  const importSkill = async (): Promise<void> => {
+    if (busy) return
+    setBusy(true)
+    setStatus('请选择 Skill 文件或目录...')
+    try {
+      const path = await ipcRenderer.invoke('skill-manager:choose-import') as string | undefined
+      if (path === undefined) { setStatus('已取消导入'); return }
+      snapshot = await ipcRenderer.invoke('skill-manager:import', path) as SkillList
+      render()
+      setStatus('Skill 已导入 DSH 用户目录', 'success')
+    } catch (error: unknown) { setStatus(errorMessage(error), 'error') }
+    finally { setBusy(false) }
+  }
+  search.addEventListener('input', render)
+  importButton.addEventListener('click', () => { void importSkill() })
+  refreshButton.addEventListener('click', () => { void load() })
+  void load()
 }
 
 function initializeMcpManagerPage(): void {
@@ -1384,6 +1517,7 @@ window.addEventListener('DOMContentLoaded', () => {
   else if (document.querySelector('#shell-update-page') !== null) initializeShellUpdatePage()
   else if (document.querySelector('#personalization-page') !== null) initializePersonalizationPage()
   else if (document.querySelector('#mcp-manager-page') !== null) initializeMcpManagerPage()
+  else if (document.querySelector('#skill-manager-page') !== null) initializeSkillManagerPage()
   else if (document.querySelector('#plugin-manager-page') !== null) initializePluginManagerPage()
   else if (document.querySelector('#version') !== null) initializeRuntimePage()
   else if (document.querySelector('#repair-session-id') !== null) initializeRepairPage()

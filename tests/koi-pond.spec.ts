@@ -194,6 +194,77 @@ describe('koi dialogue observer', () => {
     expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'dsh/session-running', sessionId: 'main', requestId: 'request', running: false }), 'https://fixture.invalid')
   })
 
+  it('uses the current session workspace and title for pond running entries', async () => {
+    const postMessage = vi.fn()
+    vi.stubGlobal('window', { postMessage, location: { origin: 'https://fixture.invalid' } })
+    const session = client()
+    session.sessionId = 'main'
+    session.actx = {
+      sessions: {
+        list: {
+          getSnapshot: () => ({ byId: {
+            main: { cwd: 'C:\\Users\\wsx\\deepseek-project', title: '修复模型选择' },
+          } }),
+        },
+      },
+      workspaces: {
+        list: {
+          getSnapshot: () => ({ items: [
+            { path: 'C:\\Users\\wsx\\deepseek-project', title: '深度项目' },
+          ] }),
+        },
+      },
+    }
+    await session.prompt('hello', 'queue', undefined, 'request')
+    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'dsh/session-running', projectName: '深度项目', sessionLabel: '修复模型选择',
+    }), 'https://fixture.invalid')
+  })
+
+  it('reads names through the runtime context service and never uses the session id as a label', async () => {
+    const postMessage = vi.fn()
+    vi.stubGlobal('window', { postMessage, location: { origin: 'https://fixture.invalid' } })
+    const session = client()
+    session.sessionId = 'session-123'
+    const services = new Map([
+      ['sessions', { list: { getSnapshot: () => ({ byId: { 'session-123': { cwd: 'C:\\work\\named-project', displayTitle: '有名称的会话' } } }) } }],
+      ['workspaces', { list: { getSnapshot: () => ({ items: [{ path: 'C:\\work\\named-project', title: '命名项目' }] }) } }],
+    ])
+    session.actx = { get: (name: string) => services.get(name) }
+    await session.prompt('hello', 'queue', undefined, 'request')
+    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ projectName: '命名项目', sessionLabel: '有名称的会话' }), 'https://fixture.invalid')
+
+    const unnamed = client()
+    unnamed.sessionId = 'session-id-only'
+    unnamed.actx = { get: () => undefined }
+    await unnamed.prompt('hello', 'queue', undefined, 'request-2')
+    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ sessionLabel: '未命名会话' }), 'https://fixture.invalid')
+    expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ sessionLabel: 'session-id-only' }), 'https://fixture.invalid')
+  })
+
+  it('publishes the latest assistant output for the pond card', async () => {
+    const postMessage = vi.fn()
+    vi.stubGlobal('window', { postMessage, location: { origin: 'https://fixture.invalid' } })
+    const session = client()
+    session.sessionId = 'main'
+    session.events = [{ data: { message: { content: [{ text: '最后一条输出' }] } } }]
+    await session.prompt('hello', 'queue', undefined, 'request')
+    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'dsh/session-running', output: '最后一条输出',
+    }), 'https://fixture.invalid')
+  })
+
+  it('renders a project title for one running session and session titles for shared projects', async () => {
+    const script = await readFile(new URL('../assets/koi-pond.js', import.meta.url), 'utf8')
+    const css = await readFile(new URL('../assets/koi-pond.css', import.meta.url), 'utf8')
+    expect(script).toContain('const title = items.length === 1 ? project : (item.sessionLabel ||')
+    expect(script).toContain('if (items.length > 1)')
+    expect(script).toContain("item.approval ? '审批' : '正在思考'")
+    expect(css).toContain('-webkit-line-clamp: 2')
+    expect(css).toContain('align-items: flex-start')
+    expect(css).toContain('flex: 1 1 auto')
+  })
+
   it('does not count failed or child-session prompts; preserves errors and arguments', async () => {
     const postMessage = vi.fn()
     vi.stubGlobal('window', { postMessage, location: { origin: 'https://fixture.invalid' } })
