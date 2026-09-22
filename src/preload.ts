@@ -1533,6 +1533,21 @@ function initializeRepairPage(): void {
 }
 
 window.addEventListener('DOMContentLoaded', () => {
+  if (window.top === window) {
+    window.addEventListener('keydown', (event) => {
+      if (event.key === 'PageUp' || event.key === 'PageDown') {
+        const target = event.target as Element | null
+        if (target && (target.closest?.('[data-composer-card="true"]') || target.matches?.('textarea, [contenteditable="true"]'))) {
+          event.preventDefault()
+          if (window.scrollX !== 0 || document.documentElement.scrollLeft !== 0) {
+            window.scrollTo(0, window.scrollY)
+          }
+          const frame = document.querySelector('[class*="frame"], [class*="_frame"]') as HTMLElement | null
+          if (frame && frame.scrollLeft !== 0) frame.scrollLeft = 0
+        }
+      }
+    }, true)
+  }
   if (window.top === window && /^https?:$/.test(window.location.protocol)) {
     installKoiPondToggle(() => ipcRenderer.invoke('pond:toggle'))
   }

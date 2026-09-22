@@ -207,4 +207,71 @@ describe('desktop text and file context contract', () => {
     expect(main).toContain("window.webContents.on('context-menu'")
     expect(main).toContain('createWebContextMenuTemplate(params)')
   })
+
+  it('prevents PageUp and PageDown keydown events on the chat editor to avoid horizontal layout shift', () => {
+    const listeners = new Map<string, (event: any) => void>()
+    class FakeElement {
+      closest(_selector: string): FakeElement | null { return null }
+    }
+    class FakeHTMLElement extends FakeElement {
+      matches(_selector: string): boolean { return false }
+    }
+    const composer = new class extends FakeHTMLElement {
+      override closest(selector: string): FakeElement | null {
+        return selector === '[data-composer-card="true"]' ? this : null
+      }
+    }()
+    class FakeContentEditableElement extends FakeHTMLElement {
+      override matches(selector: string): boolean { return selector.includes('[contenteditable="true"]') }
+      override closest(selector: string): FakeElement | null {
+        if (selector === 'textarea,[contenteditable="true"]') return this
+        if (selector === '[data-composer-card="true"]') return composer
+        if (selector === '[data-input-scroll="true"]') return this
+        return null
+      }
+    }
+    const editor = new FakeContentEditableElement()
+    const windowFixture = { addEventListener() {}, removeEventListener() {} } as any
+    const documentFixture = {
+      addEventListener: (type: string, listener: (event: any) => void) => listeners.set(type, listener),
+      removeEventListener() {},
+      querySelectorAll: () => [],
+    }
+    const execute = new Function(
+      'window', 'document', 'Element', 'HTMLElement', 'HTMLTextAreaElement', 'HTMLInputElement',
+      'InputEvent', 'Node', 'HTMLFormElement', 'HTMLButtonElement', 'KeyboardEvent', 'Map', 'Set',
+      'return ' + createFileContextInjectorScript(),
+    )
+    execute(
+      windowFixture, documentFixture, FakeElement, FakeHTMLElement, class {}, class {},
+      class {}, FakeElement, class {}, class {}, class {}, Map, Set,
+    )
+
+    let pageUpPrevented = false
+    listeners.get('keydown')?.({
+      type: 'keydown',
+      key: 'PageUp',
+      target: editor,
+      preventDefault: () => { pageUpPrevented = true },
+    })
+    expect(pageUpPrevented).toBe(true)
+
+    let pageDownPrevented = false
+    listeners.get('keydown')?.({
+      type: 'keydown',
+      key: 'PageDown',
+      target: editor,
+      preventDefault: () => { pageDownPrevented = true },
+    })
+    expect(pageDownPrevented).toBe(true)
+
+    let otherKeyPrevented = false
+    listeners.get('keydown')?.({
+      type: 'keydown',
+      key: 'ArrowDown',
+      target: editor,
+      preventDefault: () => { otherKeyPrevented = true },
+    })
+    expect(otherKeyPrevented).toBe(false)
+  })
 })
