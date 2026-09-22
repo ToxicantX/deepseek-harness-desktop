@@ -96,7 +96,8 @@ try {
   if (settingsBody?.type !== 'server-response' || settingsBody.rpcId !== settingsRpcId || settingsBody.result?.ok !== true || settingsBody.result.value?.opened !== true) {
     throw new Error('Desktop settings Host API is not active in the packaged Runtime')
   }
-  if (openedSettingsPath !== join(home, 'settings.yaml')) {
+  const expectedSettingsPaths = new Set([join(home, 'settings.yaml'), join(home, 'profiles', 'web', 'cordis.patch.yml')])
+  if (openedSettingsPath === undefined || !expectedSettingsPaths.has(openedSettingsPath)) {
     throw new Error(`Desktop settings Host API returned an unexpected provider path: ${openedSettingsPath ?? 'none'}`)
   }
   const exit = await backend.stop()
