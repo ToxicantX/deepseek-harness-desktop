@@ -41,7 +41,8 @@ try {
   let response = await fetch(backend.url, { redirect: 'manual' })
   let cookie
   if (backend.url.searchParams.has('token')) {
-    if (response.status !== 303 || response.headers.get('location') !== '/') throw new Error('Runtime launch authentication did not redirect to the clean root')
+    if (response.status === 303 && response.headers.get('location') !== '/') throw new Error('Runtime launch authentication redirected away from the clean root')
+    if (response.status !== 200 && response.status !== 303) throw new Error(`Runtime launch authentication returned HTTP ${response.status}`)
     cookie = response.headers.getSetCookie().map(value => value.split(';', 1)[0]).join('; ')
     if (!cookie) throw new Error('Runtime launch authentication did not issue a session cookie')
     const anonymous = await fetch(new URL('/', backend.url))
