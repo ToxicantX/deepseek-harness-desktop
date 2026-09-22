@@ -355,6 +355,13 @@ export function createFileContextInjectorScript(): string {
     let editor = null;
     let button = null;
     if (event.type === 'keydown') {
+      if (event.key === 'PageUp' || event.key === 'PageDown') {
+        editor = editorFromTarget(event.target);
+        if (isChatEditor(editor) || (event.target instanceof Element && Boolean(event.target.closest('[data-composer-card="true"]')))) {
+          event.preventDefault();
+          return;
+        }
+      }
       if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
       editor = editorFromTarget(event.target);
       if (!isChatEditor(editor)) return;

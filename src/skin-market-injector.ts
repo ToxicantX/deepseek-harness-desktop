@@ -37,6 +37,115 @@ export function createSkinSessionsAdapter(){
   }
 }
 
+export function createSkinStoreAdapter() {
+  const createSnapshotStore = (initial: any, options?: { persist?: { name?: string } }) => {
+    let state = initial
+    const listeners = new Set<() => void>()
+    const persistName = options && options.persist && options.persist.name
+    if (persistName) {
+      try {
+        const saved = localStorage.getItem(persistName)
+        if (saved !== null) state = JSON.parse(saved)
+      } catch {}
+    }
+    const emit = () => {
+      if (persistName) {
+        try {
+          localStorage.setItem(persistName, JSON.stringify(state))
+        } catch {}
+      }
+      listeners.forEach(listener => listener())
+    }
+    return {
+      getSnapshot: () => state,
+      getState: () => state,
+      subscribe(listener: () => void) {
+        listeners.add(listener)
+        return () => listeners.delete(listener)
+      },
+      update(mutator: (draft: any) => any) {
+        if (state && typeof state === 'object') {
+          const draft = Array.isArray(state) ? state.slice() : { ...state }
+          const result = mutator(draft)
+          const nextState = result === undefined ? draft : result
+          let changed = false
+          if (Array.isArray(state) && Array.isArray(nextState)) {
+            if (state.length !== nextState.length || state.some((v, i) => v !== nextState[i])) changed = true
+          } else if (state && typeof state === 'object' && nextState && typeof nextState === 'object') {
+            const k1 = Object.keys(state), k2 = Object.keys(nextState)
+            if (k1.length !== k2.length || k1.some(k => state[k] !== nextState[k])) changed = true
+          } else {
+            changed = state !== nextState
+          }
+          if (changed) {
+            state = nextState
+            emit()
+          }
+        } else {
+          const result = mutator(state)
+          if (result !== undefined && result !== state) {
+            state = result
+            emit()
+          }
+        }
+      },
+      setState(update: any) {
+        if (typeof update === 'function') {
+          this.update(update)
+        } else if (state && typeof state === 'object' && update && typeof update === 'object') {
+          this.update(draft => { Object.assign(draft, update) })
+        } else if (state !== update) {
+          state = update
+          emit()
+        }
+      },
+      set(next: any) {
+        state = next
+        emit()
+      },
+    }
+  }
+
+  const defineStore = (decl: any) => {
+    const definition = decl || {}
+    const createInstance = (scopeKey?: string) => {
+      const persistKey = definition.persist === undefined ? undefined : (scopeKey === undefined ? definition.persist : `${definition.persist}.${scopeKey}`)
+      const initial = typeof definition.init === 'function' ? definition.init() : (typeof definition.state === 'function' ? definition.state() : (definition.state || {}))
+      const store = createSnapshotStore(initial, persistKey !== undefined ? { persist: { name: persistKey } } : undefined)
+      const actions: Record<string, (...params: any[]) => void> = {}
+      for (const key of Object.keys(definition.actions || {})) {
+        const mutate = definition.actions[key]
+        actions[key] = (...params: any[]) => {
+          store.update(draft => {
+            mutate(draft, ...params)
+          })
+        }
+      }
+      return {
+        actions,
+        getSnapshot: () => store.getSnapshot(),
+        getState: () => store.getSnapshot(),
+        setState: (update: any) => store.setState(update),
+        subscribe: (fn: () => void) => store.subscribe(fn),
+        store,
+        clearPersisted: () => {
+          if (persistKey === undefined || typeof localStorage === 'undefined') return
+          try { localStorage.removeItem(persistKey) } catch {}
+        },
+      }
+    }
+    const defaultInstance = createInstance('root')
+    const handle = {
+      spec: definition,
+      create: createInstance,
+      ...defaultInstance,
+    }
+    return handle
+  }
+
+  return { createSnapshotStore, defineStore }
+}
+
 export function createClientBundleAdapterScript(bundle: string, skinId: string, requestedVariant?: string): string {
   if (!/window\s*\.\s*__ModuleLoader__\s*\.\s*load\s*\(\s*\{/.test(bundle.replace(/^\uFEFF/, ''))) throw new Error('unsupported skin client bundle: missing ModuleLoader wrapper for ' + skinId)
   const id = JSON.stringify(skinId)
@@ -88,6 +197,49 @@ export function createClientBundleAdapterScript(bundle: string, skinId: string, 
   if (customBackgroundUrl && !/^data:image\\/(?:png|jpeg|webp|gif);base64,/i.test(customBackgroundUrl)) { localStorage.removeItem(customBackgroundStorageKey); customBackgroundUrl = null; }
   applyShellBackground(customBackgroundUrl || backgroundAssetUrl);
   disposers.push(() => { if (backgroundFix) backgroundFix.remove(); });
+  const originalFetch = typeof window.fetch === 'function' ? window.fetch.bind(window) : undefined;
+  if (originalFetch) {
+    window.fetch = async (input, init) => {
+      try {
+        const urlString = typeof input === 'string' ? input : (input && typeof input.url === 'string' ? input.url : String(input?.href || input || ''));
+        const parsedUrl = new URL(urlString, window.location.href);
+        if (parsedUrl.pathname === '/solarized/state') {
+          const method = String(init?.method || (input && typeof input.method === 'string' ? input.method : 'GET')).toUpperCase();
+          if (method === 'GET') {
+            const saved = localStorage.getItem('solarized-dsh-theme:theme');
+            const payload = JSON.stringify({ version: 1, theme: saved || 'system' });
+            return typeof Response === 'function'
+              ? new Response(payload, { status: 200, headers: { 'content-type': 'application/json; charset=utf-8' } })
+              : { ok: true, status: 200, json: async () => JSON.parse(payload), text: async () => payload };
+          }
+          if (method === 'PUT') {
+            let bodyText = typeof init?.body === 'string' ? init.body : '';
+            if (!bodyText && input && typeof input.clone === 'function') {
+              try { bodyText = await input.clone().text(); } catch {}
+            }
+            try {
+              const data = JSON.parse(bodyText);
+              if (data && typeof data.theme === 'string') {
+                localStorage.setItem('solarized-dsh-theme:theme', data.theme);
+              }
+            } catch {}
+            const payload = JSON.stringify({ ok: true });
+            return typeof Response === 'function'
+              ? new Response(payload, { status: 200, headers: { 'content-type': 'application/json; charset=utf-8' } })
+              : { ok: true, status: 200, json: async () => ({ ok: true }), text: async () => payload };
+          }
+        }
+        if (parsedUrl.pathname === '/solarized/check-update') {
+          const payload = JSON.stringify({ ok: true, upToDate: true, current: '0.2.1', latest: '0.2.1' });
+          return typeof Response === 'function'
+            ? new Response(payload, { status: 200, headers: { 'content-type': 'application/json; charset=utf-8' } })
+            : { ok: true, status: 200, json: async () => JSON.parse(payload), text: async () => payload };
+        }
+      } catch {}
+      return originalFetch(input, init);
+    };
+    disposers.push(() => { window.fetch = originalFetch; });
+  }
   let exported;
   const originalLoader = window.__ModuleLoader__;
   const dshModules = window.__DSH_MODULES__;
@@ -101,10 +253,27 @@ export function createClientBundleAdapterScript(bundle: string, skinId: string, 
   const reactDom = await loadReal('react-dom', shellReact.ReactDOM || {});
   const reactDomClient = await loadReal('react-dom/client', shellReact.ReactDOMClient || {});
   const platform = await loadReal('@deepseek-ai/dsh-client-runtime/client', {});
-  const createSnapshotStore = (initial, options) => { let state = initial; const listeners = new Set(); const persistName = options && options.persist && options.persist.name; if (persistName) { try { const saved = localStorage.getItem(persistName); if (saved !== null) state = JSON.parse(saved); } catch {} } const emit = () => { if (persistName) { try { localStorage.setItem(persistName, JSON.stringify(state)); } catch {} } listeners.forEach(listener => listener()); }; return { getSnapshot: () => state, subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); }, update(mutator) { if (state && typeof state === 'object') { const draft = Array.isArray(state) ? state.slice() : { ...state }; const result = mutator(draft); state = result === undefined ? draft : result; } else { const result = mutator(state); if (result !== undefined) state = result; } emit(); }, set(next) { state = next; emit(); } }; };
-  const defineStore = definition => { let state = typeof definition.state === 'function' ? definition.state() : (definition.state || {}); const listeners = new Set(); const api = { getState: () => state, setState: update => { state = { ...state, ...(typeof update === 'function' ? update(state) : update) }; listeners.forEach(listener => listener()); }, subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener); } }; return api; };
-  const lazyProxy = new Proxy(function(){}, { get: (_target, property) => property === 'defineStore' ? defineStore : property === 'default' ? react : () => null, apply: () => null });
-  const requireCompat = name => name === 'react' ? react : name === 'react/jsx-runtime' ? jsxRuntime : name === 'react-dom' ? reactDom : name === 'react-dom/client' ? reactDomClient : name === '@deepseek-ai/dsh-client-runtime/client' ? { ...platform, defineStore: platform.defineStore || defineStore, createSnapshotStore: platform.createSnapshotStore || createSnapshotStore } : lazyProxy;
+  const { createSnapshotStore, defineStore } = (${createSkinStoreAdapter.toString()})();
+  const runtimeCompat = {
+    ...platform,
+    defineStore: platform.defineStore || defineStore,
+    createSnapshotStore: platform.createSnapshotStore || createSnapshotStore,
+  };
+  const lazyProxy = new Proxy(function(){}, {
+    get: (_target, property) =>
+      property === 'defineStore' ? defineStore :
+      property === 'createSnapshotStore' ? createSnapshotStore :
+      property === 'default' ? react :
+      () => null,
+    apply: () => null
+  });
+  const requireCompat = name =>
+    name === 'react' ? react :
+    name === 'react/jsx-runtime' ? jsxRuntime :
+    name === 'react-dom' ? reactDom :
+    name === 'react-dom/client' ? reactDomClient :
+    (name === '@deepseek-ai/dsh-client-runtime/client' || name === '@deepseek-ai/dsh-client-runtime' || name === '@deepseek-ai/dsh-client-store' || name === '@deepseek-ai/dsh-client-ui-theme' || name === '@deepseek-ai/dsh-client-ui-slots') ? runtimeCompat :
+    lazyProxy;
   window.__ModuleLoader__ = { load(definition) { exported = definition.factory(requireCompat); } };
   try {
 ${adaptedBundle}
@@ -116,7 +285,7 @@ ${adaptedBundle}
   const ownHost = (name, style) => { const host = document.createElement('div'); host.setAttribute('data-dsh-skin-owned', ${id}); host.setAttribute('data-dsh-skin-slot', name); Object.assign(host.style, style); (document.body || document.documentElement).appendChild(host); owned.push(host); return host; };
   const ensureSettings = () => { if (settingsDrawer) return settingsDrawer; settingsDrawer = ownHost('settings.drawer', {position:'fixed',top:'64px',right:'24px',bottom:'76px',width:'min(440px,calc(100vw - 48px))',display:'none',zIndex:'2147483002',overflow:'auto',padding:'18px',border:'1px solid var(--dsw-alias-border-default,rgba(127,127,127,.35))',borderRadius:'12px',background:'var(--dsw-alias-bg-layer-1,Canvas)',color:'var(--dsw-alias-fg-default,CanvasText)',boxShadow:'0 18px 56px rgba(0,0,0,.35)'}); settingsToggle = ownHost('settings.toggle', {position:'fixed',right:'22px',bottom:'22px',width:'38px',height:'38px',boxSizing:'border-box',display:'none',placeItems:'center',zIndex:'2147483003',padding:'0',border:'1px solid var(--dsw-alias-border-default,rgba(127,127,127,.35))',borderRadius:'50%',background:'var(--dsw-alias-bg-layer-1,Canvas)',color:'var(--dsw-alias-fg-default,CanvasText)',font:'13px ui-sans-serif,system-ui',cursor:'pointer'}); settingsToggle.setAttribute('role','button');settingsToggle.setAttribute('tabindex','0');settingsToggle.setAttribute('title','插件设置');settingsToggle.setAttribute('aria-label','插件设置');const settingsNs='http://www.w3.org/2000/svg';const settingsIcon=document.createElementNS(settingsNs,'svg');settingsIcon.setAttribute('viewBox','0 0 24 24');settingsIcon.setAttribute('width','20');settingsIcon.setAttribute('height','20');settingsIcon.setAttribute('fill','none');settingsIcon.setAttribute('stroke','currentColor');settingsIcon.setAttribute('stroke-width','1.8');settingsIcon.setAttribute('stroke-linecap','round');settingsIcon.setAttribute('stroke-linejoin','round');settingsIcon.setAttribute('aria-hidden','true');settingsIcon.setAttribute('data-icon','palette');const settingsPath=document.createElementNS(settingsNs,'path');settingsPath.setAttribute('d','M12 3a9 9 0 1 0 0 18h1a2 2 0 0 0 1.5-3.3 1.6 1.6 0 0 1 1.2-2.7H17a4 4 0 0 0 4-4c0-4.4-4-8-9-8Z');settingsIcon.append(settingsPath);for(const [x,y] of [[7,10],[10,6.5],[14.5,6.5],[17.5,10]]){const dot=document.createElementNS(settingsNs,'circle');dot.setAttribute('cx',String(x));dot.setAttribute('cy',String(y));dot.setAttribute('r','1');dot.setAttribute('fill','currentColor');dot.setAttribute('stroke','none');settingsIcon.append(dot);}settingsToggle.appendChild(settingsIcon); const updateSettingsVisibility=()=>{const mounts=[...settingsDrawer.querySelectorAll('[data-dsh-skin-slot$=".mount"]')];const hasContent=mounts.some(mount=>mount.childElementCount>0||(mount.textContent||'').trim().length>0);settingsToggle.style.display=hasContent?'grid':'none';if(!hasContent)settingsDrawer.style.display='none'};const settingsObserver=new MutationObserver(updateSettingsVisibility);settingsObserver.observe(settingsDrawer,{childList:true,subtree:true,characterData:true});disposers.push(()=>settingsObserver.disconnect());const toggleDrawer=()=>{if(settingsToggle.style.display==='none')return;settingsDrawer.style.display=settingsDrawer.style.display==='none'?'block':'none'};settingsToggle.onclick=toggleDrawer;settingsToggle.onkeydown=event=>{if(event.key==='Enter'||event.key===' ')toggleDrawer()};queueMicrotask(updateSettingsVisibility); return settingsDrawer; };
   const ensureHost = name => { if (String(name).startsWith('settings.')) return ensureSettings(); if (hosts.has(name)) return hosts.get(name); const style = name === 'shell.overlay' ? {position:'fixed',inset:'0',zIndex:'2147482000',pointerEvents:'none'} : name === 'conversation.view' ? {position:'fixed',top:'0',right:'0',bottom:'0',left:'var(--dsh-sidebar-width,280px)',zIndex:'2147481900',overflow:'auto'} : name === 'sidebar.footer.action' ? {position:'fixed',left:'12px',bottom:'56px',width:'min(250px,calc(100vw - 24px))',zIndex:'2147482100'} : {position:'fixed',inset:'0',zIndex:'2147481800',pointerEvents:'none'}; const host=ownHost(name,style); hosts.set(name,host); return host; };
-  const slots = { inject(name, register) { const previousSlot=activeSlotName; activeSlotName=String(name); try { const result=typeof register==='function' ? register() : noop; if(typeof result==='function')disposers.push(result); return result; } finally { activeSlotName=previousSlot; } }, register(config, Component) { const name=String(config?.name || activeSlotName || 'shell.overlay'); if (typeof Component!=='function' && typeof Component!=='object') return noop; const target=ensureHost(name); const mount=document.createElement('div'); mount.setAttribute('data-dsh-skin-owned',${id}); mount.setAttribute('data-dsh-skin-slot',name+'.mount'); Object.assign(mount.style,{position:'relative',width:'100%',height:name==='conversation.view'?'100%':'auto',pointerEvents:'auto'}); target.appendChild(mount); owned.push(mount); let props={}; if (typeof config?.inject==='function') { try { props=config.inject({sync:noop}) || {}; } catch (error) { console.warn('[dsh skin slot inject]',error); } } const makeStoreHook=(store,fallback)=>selector=>{const getSnapshot=()=>store&&typeof store.getSnapshot==='function'?store.getSnapshot():fallback;const subscribe=listener=>store&&typeof store.subscribe==='function'?store.subscribe(listener):noop;const snapshot=react.useSyncExternalStore(subscribe,getSnapshot,getSnapshot);return typeof selector==='function'?selector(snapshot):snapshot;}; for(const [hookName,store] of Object.entries(props.hooks||{})){const propName='use'+hookName.charAt(0).toUpperCase()+hookName.slice(1);props[propName]=makeStoreHook(store,{});} let slotStore;try{slotStore=config?.store&&typeof config.store.create==='function'?config.store.create('dsh-desktop-shell'):null;}catch{} if(slotStore){props.useStore=makeStoreHook(slotStore,{});props.actions=slotStore.actions||{};} const emptySession={nodes:[],partial:null,running:false,blank:true,runningCalls:[],pending:[],promptError:null};props.useSession ||= makeStoreHook(null,emptySession);props.inputActions ||= {setDraft:noop,submit:noop};props.actions ||= new Proxy({}, {get:()=>noop}); try { const createRoot=reactDomClient.createRoot || reactDom.createRoot; if (typeof createRoot!=='function') throw new Error('ReactDOM createRoot is unavailable'); const root=createRoot(mount); roots.push(root); root.render(react.createElement(Component,props)); let disposed=false; return () => { if (disposed) return; disposed=true; try { root.unmount(); } catch {} mount.remove(); }; } catch (error) { mount.remove(); console.warn('[dsh skin slot mount]',error); return noop; } } };
+  const slots = { inject(name, register) { const previousSlot=activeSlotName; activeSlotName=String(name); try { const result=typeof register==='function' ? register() : noop; if(typeof result==='function')disposers.push(result); return result; } finally { activeSlotName=previousSlot; } }, register(config, Component) { const name=String(config?.name || activeSlotName || 'shell.overlay'); if (typeof Component!=='function' && typeof Component!=='object') return noop; const target=ensureHost(name); const mount=document.createElement('div'); mount.setAttribute('data-dsh-skin-owned',${id}); mount.setAttribute('data-dsh-skin-slot',name+'.mount'); Object.assign(mount.style,{position:'relative',width:'100%',height:name==='conversation.view'?'100%':'auto',pointerEvents:'auto'}); target.appendChild(mount); owned.push(mount); let slotStore=null; try { if (config?.store) { slotStore = typeof config.store.create === 'function' ? config.store.create('dsh-desktop-shell') : config.store; } } catch(error) { console.warn('[dsh skin slot store create]', error); } const storeActions = slotStore?.actions || {}; let props={}; if (typeof config?.inject==='function') { try { props=config.inject(storeActions) || {}; } catch (error) { console.warn('[dsh skin slot inject]',error); } } const makeStoreHook=(store,fallback)=>selector=>{const getSnapshot=()=>{ if(store&&typeof store.getSnapshot==='function')return store.getSnapshot(); if(store&&typeof store.getState==='function')return store.getState(); return fallback; }; const subscribe=listener=>store&&typeof store.subscribe==='function'?store.subscribe(listener):noop; const snapshot=react.useSyncExternalStore(subscribe,getSnapshot,getSnapshot); return typeof selector==='function'?selector(snapshot):snapshot; }; for(const [hookName,store] of Object.entries(props.hooks||{})){const propName='use'+hookName.charAt(0).toUpperCase()+hookName.slice(1);props[propName]=makeStoreHook(store,{});} if(slotStore){props.useStore=makeStoreHook(slotStore,{});props.actions={ ...storeActions, ...(props.actions||{}) };} const emptySession={nodes:[],partial:null,running:false,blank:true,runningCalls:[],pending:[],promptError:null};props.useSession ||= makeStoreHook(null,emptySession);props.useStore ||= makeStoreHook(slotStore,{});props.inputActions ||= {setDraft:noop,submit:noop};props.actions ||= storeActions || new Proxy({}, {get:()=>noop});props.t ||= config?.locale ? locale.bind(config.locale) : locale.t; try { const createRoot=reactDomClient.createRoot || reactDom.createRoot; if (typeof createRoot!=='function') throw new Error('ReactDOM createRoot is unavailable'); const root=createRoot(mount); roots.push(root); root.render(react.createElement(Component,props)); let disposed=false; return () => { if (disposed) return; disposed=true; try { root.unmount(); } catch {} mount.remove(); }; } catch (error) { mount.remove(); console.warn('[dsh skin slot mount]',error); return noop; } } };
   const locale = (${createSkinLocaleAdapter.toString()})(document.documentElement.lang || 'en');
   const sessions = (${createSkinSessionsAdapter.toString()})();
   const sessionMessage = event => { const value=event.data;if(event.source!==window||event.origin!==window.location.origin||value===null||typeof value!=='object'||value.type!=='dsh/desktop-pet-active-session')return;const sessionId=value.sessionId;if(sessionId===null)sessions.setCurrent(null);else if(typeof sessionId==='string'&&/^[0-9A-Za-z._~-]{1,128}$/.test(sessionId))sessions.setCurrent(sessionId); };
