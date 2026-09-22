@@ -245,12 +245,12 @@ export class RuntimeController {
     return this.enqueue(async () => {
       this.state = await this.store.setPreference(preference)
       await this.stopBackend()
-      await this.boot()
+      const fallbackError = await this.boot()
       if (preference.mode === 'pinned' && this.state.currentVersion !== preference.version) {
         const message = this.state.currentVersion === undefined
           ? `DSH ${preference.version} 未能启动`
           : `DSH ${preference.version} 启动失败，已继续使用 DSH ${this.state.currentVersion}`
-        if (this.phase !== 'error') this.fail(message)
+        if (this.phase !== 'error') this.fail(fallbackError === undefined ? message : `${message}\n\n启动诊断：${fallbackError}`)
         throw new Error(this.error ?? message)
       }
     })
@@ -319,7 +319,7 @@ export class RuntimeController {
     return next
   }
 
-  private async boot(): Promise<void> {
+  private async boot(): Promise<string | undefined> {
     this.recoveryPlan = undefined
     this.update('checking', '正在检查可用的 DSH 版本')
     this.state = await this.store.readState()
@@ -366,7 +366,7 @@ export class RuntimeController {
       if (fallback !== undefined) {
         try {
           await this.launch(fallback, `DSH 更新未完成，继续使用 ${fallback.manifest.dshVersion}`)
-          return
+          return primaryError
         } catch (fallbackError: unknown) {
           const detail = fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
           this.fail(`${primaryError}\n\n回退版本启动失败：${detail}`)

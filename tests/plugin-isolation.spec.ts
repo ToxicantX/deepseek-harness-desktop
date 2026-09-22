@@ -21,6 +21,11 @@ describe('plugin isolation', () => {
       { id: 'three', name: 'third-party-extra' },
     ] }]
     expect(isolationTargets(rows, ['third-party', '@deepseek-ai/core'])).toEqual([{ id: 'one', name: 'third-party', disabled: true }])
+    expect(isolationTargets([
+      { id: 'same', name: '@deepseek-ai/core' },
+      { id: 'same', name: '@deepseek-ai/core-extension' },
+      { id: 'third', name: 'third-party' },
+    ], ['third-party'])).toEqual([{ id: 'third', name: 'third-party', disabled: true }])
     expect(() => isolationTargets([{ id: 'same', name: 'third-party' }, { id: 'same', name: 'core' }], ['third-party'])).toThrow(/ambiguous/)
     expect(() => isolationTargets([{ id: 'one', name: 'third-party', disabled: true }], ['third-party'], true)).toThrow(/用户配置/)
     expect(() => isolationTargets([{ id: 'outer', group: true, disabled: true, config: rows }], ['third-party'], true)).toThrow(/用户配置/)

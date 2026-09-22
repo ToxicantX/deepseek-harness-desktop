@@ -44,6 +44,7 @@ export function isolationTargets(value: unknown, packages: readonly string[], re
   if (!Array.isArray(value)) throw new Error('Invalid Runtime composition')
   const names = new Set(packages.filter(thirdParty))
   const ids = new Set<string>()
+  const duplicateIds = new Set<string>()
   const targets: Target[] = []
   const visit = (rows: unknown[], depth: number, parentDisabled = false): void => {
     if (depth > 32) throw new Error('Runtime composition is too deep')
@@ -52,7 +53,7 @@ export function isolationTargets(value: unknown, packages: readonly string[], re
       const entry = row as Record<string, unknown>
       const disabled = parentDisabled || (entry.disabled !== undefined && entry.disabled !== null && entry.disabled !== false)
       if (typeof entry.id === 'string') {
-        if (ids.has(entry.id)) throw new Error('Runtime entry ID is ambiguous')
+        if (ids.has(entry.id)) duplicateIds.add(entry.id)
         ids.add(entry.id)
       }
       if (typeof entry.name === 'string' && names.has(entry.name)) {
@@ -64,6 +65,7 @@ export function isolationTargets(value: unknown, packages: readonly string[], re
     }
   }
   visit(value, 0)
+  if (targets.some(target => duplicateIds.has(target.id))) throw new Error('Runtime entry ID is ambiguous')
   return targets
 }
 

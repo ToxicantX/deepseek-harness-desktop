@@ -147,12 +147,12 @@ describe('RuntimeController catalog refresh', () => {
     await controller.refreshCatalog()
 
     await expect(controller.setPreference({ mode: 'pinned', version: newRelease.dshVersion }))
-      .rejects.toThrow(`DSH ${newRelease.dshVersion} 启动失败，已继续使用 DSH ${oldRelease.dshVersion}`)
+      .rejects.toThrow(`DSH ${newRelease.dshVersion} 启动失败，已继续使用 DSH ${oldRelease.dshVersion}\n\n启动诊断：source build failed`)
 
     expect(controller.snapshot()).toMatchObject({
       phase: 'error',
       currentVersion: oldRelease.dshVersion,
-      error: `DSH ${newRelease.dshVersion} 启动失败，已继续使用 DSH ${oldRelease.dshVersion}`,
+      error: `DSH ${newRelease.dshVersion} 启动失败，已继续使用 DSH ${oldRelease.dshVersion}\n\n启动诊断：source build failed`,
     })
   })
 
