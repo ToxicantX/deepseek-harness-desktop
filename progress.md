@@ -1793,3 +1793,19 @@ Remove-Item -LiteralPath 'src/conversation-replay-host-injector.ts','src/convers
 - 当前 `dsh-multi-model-orchestrator` 仍使用上游旧 `.agent-presets` 注册机制；Shell 会保留其默认值，但在插件适配 `agent-preset-registry` 前，DSH 0.1.7-alpha.1 的预设页仍只显示内置预设。该兼容问题不影响本次恢复的供应商、模型与默认模型。
 - 本地产物未配置 Authenticode 证书，实际发布签名状态由 `shell-release.yml` 的 GitHub Actions 证书配置和签名校验决定。
 - 回滚方式：回退 0.1.51 发布提交；真实 Profile 可从上述手工恢复备份按文件恢复。
+
+## 2026-09-23 - Task: 刷新发现上游最新 DSH 版本 / Shell 0.1.52
+### What was done
+- 根因：刷新只读取每日同步的桌面 Runtime Catalog，上游 0.1.7-alpha.2 发布后目录仍为 alpha.1；版本管理刷新按钮还误绑定了 Runtime 重启；自动策略未改变时更新按钮始终禁用。
+- 刷新同时查询官方 GitHub Releases（含 alpha/rc、按 semver 排序）和桌面目录，显示最新上游版本及桌面包可用、等待发布、需更新 Shell 或检查失败状态。
+- 为目录请求禁用缓存并添加唯一刷新参数，保留离线缓存提示；未验证版本不进入可安装选项。
+- 刷新只更新列表，不重启 Runtime，保留未应用的策略选择；自动策略可应用新版本及同版本新修订。
+- Runtime 自动同步改为每小时检查；新 Runtime 默认要求 Shell >=0.1.51，以启用配置保护。已触发 alpha.2 桌面构建与原有完整冒烟门禁。
+- Shell 版本更新到 0.1.52，并将真实 Electron 版本管理验收接入 Shell 发布流程。
+### Testing
+- 全量 `pnpm test`：49 个文件、347 项测试通过；`pnpm typecheck`、`pnpm run build`、`git diff --check` 通过。
+- `node scripts/smoke-runtime-refresh.mjs`：真实 sandboxed preload 验证待发布状态、刷新不重启、自动更新、revision 更新、草稿选择保留、断网恢复及 900/390px 无横向溢出；截图检查通过。
+- `pnpm run dist` 通过，0.1.52 安装器和 portable 包已生成；真实 GitHub 请求成功识别桌面 alpha.1 与上游 alpha.2 的差距，未使用缓存。
+### Notes
+- 上游版本可立即发现，但桌面包必须通过构建与冒烟才能安装；GitHub 限流时明确显示上游检查失败。
+- 本轮不改变真实模型配置，也不自动切换当前运行中的 Runtime。

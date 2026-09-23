@@ -152,7 +152,8 @@ async function atomicWrite(filename: string, contents: string): Promise<void> {
 
 async function fetchJson(url: string, signal?: AbortSignal): Promise<unknown> {
   const response = await fetch(url, {
-    headers: { accept: 'application/json', 'user-agent': 'deepseek-harness-desktop' },
+    headers: { accept: 'application/json', 'user-agent': 'deepseek-harness-desktop', 'cache-control': 'no-cache' },
+    cache: 'no-store',
     redirect: 'follow',
     ...(signal === undefined ? {} : { signal }),
   })
@@ -210,7 +211,9 @@ export class RuntimeStore {
 
   async loadCatalog(url = DEFAULT_CATALOG_URL): Promise<{ catalog: RuntimeCatalog; cached: boolean }> {
     try {
-      const catalog = parseRuntimeCatalog(await fetchJson(url, AbortSignal.timeout(10_000)))
+      const freshUrl = new URL(url)
+      freshUrl.searchParams.set('_refresh', randomUUID())
+      const catalog = parseRuntimeCatalog(await fetchJson(freshUrl.href, AbortSignal.timeout(10_000)))
       await atomicWrite(this.catalogFile, `${JSON.stringify(catalog, undefined, 2)}\n`)
       return { catalog, cached: false }
     } catch (networkError: unknown) {

@@ -78,6 +78,7 @@ function createController(
     onOpenSettingsDocument: vi.fn(async () => {}),
     beginRuntimeConfigProtection: vi.fn(async () => undefined),
     recoverPendingRuntimeConfigProtection: vi.fn(async () => undefined),
+    loadLatestUpstreamVersion: vi.fn(async () => '0.1.7-alpha.2'),
     ...options,
   })
 }
@@ -108,6 +109,28 @@ describe('RuntimeController catalog refresh', () => {
 
     expect(refreshed.versions.map(version => version.version)).toEqual([newRelease.dshVersion, oldRelease.dshVersion])
     expect(stop).not.toHaveBeenCalled()
+    expect(refreshed.upstream).toEqual({ version: '0.1.7-alpha.2', status: 'pending' })
+    expect(mocks.startBackend).not.toHaveBeenCalled()
+  })
+
+  it.each(['available', 'shell-required', 'error'] as const)('reports upstream %s without admitting unvalidated versions', async status => {
+    const release = manifest('0.1.7-alpha.2')
+    if (status === 'shell-required') release.requiredShellRange = '>=0.1.51'
+    const store = {
+      loadCatalog: vi.fn(async () => ({ catalog: catalog(release), cached: false })),
+      readState: vi.fn(async () => ({ schemaVersion: 1, preference: { mode: 'latest-compatible' as const } })),
+      installed: vi.fn(async () => undefined),
+    }
+    const controller = createController(store, vi.fn(), 'C:/dsh-home', {
+      loadLatestUpstreamVersion: vi.fn(async () => {
+        if (status === 'error') throw new Error('HTTP 403')
+        return release.dshVersion
+      }),
+    })
+    const view = await controller.refreshCatalog()
+    expect(view.upstream).toEqual(status === 'error' ? { status } : { status, version: release.dshVersion })
+    expect(view.versions).toHaveLength(status === 'shell-required' ? 0 : 1)
+    expect(mocks.startBackend).not.toHaveBeenCalled()
   })
 
   it('switches an old-version user using only the selected catalog manifest', async () => {

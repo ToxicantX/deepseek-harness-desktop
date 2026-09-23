@@ -20,6 +20,7 @@ import { cleanupRemovedPluginPresets } from './plugin-removal-cleanup.ts'
 import { inspectPluginPresetRecovery, type PluginPresetRecoveryPlan } from './plugin-preset-recovery.ts'
 import { inspectAgentPresetSchemaRecovery } from './agent-preset-schema-recovery.ts'
 import { RuntimeStore, type InstalledRuntime, type RuntimeState } from './runtime-store.ts'
+import { loadLatestUpstreamVersion } from './upstream-releases.ts'
 import {
   beginRuntimeConfigProtection,
   recoverPendingRuntimeConfigProtection,
@@ -58,6 +59,7 @@ export interface RuntimeView {
   preference: RuntimePreference
   versions: RuntimeVersionView[]
   cachedCatalog: boolean
+  upstream?: { version?: string; status: 'available' | 'pending' | 'shell-required' | 'error' }
   progress?: { received: number; total: number }
   recovery?: RuntimeRecoveryView
   error?: string
@@ -90,6 +92,7 @@ export interface RuntimeControllerOptions {
   inspectAgentPresetSchema?: AgentPresetSchemaRecoveryInspector
   beginRuntimeConfigProtection?: RuntimeConfigProtectionStarter
   recoverPendingRuntimeConfigProtection?: PendingRuntimeConfigProtectionRecoverer
+  loadLatestUpstreamVersion?: typeof loadLatestUpstreamVersion
   pluginIsolation?: PluginIsolation
   onView(view: RuntimeView): void
   onReady(url: URL, runtime: InstalledRuntime, cliDirectory: string): Promise<void>
@@ -128,6 +131,8 @@ export class RuntimeController {
   private error: string | undefined
   private progress: { received: number; total: number } | undefined
   private cachedCatalog = false
+  private upstream: RuntimeView['upstream']
+  private readonly loadLatestUpstreamVersion: typeof loadLatestUpstreamVersion
   private pending: Promise<void> = Promise.resolve()
 
   constructor(options: RuntimeControllerOptions) {
@@ -145,6 +150,7 @@ export class RuntimeController {
     this.inspectAgentPresetSchema = options.inspectAgentPresetSchema ?? inspectAgentPresetSchemaRecovery
     this.beginRuntimeConfigProtection = options.beginRuntimeConfigProtection ?? beginRuntimeConfigProtection
     this.recoverPendingRuntimeConfigProtection = options.recoverPendingRuntimeConfigProtection ?? recoverPendingRuntimeConfigProtection
+    this.loadLatestUpstreamVersion = options.loadLatestUpstreamVersion ?? loadLatestUpstreamVersion
     this.pluginIsolation = options.pluginIsolation
     this.onView = options.onView
     this.onReady = options.onReady
@@ -161,9 +167,18 @@ export class RuntimeController {
 
   refreshCatalog(): Promise<RuntimeView> {
     return this.enqueueResult(async () => {
-      const loaded = await this.store.loadCatalog(this.catalogUrl)
+      const [loaded, latest] = await Promise.all([
+        this.store.loadCatalog(this.catalogUrl),
+        this.loadLatestUpstreamVersion().catch(() => undefined),
+      ])
       this.catalog = loaded.catalog
       this.cachedCatalog = loaded.cached
+      const releases = loaded.catalog.releases.filter(release => release.dshVersion === latest)
+      this.upstream = latest === undefined ? { status: 'error' } : {
+        version: latest,
+        status: releases.length === 0 ? 'pending'
+          : releases.some(release => isReleaseCompatible(release, this.shellVersion)) ? 'available' : 'shell-required',
+      }
       this.state = await this.store.readState()
       await this.refreshInstalledVersions()
       this.emit()
@@ -300,6 +315,7 @@ export class RuntimeController {
       preference: this.state.preference,
       versions,
       cachedCatalog: this.cachedCatalog,
+      ...(this.upstream === undefined ? {} : { upstream: this.upstream }),
       ...(this.progress === undefined ? {} : { progress: this.progress }),
       ...(this.phase !== 'error' || this.recoveryPlan === undefined ? {} : {
         recovery: this.recoveryPlan.kind === 'stale-local-plugins'

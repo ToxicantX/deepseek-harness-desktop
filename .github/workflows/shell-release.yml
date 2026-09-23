@@ -51,6 +51,9 @@ jobs:
           CSC_LINK: ${{ startsWith(github.ref, 'refs/tags/shell-v') && secrets.CSC_LINK || '' }}
           CSC_KEY_PASSWORD: ${{ startsWith(github.ref, 'refs/tags/shell-v') && secrets.CSC_KEY_PASSWORD || '' }}
         run: pnpm run dist
+      - name: Verify Runtime version manager
+        shell: pwsh
+        run: node scripts/smoke-runtime-refresh.mjs
       - name: Verify Authenticode signatures
         if: startsWith(github.ref, 'refs/tags/shell-v')
         shell: pwsh

@@ -73,6 +73,7 @@
     .selection-summary { display: flex; align-items: center; justify-content: space-between; gap: 18px; min-height: 52px; margin-top: 14px; padding: 10px 0; border-top: 1px solid #e2e5ea; border-bottom: 1px solid #e2e5ea; }
     #selection-version { flex: 0 0 auto; color: #263b75; font-size: 13px; font-weight: 650; }
     #selection-detail { min-width: 0; color: #69707d; font-size: 12px; line-height: 1.45; text-align: right; overflow-wrap: anywhere; }
+    #upstream-status { margin: 12px 0 0; color: #69707d; font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
     .section-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
     .startup-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
     #recover-stale-plugins, #recover-profile-bundles, #recover-plugin-preset { border-color: #a96b18; color: #7a4a0d; background: #fff8ed; }
@@ -177,6 +178,7 @@
         <button id="apply" class="primary" type="button" disabled>应用版本策略</button>
         <button id="retry" type="button">刷新版本目录</button>
       </div>
+      <p id="upstream-status" role="status" hidden></p>
     </section>
   </main>
 </body>

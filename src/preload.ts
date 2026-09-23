@@ -118,6 +118,7 @@ let runtimeDraftMode: RuntimePreference['mode'] | undefined
 let runtimeDraftVersion: string | undefined
 let runtimePreferenceTouched = false
 let runtimeManagerMode = false
+let runtimeRefreshing = false
 
 const runtimePhaseLabels: Record<RuntimeView['phase'], string> = {
   checking: '检查中',
@@ -145,7 +146,7 @@ function renderRuntime(view: RuntimeView): void {
   const fallbackVersion = availableVersions.find(version => version.current)?.version ?? availableVersions[0]?.version
   runtimeDraftVersion ??= fallbackVersion
 
-  const busy = view.phase === 'checking' || view.phase === 'downloading' || view.phase === 'starting'
+  const busy = runtimeRefreshing || view.phase === 'checking' || view.phase === 'downloading' || view.phase === 'starting'
   document.body.dataset.phase = view.phase
   document.body.dataset.view = runtimeManagerMode ? 'manager' : 'startup'
   element<HTMLElement>('version-settings').hidden = !runtimeManagerMode
@@ -188,6 +189,13 @@ function renderRuntime(view: RuntimeView): void {
     : view.phase === 'checking' ? '正在检查' : view.phase === 'starting' ? '正在连接' : '正在准备'
 
   element('cache').style.display = view.cachedCatalog ? 'block' : 'none'
+  const upstream = element('upstream-status')
+  upstream.hidden = view.upstream === undefined
+  upstream.textContent = view.upstream === undefined ? ''
+    : view.upstream.status === 'error' ? '上游版本检查失败，请稍后刷新'
+    : '上游最新：DSH ' + view.upstream.version + (view.upstream.status === 'pending'
+      ? (view.cachedCatalog ? ' · 桌面目录离线，可用状态待确认' : ' · 等待桌面包发布')
+      : view.upstream.status === 'shell-required' ? ' · 需要更新 Shell' : ' · 桌面包已可用')
   const error = element('error')
   error.textContent = view.error ?? ''
   error.style.display = view.error === undefined ? 'none' : 'block'
@@ -248,11 +256,14 @@ function renderRuntime(view: RuntimeView): void {
   }
 
   const applyButton = element<HTMLButtonElement>('apply')
+  const targetChanged = targetVersion !== undefined && (targetVersion.version !== view.currentVersion
+    || targetVersion.runtimeRevision !== view.currentRuntimeRevision)
   applyButton.textContent = pinned && runtimeDraftVersion !== undefined
     ? '固定到 ' + runtimeDraftVersion
-    : '使用自动策略'
-  applyButton.disabled = busy || targetVersion === undefined || runtimePreferenceMatches(view)
+    : targetChanged ? '更新到 ' + targetVersion!.version : '使用自动策略'
+  applyButton.disabled = busy || targetVersion === undefined || (runtimePreferenceMatches(view) && !targetChanged)
   element<HTMLButtonElement>('retry').disabled = busy
+  element<HTMLButtonElement>('retry').textContent = runtimeRefreshing ? '正在检查版本' : '刷新版本目录'
 
   const startupRetry = element<HTMLButtonElement>('startup-retry')
   startupRetry.hidden = runtimeManagerMode || view.phase !== 'error'
@@ -339,7 +350,24 @@ function initializeRuntimePage(): void {
     rerender()
   })
   const retry = (): void => { void ipcRenderer.invoke('runtime:retry').catch(showError) }
-  element<HTMLButtonElement>('retry').addEventListener('click', retry)
+  const refresh = async (): Promise<void> => {
+    if (runtimeRefreshing) return
+    runtimeRefreshing = true
+    rerender()
+    element<HTMLButtonElement>('retry').disabled = true
+    let refreshError: unknown
+    try {
+      renderRuntime(await ipcRenderer.invoke('runtime:get-view') as RuntimeView)
+    } catch (error: unknown) {
+      refreshError = error
+    } finally {
+      runtimeRefreshing = false
+      rerender()
+      if (runtimeLatestView === undefined) element<HTMLButtonElement>('retry').disabled = false
+      if (refreshError !== undefined) showError(refreshError)
+    }
+  }
+  element<HTMLButtonElement>('retry').addEventListener('click', () => { void refresh() })
   element<HTMLButtonElement>('startup-retry').addEventListener('click', retry)
   element<HTMLButtonElement>('recover-stale-plugins').addEventListener('click', () => {
     if (runtimeRecoveryIds.length === 0) return
@@ -373,7 +401,7 @@ function initializeRuntimePage(): void {
       runtimePreferenceTouched = false
     }).catch(showError)
   })
-  void (ipcRenderer.invoke('runtime:get-view') as Promise<RuntimeView>).then(renderRuntime).catch(showError)
+  void refresh()
 }
 
 function setHidden(id: string, hidden: boolean): void { element(id).hidden = hidden }

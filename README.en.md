@@ -27,6 +27,8 @@ Download the Windows x64 installer or portable build from the [Latest Release](h
 
 A new upstream tag does not enter the catalog until its desktop runtime passes the build, compatibility, and smoke gates, so an unprepared version cannot break an existing installation. Release channels stay separate: `shell-v*` publishes the Shell, `runtime-dsh-v*-desktop.<revision>` publishes immutable runtimes, and `runtime-catalog` carries the machine-readable catalog.
 
+Refreshing the version manager checks official GitHub Releases, including alpha/rc versions, alongside the desktop catalog without restarting the Runtime. It reports whether the latest upstream version is available, awaiting a desktop build, or requires a newer Shell. Automatic policy users can apply a newly discovered version or revision with the update button. Desktop builds check upstream hourly; installation remains gated on build and smoke validation. Offline caches and failed upstream checks are explicitly reported.
+
 ## Installation and updates
 
 On a normal application launch, the local Shell startup page shows only the status ring and catalog, Runtime download, or startup state; it does not expose version selection. For first install, automatic upgrade, or a DSH switch initiated from the version manager, target-version download progress stays at the bottom of the startup page. Version selection appears only under **Runtime → Manage DSH versions**. Animation is disabled when the system requests reduced motion. First launch requires network access. The Shell downloads `runtime-catalog.json`, selects a version, downloads the Windows x64 runtime ZIP, and verifies both its declared size and SHA-256. Extraction occurs in a staging directory. The Shell updates the current version only after Node, pnpm, and DSH are present and Web readiness succeeds. Download, verification, and startup failures leave the previous runtime available.
@@ -88,7 +90,7 @@ Enabling or disabling requires a stable Cordis entry `id`. The Shell writes only
 
 ## Runtime artifacts
 
-`.github/workflows/runtime-release.yml` checks the newest upstream `dsh-v*` tag each day and also accepts an explicit tag, positive `runtime_revision`, and Shell range. It verifies the tag and CLI version, installs the exact official `@deepseek-ai/dsh` release, adds a checksum-verified official Node 24 runtime and standalone pnpm, runs real Web, settings-open, session-repair, plugin, and shutdown smokes, and publishes the ZIP, manifest, and updated catalog. The catalog accepts only a higher revision for the same DSH version; release tags and assets are never overwritten.
+`.github/workflows/runtime-release.yml` checks the newest upstream `dsh-v*` tag each hour and also accepts an explicit tag, positive `runtime_revision`, and Shell range. It verifies the tag and CLI version, installs the exact official `@deepseek-ai/dsh` release, adds a checksum-verified official Node 24 runtime and standalone pnpm, runs real Web, settings-open, session-repair, plugin, and shutdown smokes, and publishes the ZIP, manifest, and updated catalog. The catalog accepts only a higher revision for the same DSH version; release tags and assets are never overwritten.
 
 The client does not clone and build the complete upstream repository on the user's machine. Git tags remain the version source of truth without requiring users to install Git, development dependencies, or native build tools.
 
