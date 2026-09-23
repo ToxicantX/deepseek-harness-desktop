@@ -164,7 +164,7 @@ describe('RuntimeController catalog refresh', () => {
     expect(controller.snapshot().currentVersion).toBe(newRelease.dshVersion)
   })
 
-  it('rejects a pinned switch when startup falls back to the previous runtime', async () => {
+  it.each(['pinned', 'latest-compatible'] as const)('reports an installation failure after fallback in %s mode', async mode => {
     const oldRelease = manifest('0.1.0-rc.7')
     const newRelease = manifest('0.1.1-rc.2')
     let preference: RuntimePreference = { mode: 'pinned', version: oldRelease.dshVersion }
@@ -188,14 +188,16 @@ describe('RuntimeController catalog refresh', () => {
 
     await controller.refreshCatalog()
 
-    await expect(controller.setPreference({ mode: 'pinned', version: newRelease.dshVersion }))
-      .rejects.toThrow(`DSH ${newRelease.dshVersion} 启动失败，已继续使用 DSH ${oldRelease.dshVersion}\n\n启动诊断：source build failed`)
+    await expect(controller.setPreference(mode === 'pinned' ? { mode, version: newRelease.dshVersion } : { mode }))
+      .rejects.toThrow(`DSH 更新未完成，已继续使用 DSH ${oldRelease.dshVersion}\n\n更新诊断：安装 DSH ${newRelease.dshVersion} 失败：source build failed`)
 
     expect(controller.snapshot()).toMatchObject({
       phase: 'error',
       currentVersion: oldRelease.dshVersion,
-      error: `DSH ${newRelease.dshVersion} 启动失败，已继续使用 DSH ${oldRelease.dshVersion}\n\n启动诊断：source build failed`,
+      error: `DSH 更新未完成，已继续使用 DSH ${oldRelease.dshVersion}\n\n更新诊断：安装 DSH ${newRelease.dshVersion} 失败：source build failed`,
     })
+    expect(mocks.startBackend).toHaveBeenCalledOnce()
+    expect(mocks.startBackend.mock.calls[0]?.[0].runtime.manifest.dshVersion).toBe(oldRelease.dshVersion)
   })
 
   it('restores legacy model configuration before starting the fallback Runtime', async () => {
@@ -479,6 +481,29 @@ describe('RuntimeController catalog refresh', () => {
     })
   })
 
+  it('rejects a failed same-version revision update without losing its installation diagnostic', async () => {
+    const previous = manifest('0.1.7-alpha.2')
+    const update = { ...previous, runtimeRevision: 2 }
+    const preference: RuntimePreference = { mode: 'pinned', version: previous.dshVersion }
+    const state = { schemaVersion: 1, preference, currentVersion: previous.dshVersion, currentRuntimeRevision: 1 }
+    const store = {
+      loadCatalog: vi.fn(async () => ({ catalog: catalog(update), cached: false })),
+      readState: vi.fn(async () => state),
+      setPreference: vi.fn(async () => state),
+      installed: vi.fn(async () => installed(previous)),
+      install: vi.fn(async () => { throw new Error('download interrupted') }),
+      promote: vi.fn(async () => state),
+    }
+    mocks.startBackend.mockResolvedValue({
+      url: new URL('http://127.0.0.1:43123/'), done: new Promise(() => {}),
+      stop: vi.fn(async () => ({ exitCode: 0, signal: null, diagnostics: '' })),
+    })
+    const controller = createController(store)
+    await expect(controller.setPreference(preference)).rejects.toThrow('安装 DSH 0.1.7-alpha.2 失败：download interrupted')
+    expect(controller.snapshot()).toMatchObject({ phase: 'error', currentRuntimeRevision: 1 })
+    expect(mocks.startBackend.mock.calls[0]?.[0].runtime.manifest.runtimeRevision).toBe(1)
+  })
+
   it('protects the current Runtime when persisted state predates revision tracking', async () => {
     const release = manifest('0.1.7-alpha.1')
     release.runtimeRevision = 2
@@ -541,7 +566,7 @@ describe('RuntimeController catalog refresh', () => {
       '正在构建 DSH 0.1.1-rc.2',
       '正在准备 DSH 0.1.1-rc.2 Runtime',
     ]))
-    expect(controller.snapshot()).toMatchObject({ phase: 'error', error: 'source build failed' })
+    expect(controller.snapshot()).toMatchObject({ phase: 'error', error: '安装 DSH 0.1.1-rc.2 失败：source build failed' })
     expect(controller.snapshot().progress).toBeUndefined()
   })
 

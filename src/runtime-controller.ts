@@ -276,11 +276,12 @@ export class RuntimeController {
       this.state = await this.store.setPreference(preference)
       await this.stopBackend()
       const fallbackError = await this.boot()
-      if (preference.mode === 'pinned' && this.state.currentVersion !== preference.version) {
+      if (fallbackError !== undefined || this.phase === 'error'
+        || (preference.mode === 'pinned' && this.state.currentVersion !== preference.version)) {
         const message = this.state.currentVersion === undefined
-          ? `DSH ${preference.version} 未能启动`
-          : `DSH ${preference.version} 启动失败，已继续使用 DSH ${this.state.currentVersion}`
-        if (this.phase !== 'error') this.fail(fallbackError === undefined ? message : `${message}\n\n启动诊断：${fallbackError}`)
+          ? 'DSH 更新未完成'
+          : `DSH 更新未完成，已继续使用 DSH ${this.state.currentVersion}`
+        if (this.phase !== 'error') this.fail(fallbackError === undefined ? message : `${message}\n\n更新诊断：${fallbackError}`)
         throw new Error(this.error ?? message)
       }
     })
@@ -367,6 +368,7 @@ export class RuntimeController {
     this.currentRuntimeRevision = this.state.currentRuntimeRevision
     let target: InstalledRuntime | undefined
     let selectedVersion: string | undefined
+    let stage = '检查版本'
     try {
       const loaded = await this.store.loadCatalog(this.catalogUrl)
       this.catalog = loaded.catalog
@@ -380,6 +382,7 @@ export class RuntimeController {
         || target.manifest.archive.sha256 !== selected.archive.sha256) {
         const previous = target
         await this.stopBackend()
+        stage = '安装'
         this.update('downloading', `正在下载 DSH ${selected.dshVersion}`)
         try {
           target = await this.store.install(selected, progress => {
@@ -388,6 +391,9 @@ export class RuntimeController {
             else if (progress.stage === 'installing') this.message = `正在安装 DSH ${selected.dshVersion} 构建依赖`
             else if (progress.stage === 'building') this.message = `正在构建 DSH ${selected.dshVersion}`
             else if (progress.stage === 'assembling') this.message = `正在准备 DSH ${selected.dshVersion} Runtime`
+            else if (progress.stage === 'downloading' && (progress.attempt ?? 1) > 1) {
+              this.message = `正在重试下载 DSH ${selected.dshVersion}（第 ${progress.attempt}/3 次）`
+            }
             this.emit()
           })
           this.installedVersions.add(selected.dshVersion)
@@ -395,14 +401,17 @@ export class RuntimeController {
         } catch (error: unknown) {
           if (previous !== undefined && isReleaseCompatible(previous.manifest, this.shellVersion)) {
             const message = `DSH ${selected.dshVersion} 更新未完成，继续使用 DSH ${previous.manifest.dshVersion}`
+            const detail = `安装 DSH ${selected.dshVersion} 失败：${error instanceof Error ? error.message : String(error)}`
             await this.launch(previous, message)
-            return
+            this.update('ready', `${message}\n\n更新诊断：${detail}`)
+            return detail
           }
           throw error
         }
       }
       if (this.state.currentVersion === target.manifest.dshVersion
         && this.state.currentRuntimeRevision !== target.manifest.runtimeRevision) requiresConfigProtection = true
+      stage = '启动'
       await this.launchSelected(
         target,
         requiresConfigProtection,
@@ -410,11 +419,13 @@ export class RuntimeController {
       )
       return
     } catch (error: unknown) {
-      const primaryError = error instanceof Error ? error.message : String(error)
+      const primaryError = `${stage}${selectedVersion === undefined ? '' : ` DSH ${selectedVersion}`} 失败：${error instanceof Error ? error.message : String(error)}`
       const fallback = await this.fallbackRuntime(selectedVersion)
       if (fallback !== undefined) {
         try {
-          await this.launch(fallback, `DSH 更新未完成，继续使用 ${fallback.manifest.dshVersion}`)
+          const message = `DSH 更新未完成，继续使用 ${fallback.manifest.dshVersion}`
+          await this.launch(fallback, message)
+          this.update('ready', `${message}\n\n更新诊断：${primaryError}`)
           return primaryError
         } catch (fallbackError: unknown) {
           const detail = fallbackError instanceof Error ? fallbackError.message : String(fallbackError)

@@ -14,6 +14,8 @@ Windows desktop shell for DeepSeek Harness. The Shell and DSH runtime have indep
 
 ## Download
 
+Runtime downloads retry interrupted connections, timeouts, and temporary HTTP failures up to three attempts. Retries resume with Range when supported, otherwise restart the file. Full size and SHA-256 checks remain mandatory. Update diagnostics distinguish catalog checks, installation, and startup failures.
+
 Download the Windows x64 installer or portable build from the [Latest Release](https://github.com/ToxicantX/deepseek-harness-desktop/releases/latest). First launch installs the newest compatible DSH runtime automatically.
 
 ## Version model

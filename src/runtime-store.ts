@@ -12,6 +12,7 @@ import {
   writeFile,
 } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 import extract from 'extract-zip'
 import {
   installRuntimeFromSource,
@@ -70,6 +71,7 @@ export interface DownloadProgress {
   stage: 'downloading'
   received: number
   total: number
+  attempt?: number
 }
 
 export type RuntimeInstallProgress = DownloadProgress | SourceInstallProgress
@@ -80,6 +82,14 @@ export interface RuntimeStoreOptions {
 }
 
 class RuntimeArchiveUnavailableError extends Error {}
+class RetryableDownloadError extends Error {}
+
+function connectionFailure(error: unknown): RetryableDownloadError {
+  const cause = error instanceof Error ? error.cause : undefined
+  const code = cause !== null && typeof cause === 'object' && 'code' in cause ? cause.code : undefined
+  const detail = typeof code === 'string' && /^[A-Z0-9_]+$/u.test(code) ? ` (${code})` : ''
+  return new RetryableDownloadError(`下载连接中断或超时${detail}`, { cause: error })
+}
 
 function stateRecord(value: unknown): RuntimeState {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('runtime state must be an object')
@@ -372,28 +382,74 @@ export class RuntimeStore {
     destination: string,
     onProgress: (progress: RuntimeInstallProgress) => void,
   ): Promise<void> {
-    const response = await fetch(manifest.archive.url, {
-      headers: { accept: 'application/octet-stream', 'user-agent': 'deepseek-harness-desktop' },
-      redirect: 'follow',
-      signal: AbortSignal.timeout(30 * 60_000),
-    })
-    if (response.status === 404) throw new RuntimeArchiveUnavailableError('runtime archive is unavailable')
-    if (!response.ok || response.body === null) {
-      throw new Error(`runtime download failed with HTTP ${response.status}`)
-    }
     const file = await open(destination, 'wx')
-    const hash = createHash('sha256')
+    let hash = createHash('sha256')
     let received = 0
+    const signal = AbortSignal.timeout(30 * 60_000)
     try {
-      const reader = response.body.getReader()
-      for (;;) {
-        const result = await reader.read()
-        if (result.done) break
-        received += result.value.byteLength
-        if (received > manifest.archive.size) throw new Error('runtime download exceeded its declared size')
-        hash.update(result.value)
-        await file.write(result.value)
-        onProgress({ stage: 'downloading', received, total: manifest.archive.size })
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        let response: Response | undefined
+        let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
+        try {
+          try {
+            response = await fetch(manifest.archive.url, {
+              headers: {
+                accept: 'application/octet-stream', 'user-agent': 'deepseek-harness-desktop',
+                'accept-encoding': 'identity', 'cache-control': 'no-cache',
+                ...(received === 0 ? {} : { range: `bytes=${received}-` }),
+              },
+              redirect: 'follow', cache: 'no-store', signal,
+            })
+          } catch (error) { throw connectionFailure(error) }
+          if (response.status === 404) throw new RuntimeArchiveUnavailableError('runtime archive is unavailable')
+          if ([408, 429, 500, 502, 503, 504].includes(response.status)) {
+            throw new RetryableDownloadError(`runtime download failed with HTTP ${response.status}`)
+          }
+          if ((response.status !== 200 && response.status !== 206) || response.body === null) {
+            throw new Error(`runtime download failed with HTTP ${response.status}`)
+          }
+          // Resume only the requested suffix; servers that ignore Range must restart the file and hash.
+          if (response.status === 206) {
+            if (response.headers.get('content-range') !== `bytes ${received}-${manifest.archive.size - 1}/${manifest.archive.size}`) {
+              throw new Error('runtime download Content-Range mismatch')
+            }
+          } else if (received !== 0) {
+            await file.truncate(0)
+            hash = createHash('sha256')
+            received = 0
+          }
+          reader = response.body.getReader()
+          for (;;) {
+            let result: ReadableStreamReadResult<Uint8Array>
+            try { result = await reader.read() }
+            catch (error) { throw connectionFailure(error) }
+            if (result.done) break
+            if (received + result.value.byteLength > manifest.archive.size) throw new Error('runtime download exceeded its declared size')
+            let offset = 0
+            while (offset < result.value.byteLength) {
+              const { bytesWritten } = await file.write(result.value, offset, result.value.byteLength - offset, received + offset)
+              if (bytesWritten === 0) throw new Error('runtime download file write made no progress')
+              offset += bytesWritten
+            }
+            hash.update(result.value)
+            received += result.value.byteLength
+            onProgress({ stage: 'downloading', received, total: manifest.archive.size, attempt })
+          }
+          if (received !== manifest.archive.size) throw new RetryableDownloadError('下载连接提前结束')
+          break
+        } catch (error) {
+          if (!(error instanceof RetryableDownloadError)) throw error
+          // A disconnect after the final byte is harmless only if full size and hash validation passes below.
+          if (received === manifest.archive.size) break
+          if (attempt === 3 || signal.aborted) {
+            throw new Error(`Runtime 下载失败（已尝试 ${attempt} 次，已接收 ${received}/${manifest.archive.size} 字节）：${error.message}`, { cause: error })
+          }
+        } finally {
+          if (reader !== undefined) { await reader.cancel().catch(() => {}); reader.releaseLock() }
+          else await response?.body?.cancel().catch(() => {})
+        }
+        onProgress({ stage: 'downloading', received, total: manifest.archive.size, attempt: attempt + 1 })
+        await delay(attempt * 500)
       }
     } finally {
       await file.close()

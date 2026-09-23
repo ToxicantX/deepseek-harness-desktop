@@ -1809,3 +1809,18 @@ Remove-Item -LiteralPath 'src/conversation-replay-host-injector.ts','src/convers
 ### Notes
 - 上游版本可立即发现，但桌面包必须通过构建与冒烟才能安装；GitHub 限流时明确显示上游检查失败。
 - 本轮不改变真实模型配置，也不自动切换当前运行中的 Runtime。
+
+## 2026-09-23 - Task: Runtime 下载 terminated 恢复 / Shell 0.1.53
+### What was done
+- 用户反馈指定 alpha.2 更新失败、回退 alpha.1，诊断仅为 terminated。定位旧下载器未处理 fetch 响应流断开，且控制器将安装异常统一误报为启动失败。
+- 新增最多 3 次下载尝试，断流后使用 Range 续传；服务端返回完整响应时重置文件和哈希。严格验证 Content-Range、完整大小和 SHA-256；校验失败不重试绕过，404 保留既有源码构建回退。
+- 仅对传输故障、提前结束及临时 HTTP 错误重试；显示尝试次数、下载字节数及安全错误码，不输出请求凭据。释放响应流并正确处理文件短写。
+- 控制器区分检查、安装、启动错误；保留回退诊断；自动策略及同版本修订更新失败也返回失败，不再误报成功。
+### Testing
+- 先复现 6 项下载失败用例和 3 项控制器误报用例，再修复通过。
+- 全量 pnpm test：50 个文件、359 项通过。下载测试包含真实 HTTP socket 中断后续传成功，以及忽略 Range、范围错误、哈希错误、大小超限、重试耗尽和临时 HTTP 错误。
+- pnpm typecheck、pnpm run dist 和 git diff --check 通过；0.1.53 安装器与 portable 包已生成；node scripts/smoke-runtime-refresh.mjs 的真实 Electron 版本管理检查通过。
+- 本机由用户发起的重试已完成：只读检查 state.json 与进程可执行路径均确认 0.1.7-alpha.2；本轮没有切换或重启真实 Runtime，也没有修改模型配置。
+### Notes
+- 原始失败没有持久化下载堆栈；下载阶段判断基于 terminated 调用路径、初始未安装状态、复现结果和随后重试成功。无法由此确定断连发生在 GitHub、代理还是本地网络。
+- 重试仅在本次下载操作内续传，进程退出或尝试耗尽后沿用既有临时文件清理。持续网络故障仍会失败并保留旧版本。

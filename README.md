@@ -177,6 +177,8 @@ dsh plugin --profile web remove <package-name>
 
 确认能够访问 GitHub Release。应用需要下载 Runtime Catalog 和 Windows x64 Runtime ZIP，并验证文件大小与 SHA-256；网络中断不会覆盖已有可用 Runtime。
 
+下载遇到断流、超时或临时服务错误时，Shell 最多尝试 3 次；服务器支持 Range 时续传，否则重新下载。重试后仍须通过完整大小和 SHA-256 校验。更新失败会区分检查、安装和启动阶段，下载中断不再误报为 DSH 启动失败。
+
 ### 某个插件导致 Runtime 无法就绪
 
 从启动页或 **Runtime → 管理插件** 移除、更新该插件，然后重新启动 Runtime。不要直接删除整个 `%USERPROFILE%\.dsh`。
