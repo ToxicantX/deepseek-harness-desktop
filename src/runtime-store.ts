@@ -55,6 +55,7 @@ export interface RuntimeState {
   schemaVersion: 1
   preference: RuntimePreference
   currentVersion?: string
+  currentRuntimeRevision?: number
 }
 
 export interface InstalledRuntime {
@@ -98,10 +99,16 @@ function stateRecord(value: unknown): RuntimeState {
   if (currentVersion !== undefined && typeof currentVersion !== 'string') {
     throw new Error('runtime state currentVersion must be a string')
   }
+  const currentRuntimeRevision = input.currentRuntimeRevision
+  if (currentRuntimeRevision !== undefined
+    && (typeof currentRuntimeRevision !== 'number' || !Number.isSafeInteger(currentRuntimeRevision) || currentRuntimeRevision < 0)) {
+    throw new Error('runtime state currentRuntimeRevision must be a nonnegative safe integer')
+  }
   return {
     schemaVersion: STATE_SCHEMA,
     preference: parsedPreference,
     ...(currentVersion === undefined ? {} : { currentVersion }),
+    ...(currentRuntimeRevision === undefined ? {} : { currentRuntimeRevision }),
   }
 }
 
@@ -194,9 +201,9 @@ export class RuntimeStore {
     return updated
   }
 
-  async promote(version: string): Promise<RuntimeState> {
+  async promote(version: string, runtimeRevision: number): Promise<RuntimeState> {
     const state = await this.readState()
-    const updated: RuntimeState = { ...state, currentVersion: version }
+    const updated: RuntimeState = { ...state, currentVersion: version, currentRuntimeRevision: runtimeRevision }
     await atomicWrite(this.stateFile, `${JSON.stringify(updated, undefined, 2)}\n`)
     return updated
   }

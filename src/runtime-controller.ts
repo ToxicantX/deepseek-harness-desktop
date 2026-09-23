@@ -21,6 +21,13 @@ import { inspectPluginPresetRecovery, type PluginPresetRecoveryPlan } from './pl
 import { inspectAgentPresetSchemaRecovery } from './agent-preset-schema-recovery.ts'
 import { RuntimeStore, type InstalledRuntime, type RuntimeState } from './runtime-store.ts'
 import {
+  beginRuntimeConfigProtection,
+  recoverPendingRuntimeConfigProtection,
+  RuntimeConfigProtectionError,
+  RuntimeConfigurationLossError,
+  type RuntimeConfigProtection,
+} from './runtime-config-protection.ts'
+import {
   inspectStaleLocalPluginRecovery,
   type StaleLocalPluginRecoveryPlan,
 } from './stale-local-plugin-recovery.ts'
@@ -61,6 +68,8 @@ type ProfileBundleRecoveryInspector = typeof inspectProfileBundleRecovery
 type PluginPresetRecoveryInspector = typeof inspectPluginPresetRecovery
 type PluginPresetCompatibilityPreparer = (input: PluginPresetCompatibilityInput) => Promise<string | undefined>
 type AgentPresetSchemaRecoveryInspector = typeof inspectAgentPresetSchemaRecovery
+type RuntimeConfigProtectionStarter = typeof beginRuntimeConfigProtection
+type PendingRuntimeConfigProtectionRecoverer = typeof recoverPendingRuntimeConfigProtection
 type RuntimeRecoveryPlan =
   | { kind: 'stale-local-plugins'; plan: StaleLocalPluginRecoveryPlan }
   | { kind: 'profile-bundle-mismatch'; plan: ProfileBundleRecoveryPlan }
@@ -79,6 +88,8 @@ export interface RuntimeControllerOptions {
   inspectPluginPreset?: PluginPresetRecoveryInspector
   preparePluginPresetCompatibility?: PluginPresetCompatibilityPreparer
   inspectAgentPresetSchema?: AgentPresetSchemaRecoveryInspector
+  beginRuntimeConfigProtection?: RuntimeConfigProtectionStarter
+  recoverPendingRuntimeConfigProtection?: PendingRuntimeConfigProtectionRecoverer
   pluginIsolation?: PluginIsolation
   onView(view: RuntimeView): void
   onReady(url: URL, runtime: InstalledRuntime, cliDirectory: string): Promise<void>
@@ -98,6 +109,8 @@ export class RuntimeController {
   private readonly inspectPluginPreset: PluginPresetRecoveryInspector
   private readonly preparePluginPresetCompatibility: PluginPresetCompatibilityPreparer
   private readonly inspectAgentPresetSchema: AgentPresetSchemaRecoveryInspector
+  private readonly beginRuntimeConfigProtection: RuntimeConfigProtectionStarter
+  private readonly recoverPendingRuntimeConfigProtection: PendingRuntimeConfigProtectionRecoverer
   private readonly pluginIsolation: PluginIsolation | undefined
   private readonly onView: (view: RuntimeView) => void
   private readonly onReady: (url: URL, runtime: InstalledRuntime, cliDirectory: string) => Promise<void>
@@ -130,6 +143,8 @@ export class RuntimeController {
     this.inspectPluginPreset = options.inspectPluginPreset ?? inspectPluginPresetRecovery
     this.preparePluginPresetCompatibility = options.preparePluginPresetCompatibility ?? preparePluginPresetCompatibility
     this.inspectAgentPresetSchema = options.inspectAgentPresetSchema ?? inspectAgentPresetSchemaRecovery
+    this.beginRuntimeConfigProtection = options.beginRuntimeConfigProtection ?? beginRuntimeConfigProtection
+    this.recoverPendingRuntimeConfigProtection = options.recoverPendingRuntimeConfigProtection ?? recoverPendingRuntimeConfigProtection
     this.pluginIsolation = options.pluginIsolation
     this.onView = options.onView
     this.onReady = options.onReady
@@ -322,7 +337,18 @@ export class RuntimeController {
   private async boot(): Promise<string | undefined> {
     this.recoveryPlan = undefined
     this.update('checking', '正在检查可用的 DSH 版本')
+    const home = this.environment.DSH_HOME ?? join(homedir(), '.dsh')
+    let recoveredConfiguration: string | undefined
+    try {
+      recoveredConfiguration = await this.recoverPendingRuntimeConfigProtection(home)
+    } catch (error: unknown) {
+      const detail = error instanceof Error ? error.message : String(error)
+      this.fail(`模型配置自动恢复失败：${detail}`)
+      return
+    }
+    let requiresConfigProtection = recoveredConfiguration !== undefined
     this.state = await this.store.readState()
+    this.currentRuntimeRevision = this.state.currentRuntimeRevision
     let target: InstalledRuntime | undefined
     let selectedVersion: string | undefined
     try {
@@ -349,6 +375,7 @@ export class RuntimeController {
             this.emit()
           })
           this.installedVersions.add(selected.dshVersion)
+          requiresConfigProtection = true
         } catch (error: unknown) {
           if (previous !== undefined && isReleaseCompatible(previous.manifest, this.shellVersion)) {
             const message = `DSH ${selected.dshVersion} 更新未完成，继续使用 DSH ${previous.manifest.dshVersion}`
@@ -358,7 +385,13 @@ export class RuntimeController {
           throw error
         }
       }
-      await this.launch(target)
+      if (this.state.currentVersion === target.manifest.dshVersion
+        && this.state.currentRuntimeRevision !== target.manifest.runtimeRevision) requiresConfigProtection = true
+      await this.launchSelected(
+        target,
+        requiresConfigProtection,
+        recoveredConfiguration === undefined ? this.state.currentVersion : undefined,
+      )
       return
     } catch (error: unknown) {
       const primaryError = error instanceof Error ? error.message : String(error)
@@ -385,12 +418,40 @@ export class RuntimeController {
     return installed
   }
 
-  private async launch(runtime: InstalledRuntime, message = `正在启动 DSH ${runtime.manifest.dshVersion}`, trial?: string): Promise<void> {
+  private async launchSelected(
+    runtime: InstalledRuntime,
+    forceProtection: boolean,
+    fromVersion: string | undefined,
+  ): Promise<void> {
+    const protection = forceProtection || fromVersion !== runtime.manifest.dshVersion
+      ? await this.beginRuntimeConfigProtection({
+          home: this.environment.DSH_HOME ?? join(homedir(), '.dsh'),
+          ...(fromVersion === undefined ? {} : { fromVersion }),
+          toVersion: runtime.manifest.dshVersion,
+        })
+      : undefined
+    try {
+      await this.launch(runtime, undefined, undefined, protection)
+    } catch (error: unknown) {
+      try { await protection?.rollback() } catch (rollbackError: unknown) {
+        throw new AggregateError([error, rollbackError], 'DSH 更新失败，且模型配置自动回滚未完整完成')
+      }
+      throw error
+    }
+  }
+
+  private async launch(
+    runtime: InstalledRuntime,
+    message = `正在启动 DSH ${runtime.manifest.dshVersion}`,
+    trial?: string,
+    configProtection?: RuntimeConfigProtection,
+  ): Promise<void> {
     for (let attempt = 0; ; attempt += 1) {
       try {
-        await this.launchOnce(runtime, message, trial)
+        await this.launchOnce(runtime, message, trial, configProtection)
         return
       } catch (error) {
+        if (error instanceof RuntimeConfigProtectionError) throw error
         const diagnostics = error instanceof Error ? error.message : String(error)
         if (trial === undefined && attempt === 0 && this.recoveryPlan?.kind === 'plugin-preset-conflict') {
           const recovery = this.recoveryPlan
@@ -422,7 +483,12 @@ export class RuntimeController {
     }
   }
 
-  private async launchOnce(runtime: InstalledRuntime, message: string, trial?: string): Promise<void> {
+  private async launchOnce(
+    runtime: InstalledRuntime,
+    message: string,
+    trial?: string,
+    configProtection?: RuntimeConfigProtection,
+  ): Promise<void> {
     await this.stopBackend()
     this.selectedRuntime = runtime
     this.update('starting', message)
@@ -478,10 +544,26 @@ export class RuntimeController {
       this.fail(exit.diagnostics.length === 0 ? `DSH runtime 意外退出：${reason}` : `DSH runtime 意外退出：${reason}\n\n${exit.diagnostics}`)
     })
     try {
-      this.state = await this.store.promote(runtime.manifest.dshVersion)
-      this.currentRuntimeRevision = runtime.manifest.runtimeRevision
+      try {
+        await configProtection?.verify()
+      } catch (error: unknown) {
+        if (error instanceof RuntimeConfigurationLossError) throw error
+        const detail = error instanceof Error ? error.message : String(error)
+        throw new RuntimeConfigProtectionError(`Runtime 模型配置校验失败：${detail}`, { cause: error })
+      }
       const cliDirectory = await prepareCliShim(runtime, this.userData)
       await this.onReady(backend.url, runtime, cliDirectory)
+      let promotedState: RuntimeState
+      try {
+        await configProtection?.commit()
+        promotedState = await this.store.promote(runtime.manifest.dshVersion, runtime.manifest.runtimeRevision)
+      } catch (error: unknown) {
+        if (configProtection === undefined) throw error
+        const detail = error instanceof Error ? error.message : String(error)
+        throw new RuntimeConfigProtectionError(`Runtime 模型配置事务提交失败：${detail}`, { cause: error })
+      }
+      this.state = promotedState
+      this.currentRuntimeRevision = runtime.manifest.runtimeRevision
       this.update('ready', `DSH ${runtime.manifest.dshVersion} 已启动`)
     } catch (error) {
       this.expectedStop = true

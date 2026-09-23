@@ -1772,3 +1772,24 @@ Remove-Item -LiteralPath 'src/conversation-replay-host-injector.ts','src/convers
 - package.json：Shell 版本升级为 0.1.39。
 - progress.md：追加本次远端发布准备与验证记录。
 - 回滚方式：执行 git revert <release-prepare-commit>；如需恢复暂存的本地鱼塘改动，执行 git stash pop。
+
+## 2026-09-23 - Task: 修复升级后模型配置消失并发布 Desktop Shell 0.1.51
+### What was done
+- 定位 DSH 0.1.7-alpha.1 设置迁移缺陷：旧 `settings.yaml` 会先改名为 `settings.yaml.imported`，单个 section 导入失败后不重试；Windows 重复迁移还会覆盖旧 `.imported`，Shell 回退旧 Runtime 时此前不会恢复这些配置文件。
+- 新增 Runtime 配置保护事务，在 Runtime 更新或版本切换前为 `settings.yaml`、`settings.yaml.imported` 和 `profiles/web/cordis.patch.yml` 创建唯一持久快照，并通过 `pending.json` 支持 Shell 中断后的自动恢复。
+- Runtime 就绪后校验 `llm-pi-ai`、`llm-deepseek`、`agent-default-model` 和 `agent-preset-registry`；迁移、启动、校验、事务提交或 Runtime 状态写入任一步失败时，先停止新后端并完整恢复配置，再启动旧 Runtime。
+- Runtime 状态新增向后兼容的 revision 记录；旧状态或同版本 revision 变化会自动启用配置保护，成功启动后再写入新 revision。
+- 兼容旧 `agent-presets` 键到 `agent-preset-registry` 的迁移；当完整的 `.imported` 仍存在而 `settings.yaml` 已丢失时，重新生成旧设置文档以重试迁移。配置丢失错误不会误触发第三方插件隔离。
+- 已从保留的凭据引用与脱敏配置结构恢复真实 Profile：`openai`、`xapi`、`antigravity` 三个供应商共 9 个模型，默认模型为 `openai / gpt-5.6-sol / high`；未输出或写入任何凭据值。
+- Desktop Shell 版本从 0.1.50 升级到 0.1.51。
+### Testing
+- 定向回归：`pnpm test tests/runtime-config-protection.spec.ts tests/runtime-controller-refresh.spec.ts`，2 个测试文件、20 项测试全部通过。
+- 全量测试：`pnpm test`，47 个测试文件、338 项测试全部通过。
+- 类型和构建：`pnpm typecheck`、`pnpm run build` 均通过；`git diff --check` 通过。
+- Windows 打包：`pnpm run dist` 通过，生成 0.1.51 x64 NSIS 安装器、portable EXE、blockmap 和 `latest.yml`，更新清单版本与包版本一致。
+- 真实运行验证：安装版 Shell 与 DSH 0.1.7-alpha.1 正常运行；设置页显示三个供应商及全部 9 个模型，当前默认显示 GPT-5.6 Sol / High；关闭设置弹窗后主窗口无可见弹窗或页面溢出。
+### Notes
+- 恢复前原文件保存在 `C:\Users\wsx_1\.dsh\.desktop-runtime-config\manual-recovery\shell-v0.1.51-20260923-091111`，该备份保留，不随发布清理。
+- 当前 `dsh-multi-model-orchestrator` 仍使用上游旧 `.agent-presets` 注册机制；Shell 会保留其默认值，但在插件适配 `agent-preset-registry` 前，DSH 0.1.7-alpha.1 的预设页仍只显示内置预设。该兼容问题不影响本次恢复的供应商、模型与默认模型。
+- 本地产物未配置 Authenticode 证书，实际发布签名状态由 `shell-release.yml` 的 GitHub Actions 证书配置和签名校验决定。
+- 回滚方式：回退 0.1.51 发布提交；真实 Profile 可从上述手工恢复备份按文件恢复。

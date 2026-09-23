@@ -1,3 +1,6 @@
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
@@ -14,7 +17,15 @@ vi.mock('../src/backend.ts', () => ({
 vi.mock('../src/cli-shell.ts', () => ({ prepareCliShim: mocks.prepareCliShim }))
 
 import type { RuntimeCatalog, RuntimeManifest, RuntimePreference } from '../src/catalog.ts'
-import { RuntimeController, type RuntimeView } from '../src/runtime-controller.ts'
+import {
+  RuntimeController,
+  type RuntimeControllerOptions,
+  type RuntimeView,
+} from '../src/runtime-controller.ts'
+import {
+  beginRuntimeConfigProtection,
+  RuntimeConfigurationLossError,
+} from '../src/runtime-config-protection.ts'
 
 function manifest(version: string): RuntimeManifest {
   return {
@@ -49,17 +60,25 @@ function installed(value: RuntimeManifest) {
   }
 }
 
-function createController(store: Record<string, unknown>, onView: (view: RuntimeView) => void = vi.fn()) {
+function createController(
+  store: Record<string, unknown>,
+  onView: (view: RuntimeView) => void = vi.fn(),
+  home = 'C:/dsh-home',
+  options: Partial<RuntimeControllerOptions> = {},
+) {
   return new RuntimeController({
     shellVersion: '0.1.20',
     store: store as any,
     shutdownHook: 'C:/shutdown-hook.js',
     userData: 'C:/user-data',
     goalGuardPlugin: 'C:/goal-guard.js',
-    environment: { DSH_HOME: 'C:/dsh-home' },
+    environment: { DSH_HOME: home },
     onView,
     onReady: vi.fn(async () => {}),
     onOpenSettingsDocument: vi.fn(async () => {}),
+    beginRuntimeConfigProtection: vi.fn(async () => undefined),
+    recoverPendingRuntimeConfigProtection: vi.fn(async () => undefined),
+    ...options,
   })
 }
 
@@ -154,6 +173,323 @@ describe('RuntimeController catalog refresh', () => {
       currentVersion: oldRelease.dshVersion,
       error: `DSH ${newRelease.dshVersion} 启动失败，已继续使用 DSH ${oldRelease.dshVersion}\n\n启动诊断：source build failed`,
     })
+  })
+
+  it('restores legacy model configuration before starting the fallback Runtime', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-controller-config-'))
+    try {
+      const profile = join(home, 'profiles', 'web')
+      const settings = join(home, 'settings.yaml')
+      const imported = settings + '.imported'
+      const patch = join(profile, 'cordis.patch.yml')
+      const legacy = 'agent-default-model:\n  provider: openai\n  model: gpt-test\n'
+      const previousImported = 'ui-onboarding:\n  welcomeNoticeVersion: previous\n'
+      const previousPatch = '- id: ui-settings-general\n  config:\n    welcomeNoticeVersion: previous\n'
+      await mkdir(profile, { recursive: true })
+      await writeFile(settings, legacy)
+      await writeFile(imported, previousImported)
+      await writeFile(patch, previousPatch)
+
+      const oldRelease = manifest('0.1.6-alpha.2')
+      const newRelease = manifest('0.1.7-alpha.1')
+      const preference: RuntimePreference = { mode: 'latest-compatible' }
+      const store = {
+        loadCatalog: vi.fn(async () => ({ catalog: catalog(newRelease, oldRelease), cached: false })),
+        readState: vi.fn(async () => ({ schemaVersion: 1, preference, currentVersion: oldRelease.dshVersion })),
+        installed: vi.fn(async (version: string) => version === newRelease.dshVersion ? installed(newRelease) : installed(oldRelease)),
+        promote: vi.fn(async (version: string) => ({ schemaVersion: 1, preference, currentVersion: version })),
+      }
+      mocks.startBackend.mockImplementation(async ({ runtime }: { runtime: ReturnType<typeof installed> }) => {
+        if (runtime.manifest.dshVersion === newRelease.dshVersion) {
+          await rm(settings)
+          await writeFile(imported, legacy)
+          await writeFile(patch, '[]\n')
+          throw new Error('startup failed after settings migration')
+        }
+        expect(await readFile(settings, 'utf8')).toBe(legacy)
+        expect(await readFile(imported, 'utf8')).toBe(previousImported)
+        expect(await readFile(patch, 'utf8')).toBe(previousPatch)
+        return {
+          url: new URL('http://127.0.0.1:43123/'),
+          done: new Promise(() => {}),
+          stop: vi.fn(async () => ({ exitCode: 0, signal: null, diagnostics: '' })),
+        }
+      })
+      const controller = createController(store, vi.fn(), home, { beginRuntimeConfigProtection })
+
+      await controller.start()
+
+      expect(mocks.startBackend).toHaveBeenCalledTimes(2)
+      expect(controller.snapshot()).toMatchObject({
+        phase: 'ready',
+        currentVersion: oldRelease.dshVersion,
+      })
+      expect(await readFile(settings, 'utf8')).toBe(legacy)
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('rolls back configuration before fallback when a ready Runtime lost model settings', async () => {
+    const oldRelease = manifest('0.1.6-alpha.2')
+    const newRelease = manifest('0.1.7-alpha.1')
+    const preference: RuntimePreference = { mode: 'latest-compatible' }
+    const events: string[] = []
+    const store = {
+      loadCatalog: vi.fn(async () => ({ catalog: catalog(newRelease, oldRelease), cached: false })),
+      readState: vi.fn(async () => ({ schemaVersion: 1, preference, currentVersion: oldRelease.dshVersion })),
+      installed: vi.fn(async (version: string) => version === newRelease.dshVersion ? installed(newRelease) : installed(oldRelease)),
+      promote: vi.fn(async (version: string) => {
+        events.push('promote-' + version)
+        return { schemaVersion: 1, preference, currentVersion: version }
+      }),
+    }
+    const protection = {
+      backupDirectory: 'C:/dsh-home/.desktop-runtime-config/backups/test',
+      verify: vi.fn(async () => {
+        events.push('verify')
+        throw new RuntimeConfigurationLossError(['llm-pi-ai'])
+      }),
+      commit: vi.fn(async () => { events.push('commit') }),
+      rollback: vi.fn(async () => { events.push('rollback') }),
+    }
+    mocks.startBackend.mockImplementation(async ({ runtime }: { runtime: ReturnType<typeof installed> }) => {
+      const version = runtime.manifest.dshVersion
+      events.push('start-' + version)
+      return {
+        url: new URL('http://127.0.0.1:43123/'),
+        done: new Promise(() => {}),
+        stop: vi.fn(async () => {
+          events.push('stop-' + version)
+          return { exitCode: 0, signal: null, diagnostics: '' }
+        }),
+      }
+    })
+    const controller = createController(store, vi.fn(), 'C:/dsh-home', {
+      beginRuntimeConfigProtection: vi.fn(async () => protection),
+      recoverPendingRuntimeConfigProtection: vi.fn(async () => undefined),
+    })
+
+    await controller.start()
+
+    expect(events).toEqual([
+      'start-' + newRelease.dshVersion,
+      'verify',
+      'stop-' + newRelease.dshVersion,
+      'rollback',
+      'start-' + oldRelease.dshVersion,
+      'promote-' + oldRelease.dshVersion,
+    ])
+    expect(protection.commit).not.toHaveBeenCalled()
+    expect(store.promote).not.toHaveBeenCalledWith(newRelease.dshVersion)
+  })
+
+  it('stops the new Runtime and rolls back before fallback when the config transaction cannot commit', async () => {
+    const oldRelease = manifest('0.1.6-alpha.2')
+    const newRelease = manifest('0.1.7-alpha.1')
+    const preference: RuntimePreference = { mode: 'latest-compatible' }
+    const events: string[] = []
+    const store = {
+      loadCatalog: vi.fn(async () => ({ catalog: catalog(newRelease, oldRelease), cached: false })),
+      readState: vi.fn(async () => ({ schemaVersion: 1, preference, currentVersion: oldRelease.dshVersion })),
+      installed: vi.fn(async (version: string) => version === newRelease.dshVersion ? installed(newRelease) : installed(oldRelease)),
+      promote: vi.fn(async (version: string) => {
+        events.push('promote-' + version)
+        return { schemaVersion: 1, preference, currentVersion: version }
+      }),
+    }
+    const protection = {
+      backupDirectory: 'C:/dsh-home/.desktop-runtime-config/backups/test',
+      verify: vi.fn(async () => { events.push('verify') }),
+      commit: vi.fn(async () => {
+        events.push('commit')
+        throw new Error('pending journal is locked')
+      }),
+      rollback: vi.fn(async () => { events.push('rollback') }),
+    }
+    mocks.startBackend.mockImplementation(async ({ runtime }: { runtime: ReturnType<typeof installed> }) => {
+      const version = runtime.manifest.dshVersion
+      events.push('start-' + version)
+      return {
+        url: new URL('http://127.0.0.1:43123/'),
+        done: new Promise(() => {}),
+        stop: vi.fn(async () => {
+          events.push('stop-' + version)
+          return { exitCode: 0, signal: null, diagnostics: '' }
+        }),
+      }
+    })
+    const controller = createController(store, vi.fn(), 'C:/dsh-home', {
+      beginRuntimeConfigProtection: vi.fn(async () => protection),
+      recoverPendingRuntimeConfigProtection: vi.fn(async () => undefined),
+    })
+
+    await controller.start()
+
+    expect(events).toEqual([
+      'start-' + newRelease.dshVersion,
+      'verify',
+      'commit',
+      'stop-' + newRelease.dshVersion,
+      'rollback',
+      'start-' + oldRelease.dshVersion,
+      'promote-' + oldRelease.dshVersion,
+    ])
+    expect(controller.snapshot()).toMatchObject({
+      phase: 'ready',
+      currentVersion: oldRelease.dshVersion,
+    })
+  })
+
+  it('rolls back committed config when persisting the selected Runtime fails', async () => {
+    const oldRelease = manifest('0.1.6-alpha.2')
+    const newRelease = manifest('0.1.7-alpha.1')
+    const preference: RuntimePreference = { mode: 'latest-compatible' }
+    const events: string[] = []
+    const store = {
+      loadCatalog: vi.fn(async () => ({ catalog: catalog(newRelease, oldRelease), cached: false })),
+      readState: vi.fn(async () => ({ schemaVersion: 1, preference, currentVersion: oldRelease.dshVersion })),
+      installed: vi.fn(async (version: string) => version === newRelease.dshVersion ? installed(newRelease) : installed(oldRelease)),
+      promote: vi.fn(async (version: string) => {
+        events.push('promote-' + version)
+        if (version === newRelease.dshVersion) throw new Error('state file is locked')
+        return { schemaVersion: 1, preference, currentVersion: version }
+      }),
+    }
+    const protection = {
+      backupDirectory: 'C:/dsh-home/.desktop-runtime-config/backups/test',
+      verify: vi.fn(async () => { events.push('verify') }),
+      commit: vi.fn(async () => { events.push('commit') }),
+      rollback: vi.fn(async () => { events.push('rollback') }),
+    }
+    mocks.startBackend.mockImplementation(async ({ runtime }: { runtime: ReturnType<typeof installed> }) => {
+      const version = runtime.manifest.dshVersion
+      events.push('start-' + version)
+      return {
+        url: new URL('http://127.0.0.1:43123/'),
+        done: new Promise(() => {}),
+        stop: vi.fn(async () => {
+          events.push('stop-' + version)
+          return { exitCode: 0, signal: null, diagnostics: '' }
+        }),
+      }
+    })
+    const controller = createController(store, vi.fn(), 'C:/dsh-home', {
+      beginRuntimeConfigProtection: vi.fn(async () => protection),
+      recoverPendingRuntimeConfigProtection: vi.fn(async () => undefined),
+    })
+
+    await controller.start()
+
+    expect(events).toEqual([
+      'start-' + newRelease.dshVersion,
+      'verify',
+      'commit',
+      'promote-' + newRelease.dshVersion,
+      'stop-' + newRelease.dshVersion,
+      'rollback',
+      'start-' + oldRelease.dshVersion,
+      'promote-' + oldRelease.dshVersion,
+    ])
+    expect(controller.snapshot()).toMatchObject({
+      phase: 'ready',
+      currentVersion: oldRelease.dshVersion,
+    })
+  })
+
+  it('blocks startup and reports an error when pending model configuration cannot be restored', async () => {
+    const release = manifest('0.1.7-alpha.1')
+    const preference: RuntimePreference = { mode: 'latest-compatible' }
+    const store = {
+      loadCatalog: vi.fn(async () => ({ catalog: catalog(release), cached: false })),
+      readState: vi.fn(async () => ({ schemaVersion: 1, preference, currentVersion: release.dshVersion })),
+      installed: vi.fn(async () => installed(release)),
+    }
+    const controller = createController(store, vi.fn(), 'C:/dsh-home', {
+      recoverPendingRuntimeConfigProtection: vi.fn(async () => {
+        throw new Error('snapshot checksum mismatch')
+      }),
+    })
+
+    await controller.start()
+
+    expect(controller.snapshot()).toMatchObject({
+      phase: 'error',
+      error: '模型配置自动恢复失败：snapshot checksum mismatch',
+    })
+    expect(store.loadCatalog).not.toHaveBeenCalled()
+    expect(mocks.startBackend).not.toHaveBeenCalled()
+  })
+
+  it('protects configuration when installing a new revision of the current Runtime version', async () => {
+    const previous = manifest('0.1.7-alpha.1')
+    const update = manifest('0.1.7-alpha.1')
+    previous.runtimeRevision = 1
+    update.runtimeRevision = 2
+    update.archive.sha256 = 'e'.repeat(64)
+    const preference: RuntimePreference = { mode: 'latest-compatible' }
+    const beginProtection = vi.fn(async () => undefined)
+    const store = {
+      loadCatalog: vi.fn(async () => ({ catalog: catalog(update), cached: false })),
+      readState: vi.fn(async () => ({ schemaVersion: 1, preference, currentVersion: previous.dshVersion })),
+      installed: vi.fn(async () => installed(previous)),
+      install: vi.fn(async () => installed(update)),
+      promote: vi.fn(async () => ({ schemaVersion: 1, preference, currentVersion: update.dshVersion })),
+    }
+    mocks.startBackend.mockResolvedValue({
+      url: new URL('http://127.0.0.1:43123/'),
+      done: new Promise(() => {}),
+      stop: vi.fn(async () => ({ exitCode: 0, signal: null, diagnostics: '' })),
+    })
+    const controller = createController(store, vi.fn(), 'C:/dsh-home', {
+      beginRuntimeConfigProtection: beginProtection,
+      recoverPendingRuntimeConfigProtection: vi.fn(async () => undefined),
+    })
+
+    await controller.start()
+
+    expect(store.install).toHaveBeenCalledWith(update, expect.any(Function))
+    expect(beginProtection).toHaveBeenCalledWith({
+      home: 'C:/dsh-home',
+      fromVersion: previous.dshVersion,
+      toVersion: update.dshVersion,
+    })
+  })
+
+  it('protects the current Runtime when persisted state predates revision tracking', async () => {
+    const release = manifest('0.1.7-alpha.1')
+    release.runtimeRevision = 2
+    const preference: RuntimePreference = { mode: 'latest-compatible' }
+    const beginProtection = vi.fn(async () => undefined)
+    const promote = vi.fn(async (version: string, runtimeRevision: number) => ({
+      schemaVersion: 1 as const,
+      preference,
+      currentVersion: version,
+      currentRuntimeRevision: runtimeRevision,
+    }))
+    const store = {
+      loadCatalog: vi.fn(async () => ({ catalog: catalog(release), cached: false })),
+      readState: vi.fn(async () => ({ schemaVersion: 1, preference, currentVersion: release.dshVersion })),
+      installed: vi.fn(async () => installed(release)),
+      promote,
+    }
+    mocks.startBackend.mockResolvedValue({
+      url: new URL('http://127.0.0.1:43123/'),
+      done: new Promise(() => {}),
+      stop: vi.fn(async () => ({ exitCode: 0, signal: null, diagnostics: '' })),
+    })
+    const controller = createController(store, vi.fn(), 'C:/dsh-home', {
+      beginRuntimeConfigProtection: beginProtection,
+    })
+
+    await controller.start()
+
+    expect(beginProtection).toHaveBeenCalledWith({
+      home: 'C:/dsh-home',
+      fromVersion: release.dshVersion,
+      toVersion: release.dshVersion,
+    })
+    expect(promote).toHaveBeenCalledWith(release.dshVersion, release.runtimeRevision)
   })
 
   it('publishes source-build stages and cleans the busy state after failure', async () => {
