@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
-import { lt } from 'semver'
+import { gte, lt } from 'semver'
 import { parseDocument, stringify } from 'yaml'
 
 const CONFIGURATION_ROOT = '.desktop-runtime-config'
@@ -10,6 +10,8 @@ const BACKUP_DIRECTORY = 'backups'
 const PENDING_FILE = 'pending.json'
 const MAX_CONFIG_BYTES = 4 * 1024 * 1024
 const LEGACY_PROFILE_VERSION = '0.1.7-alpha.1'
+const PRESET_SELECTED_DEFAULT_VERSION = '0.1.7-alpha.1'
+const PRESET_MODE_SELECTION_REMOVED_VERSION = '0.1.7-rc.2'
 const PROTECTED_SECTION_ENTRIES = [
   ['agent-default-model', 'agent-default-model'],
   ['agent-presets', 'agent-preset-registry'],
@@ -317,22 +319,34 @@ async function expectedModelSections(input: RuntimeConfigProtectionInput): Promi
 }
 
 async function prepareLegacyMigration(input: RuntimeConfigProtectionInput): Promise<void> {
-  if (!crossesLegacyProfileBoundary(input)) return
+  const legacyBoundary = crossesLegacyProfileBoundary(input)
   const settingsPath = join(input.home, 'settings.yaml')
   let source = await optionalFile(settingsPath)
   let shouldWrite = false
   if (source === undefined) {
+    if (!legacyBoundary) return
     source = await optionalFile(settingsPath + '.imported')
     if (source === undefined || protectedSectionsFromSettings(source, 'settings.yaml.imported').size === 0) return
     shouldWrite = true
   }
   const root = yamlValue(source, 'settings.yaml')
   if (!isRecord(root)) throw new Error('无法保护模型配置：settings.yaml 必须是 YAML 对象')
-  if (root['agent-presets'] !== undefined) {
-    root['agent-preset-registry'] = merge(
+  const existingRegistry = isRecord(root['agent-preset-registry']) ? root['agent-preset-registry'] : {}
+  if (gte(input.toVersion, PRESET_SELECTED_DEFAULT_VERSION)
+    && (root['agent-presets'] !== undefined || existingRegistry.default !== undefined
+      || (gte(input.toVersion, PRESET_MODE_SELECTION_REMOVED_VERSION)
+        && existingRegistry.modeSelectionEnabled !== undefined))) {
+    const registry = merge(
       isRecord(root['agent-presets']) ? root['agent-presets'] : {},
-      isRecord(root['agent-preset-registry']) ? root['agent-preset-registry'] : {},
+      existingRegistry,
     )
+    if (gte(input.toVersion, PRESET_SELECTED_DEFAULT_VERSION) && registry.default !== undefined
+      && registry.selectedDefault === undefined) {
+      registry.selectedDefault = registry.default
+      delete registry.default
+    }
+    if (gte(input.toVersion, PRESET_MODE_SELECTION_REMOVED_VERSION)) delete registry.modeSelectionEnabled
+    root['agent-preset-registry'] = registry
     delete root['agent-presets']
     source = Buffer.from(stringify(root, { lineWidth: 0 }))
     shouldWrite = true
@@ -340,12 +354,28 @@ async function prepareLegacyMigration(input: RuntimeConfigProtectionInput): Prom
   if (shouldWrite) await replaceFile(settingsPath, source)
 }
 
-async function missingModelSections(home: string, expected: ReadonlyMap<string, Record<string, unknown>>): Promise<string[]> {
+function expectedSection(id: string, value: Record<string, unknown>, toVersion: string): Record<string, unknown> {
+  if (id !== 'agent-preset-registry') return value
+  const result: Record<string, unknown> = { ...value }
+  if (gte(toVersion, PRESET_SELECTED_DEFAULT_VERSION)
+    && result.default !== undefined && result.selectedDefault === undefined) {
+    result.selectedDefault = result.default
+    delete result.default
+  }
+  if (gte(toVersion, PRESET_MODE_SELECTION_REMOVED_VERSION)) delete result.modeSelectionEnabled
+  return result
+}
+
+async function missingModelSections(
+  home: string,
+  expected: ReadonlyMap<string, Record<string, unknown>>,
+  toVersion: string,
+): Promise<string[]> {
   if (expected.size === 0) return []
   const source = await optionalFile(join(home, 'profiles', 'web', 'cordis.patch.yml'))
   if (source === undefined) return [...expected.keys()].sort((left, right) => left.localeCompare(right))
   const actual = protectedSectionsFromPatch(source, 'profiles/web/cordis.patch.yml')
-  return [...expected].flatMap(([id, value]) => contains(actual.get(id), value) ? [] : [id])
+  return [...expected].flatMap(([id, value]) => contains(actual.get(id), expectedSection(id, value, toVersion)) ? [] : [id])
     .sort((left, right) => left.localeCompare(right))
 }
 
@@ -411,7 +441,7 @@ export async function beginRuntimeConfigProtection(
       }
       const deadline = Date.now() + timeoutMs
       for (;;) {
-        const missing = await missingModelSections(input.home, expected)
+        const missing = await missingModelSections(input.home, expected, input.toVersion)
         if (missing.length === 0) return
         const remaining = deadline - Date.now()
         if (remaining <= 0) throw new RuntimeConfigurationLossError(missing)

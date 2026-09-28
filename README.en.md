@@ -16,6 +16,8 @@ Windows desktop shell for DeepSeek Harness. The Shell and DSH runtime have indep
 
 Runtime downloads retry interrupted connections, timeouts, and temporary HTTP failures up to three attempts. Retries resume with Range when supported, otherwise restart the file. Full size and SHA-256 checks remain mandatory. Update diagnostics distinguish catalog checks, installation, and startup failures.
 
+Before switching runtimes, the Shell snapshots model and preset configuration and validates the migrated result according to the target DSH version. DSH 0.1.7 stores the legacy `agent-presets.default` choice as `agent-preset-registry.selectedDefault`, while rc.2 removes `modeSelectionEnabled`; these equivalent migrations are accepted without weakening checks for providers, models, the default model, or the selected preset value.
+
 Download the Windows x64 installer or portable build from the [Latest Release](https://github.com/ToxicantX/deepseek-harness-desktop/releases/latest). First launch installs the newest compatible DSH runtime automatically.
 
 ## Version model

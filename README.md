@@ -209,6 +209,8 @@ SignPath Foundation 批准并启用集成后，符合条件的 Shell Release 将
 
 版本管理中的“刷新版本目录”会同时检查官方 GitHub Releases（包含 alpha/rc）和桌面目录，并显示上游最新版本是已可用、等待桌面包发布还是需要更新 Shell。刷新不会重启 Runtime；自动策略发现新版本或新修订后，可点击“更新到”应用。桌面构建每小时检查一次上游；构建和冒烟验证完成后，新版本才可安装。网络失败时会明确标示检查失败或使用缓存。
 
+Shell 会在 Runtime 切换前保护模型与预设配置，并按目标 DSH 版本校验迁移结果。DSH 0.1.7 将旧 `agent-presets.default` 迁移为 `agent-preset-registry.selectedDefault`，rc.2 移除了 `modeSelectionEnabled`；这些等价迁移不会再被误判为配置丢失。供应商、模型、默认模型或实际预设选择发生丢失时仍会回滚。
+
 ## 开发者说明
 
 需要 Windows x64、Node.js 24 和 pnpm 11：

@@ -1824,3 +1824,16 @@ Remove-Item -LiteralPath 'src/conversation-replay-host-injector.ts','src/convers
 ### Notes
 - 原始失败没有持久化下载堆栈；下载阶段判断基于 terminated 调用路径、初始未安装状态、复现结果和随后重试成功。无法由此确定断连发生在 GitHub、代理还是本地网络。
 - 重试仅在本次下载操作内续传，进程退出或尝试耗尽后沿用既有临时文件清理。持续网络故障仍会失败并保留旧版本。
+
+## 2026-09-28 - Task: rc.2 preset 配置保护误判 / Shell 0.1.54
+### What was done
+- 根因：0.1.6 的 `agent-presets.default` 是用户选择，0.1.7 使用 `agent-preset-registry.selectedDefault`；旧 Shell 错误迁移为部署字段 `default`，并逐字段校验。rc.2 写回新字段后，保护器将同值改名误判为配置丢失。
+- 上游 rc.2 同时删除 `modeSelectionEnabled`，改由开发者工具偏好控制；该废弃界面字段不再参与模型配置完整性判断。
+- 迁移旧 settings 时写入 `selectedDefault`；修复此前已生成的 `agent-preset-registry.default`；校验时按目标版本比较等价语义。预设值变化仍会失败并回滚。
+- 供应商、模型、默认模型保护没有放宽；快照与中断恢复机制保持不变。Shell 版本更新到 0.1.54。
+### Testing
+- 先新增失败用例复现字段改名误判，再验证同值迁移通过、不同值仍失败、rc.2 废弃字段可移除、既有错误 settings 可修复并回滚。
+- 定向测试 `tests/runtime-config-protection.spec.ts` 13 项通过；全量 `pnpm test` 50 个文件、364 项通过；`pnpm typecheck`、`pnpm run dist`、`git diff --check` 通过；真实 Electron 版本管理冒烟通过。
+### Notes
+- 只读检查当前本机 Profile 的受保护 section 仍包含供应商、默认模型和 preset 选择；未输出配置值或凭据。
+- 本轮不会自动切换用户正在运行的 Runtime；升级 Shell 后重新应用 rc.2 才会使用修复。

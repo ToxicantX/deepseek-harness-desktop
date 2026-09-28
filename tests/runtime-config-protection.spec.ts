@@ -188,6 +188,7 @@ describe('Runtime model configuration protection', () => {
     })
     const prepared = await readFile(value.settings, 'utf8')
     expect(prepared).toContain('agent-preset-registry:')
+    expect(prepared).toContain('selectedDefault: multi-model-orchestrator')
     expect(prepared).not.toContain('agent-presets:')
 
     await rm(value.settings)
@@ -195,7 +196,7 @@ describe('Runtime model configuration protection', () => {
     await writeFile(value.patch, [
       '- id: agent-preset-registry',
       '  config:',
-      '    default: multi-model-orchestrator',
+      '    selectedDefault: multi-model-orchestrator',
       '- id: agent-default-model',
       '  config:',
       '    provider: openai',
@@ -206,6 +207,121 @@ describe('Runtime model configuration protection', () => {
     await expect(transaction!.verify({ timeoutMs: 0 })).resolves.toBeUndefined()
     await transaction!.commit()
     expect(await readFile(join(transaction!.backupDirectory, 'settings.yaml'), 'utf8')).toBe(legacy)
+  })
+
+  it('maps the legacy preset default to the rc.2 selectedDefault field', async () => {
+    const value = await fixture()
+    await writeFile(value.settings, [
+      'agent-presets:',
+      '  default: multi-model-orchestrator',
+      '',
+    ].join('\n'))
+    await writeFile(value.patch, '[]\n')
+
+    const transaction = await beginRuntimeConfigProtection({
+      home: value.home,
+      fromVersion: '0.1.6-alpha.2',
+      toVersion: '0.1.7-rc.2',
+    })
+    const prepared = await readFile(value.settings, 'utf8')
+    expect(prepared).toContain('selectedDefault: multi-model-orchestrator')
+    expect(prepared).not.toMatch(/^\s+default:/mu)
+
+    await rm(value.settings)
+    await writeFile(value.imported, prepared)
+    await writeFile(value.patch, [
+      '- id: agent-preset-registry',
+      '  config:',
+      '    selectedDefault: multi-model-orchestrator',
+      '',
+    ].join('\n'))
+
+    await expect(transaction!.verify({ timeoutMs: 0 })).resolves.toBeUndefined()
+  })
+
+  it('rejects an rc.2 migration that changes the selected preset value', async () => {
+    const value = await fixture()
+    await writeFile(value.settings, 'agent-presets:\n  default: multi-model-orchestrator\n')
+    await writeFile(value.patch, '[]\n')
+    const transaction = await beginRuntimeConfigProtection({
+      home: value.home,
+      fromVersion: '0.1.6-alpha.2',
+      toVersion: '0.1.7-rc.2',
+    })
+    await writeFile(value.patch, [
+      '- id: agent-preset-registry',
+      '  config:',
+      '    selectedDefault: standard',
+      '',
+    ].join('\n'))
+
+    await expect(transaction!.verify({ timeoutMs: 0 })).rejects.toThrow('agent-preset-registry')
+  })
+
+  it('accepts rc.2 selectedDefault as the same choice protected from an existing Profile', async () => {
+    const value = await fixture()
+    await writeFile(value.patch, [
+      '- id: agent-preset-registry',
+      '  config:',
+      '    default: multi-model-orchestrator',
+      '    modeSelectionEnabled: true',
+      '',
+    ].join('\n'))
+    const transaction = await beginRuntimeConfigProtection({
+      home: value.home,
+      fromVersion: '0.1.7-alpha.2',
+      toVersion: '0.1.7-rc.2',
+    })
+    await writeFile(value.patch, [
+      '- id: agent-preset-registry',
+      '  config:',
+      '    selectedDefault: multi-model-orchestrator',
+      '',
+    ].join('\n'))
+
+    await expect(transaction!.verify({ timeoutMs: 0 })).resolves.toBeUndefined()
+  })
+
+  it('prepares an already-renamed legacy settings section for rc.2', async () => {
+    const value = await fixture()
+    await writeFile(value.settings, 'agent-preset-registry:\n  default: coding\n')
+    const transaction = await beginRuntimeConfigProtection({
+      home: value.home,
+      fromVersion: '0.1.7-alpha.2',
+      toVersion: '0.1.7-rc.2',
+    })
+
+    expect(await readFile(value.settings, 'utf8')).toContain('selectedDefault: coding')
+    await transaction!.rollback()
+    expect(await readFile(value.settings, 'utf8')).toBe('agent-preset-registry:\n  default: coding\n')
+  })
+
+  it('drops the rc.2 preset chooser field without treating its removal as model loss', async () => {
+    const value = await fixture()
+    await writeFile(value.settings, [
+      'agent-preset-registry:',
+      '  selectedDefault: coding',
+      '  modeSelectionEnabled: false',
+      '',
+    ].join('\n'))
+    await writeFile(value.patch, [
+      '- id: agent-preset-registry',
+      '  config:',
+      '    selectedDefault: coding',
+      '    modeSelectionEnabled: false',
+      '',
+    ].join('\n'))
+    const transaction = await beginRuntimeConfigProtection({
+      home: value.home,
+      fromVersion: '0.1.7-rc.1',
+      toVersion: '0.1.7-rc.2',
+    })
+    const prepared = await readFile(value.settings, 'utf8')
+    expect(prepared).toContain('selectedDefault: coding')
+    expect(prepared).not.toContain('modeSelectionEnabled')
+    await writeFile(value.patch, '- id: agent-preset-registry\n  config:\n    selectedDefault: coding\n')
+
+    await expect(transaction!.verify({ timeoutMs: 0 })).resolves.toBeUndefined()
   })
 
   it('recovers a pending transaction after a Shell interruption before making another snapshot', async () => {
