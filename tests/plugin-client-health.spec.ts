@@ -7,7 +7,7 @@ function contents() {
     mainFrame: { url: 'http://127.0.0.1:41111/' },
     getURL: () => 'http://127.0.0.1:41111/',
     isDestroyed: () => false,
-    executeJavaScript: vi.fn(async () => 'mounted'),
+    executeJavaScript: vi.fn(async (): Promise<unknown> => ({ state: 'mounted' })),
   })
 }
 
@@ -30,6 +30,18 @@ describe('frontend plugin validation', () => {
       page.emit('console-message', { frame: page.mainFrame, message: '401 Unauthorized' })
     })
     expect(page.executeJavaScript).toHaveBeenCalledOnce()
+    expect(page.listenerCount('console-message')).toBe(0)
+  })
+
+  it('captures an exact final boot pending report from the failure page', async () => {
+    const page = contents()
+    page.executeJavaScript.mockResolvedValue({
+      state: 'failed',
+      diagnostic: 'Failed to load plugins\nweb boot: 1 entry did not activate\ndsh-channel-telegram: pending (waiting for service: settingsScope)',
+    })
+
+    await expect(loadAndValidatePlugins(page as any, new URL(page.getURL()), async () => {}))
+      .rejects.toThrow('dsh-channel-telegram')
     expect(page.listenerCount('console-message')).toBe(0)
   })
 

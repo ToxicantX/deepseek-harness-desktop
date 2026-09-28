@@ -37,6 +37,13 @@ export function classifyPluginFailure(diagnostics: string): string[] {
       : /^cannot get property "[\w$]+" without inject$/u.test(reason)
     if (thirdParty(name) && incompatible) names.add(name)
   }
+  const finalBoot = /web boot:\s+\d+\s+entr(?:y|ies) did not activate([\s\S]*)/u.exec(clean)?.[1]
+  if (finalBoot !== undefined) {
+    for (const match of finalBoot.matchAll(/([@A-Za-z0-9][@A-Za-z0-9._/-]{0,213}):\s+pending \(waiting for service:\s*[\w$.-]+\)/gu)) {
+      const name = match[1]!
+      if (thirdParty(name)) names.add(name)
+    }
+  }
   return [...names]
 }
 

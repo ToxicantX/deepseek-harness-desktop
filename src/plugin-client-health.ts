@@ -3,10 +3,13 @@ import type { WebContents } from 'electron'
 import { classifyPluginFailure, PluginImportFailure } from './plugin-isolation.ts'
 
 // The alpha boot kernel keeps this marker until the UI renderer mounts.
-export function clientBootState(): 'loading' | 'failed' | 'mounted' {
+export function clientBootState(): { state: 'loading' | 'failed' | 'mounted'; diagnostic?: string } {
   const boot = document.querySelector('[data-dsh-boot]')
-  if (boot !== null) return boot.textContent?.includes('Failed to load plugins') ? 'failed' : 'loading'
-  return document.querySelector('#root')?.childElementCount ? 'mounted' : 'loading'
+  if (boot !== null) {
+    const text = (boot.textContent ?? '').slice(0, 24 * 1024)
+    return text.includes('Failed to load plugins') ? { state: 'failed', diagnostic: text } : { state: 'loading' }
+  }
+  return { state: document.querySelector('#root')?.childElementCount ? 'mounted' : 'loading' }
 }
 
 export async function loadAndValidatePlugins(contents: WebContents, url: URL, load: () => Promise<void>, timeoutMs = 30_000): Promise<void> {
@@ -26,8 +29,15 @@ export async function loadAndValidatePlugins(contents: WebContents, url: URL, lo
       if (failures.size) {
         throw new PluginImportFailure([...failures])
       }
-      const state: unknown = await contents.executeJavaScript(`(${clientBootState.toString()})()`)
+      const probe: unknown = await contents.executeJavaScript(`(${clientBootState.toString()})()`)
+      const state = typeof probe === 'string' ? probe
+        : probe !== null && typeof probe === 'object' && 'state' in probe ? probe.state : undefined
+      if (probe !== null && typeof probe === 'object' && 'diagnostic' in probe && typeof probe.diagnostic === 'string') {
+        for (const name of classifyPluginFailure(probe.diagnostic)) failures.add(name)
+        if (failures.size) throw new PluginImportFailure([...failures])
+      }
       if (state === 'mounted') return
+      if (state === 'failed') throw new Error('插件界面启动失败；未将未知错误自动归为不兼容')
       // Wait for the kernel's final console report instead of attributing a pending service to a plugin.
       await delay(200)
     }

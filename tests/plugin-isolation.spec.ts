@@ -41,7 +41,18 @@ describe('plugin isolation', () => {
     expect(classifyPluginFailure('cannot get property "webServer" without inject')).toEqual([])
   })
 
-  it('isolates only the declared plugin causing undeclared service access', async () => {
+  it('attributes final boot pending reports to exact third-party packages', () => {
+    expect(classifyPluginFailure('HARNESS\nFailed to load plugins\nweb boot: 1 entry did not activate\ndsh-channel-telegram: pending (waiting for service: settingsScope)'))
+      .toEqual(['dsh-channel-telegram'])
+    expect(classifyPluginFailure('web boot: 1 entry did not activate dsh-channel-telegram: pending (waiting for service: settingsScope)'))
+      .toEqual(['dsh-channel-telegram'])
+    expect(classifyPluginFailure('web boot: 1 entry did not activate\n@deepseek-ai/core: pending (waiting for service: settingsScope)'))
+      .toEqual([])
+    expect(classifyPluginFailure('dsh-channel-telegram: pending (waiting for service: settingsScope)'))
+      .toEqual([])
+  })
+
+  it('isolates only the installed plugin named by a final pending boot report', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-isolation-service-'))
     const service = new PluginIsolation({ home: root, directory: root })
     vi.spyOn(service, 'packages').mockResolvedValue(['dsh-channel-telegram', 'other-plugin'])
@@ -50,7 +61,7 @@ describe('plugin isolation', () => {
       { id: 'other', name: 'other-plugin' },
     ])
     const runtime = { manifest: { dshVersion: '0.1.5-rc.2' } } as InstalledRuntime
-    const diagnostic = 'failed to apply loader entry telegram-channel (dsh-channel-telegram): cannot get property "webServer" without inject'
+    const diagnostic = 'Failed to load plugins\nweb boot: 1 entry did not activate\ndsh-channel-telegram: pending (waiting for service: settingsScope)'
 
     expect(await service.quarantine(runtime, {}, diagnostic)).toBe(true)
     expect(await service.list()).toEqual([{ name: 'dsh-channel-telegram', reason: 'import-incompatible' }])

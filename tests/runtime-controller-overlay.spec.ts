@@ -14,6 +14,7 @@ vi.mock('../src/backend.ts', () => ({
 vi.mock('../src/cli-shell.ts', () => ({ prepareCliShim: vi.fn(async () => 'cli-directory') }))
 
 import { RuntimeController } from '../src/runtime-controller.ts'
+import { PluginImportFailure } from '../src/plugin-isolation.ts'
 
 function runtime() {
   return {
@@ -140,6 +141,29 @@ describe('RuntimeController goal guard overlay', () => {
     await expect((controller(vi.fn(async () => { throw new Error('client import failure') }), isolation) as any).launch(runtime())).rejects.toThrow('client import failure')
     expect(stop).toHaveBeenCalledTimes(4)
     expect(isolation.quarantine).toHaveBeenCalledTimes(3)
+  })
+
+  it('isolates a frontend boot package failure and restarts with the disabled overlay', async () => {
+    const quarantine = vi.fn(async (_runtime, _environment, failure) => {
+      expect(failure).toBeInstanceOf(PluginImportFailure)
+      expect(failure.packages).toEqual(['dsh-channel-telegram'])
+      return true
+    })
+    const isolation = { prepare: vi.fn(async () => undefined), quarantine }
+    const stops = [vi.fn(async () => {}), vi.fn(async () => {})]
+    mocks.startBackend
+      .mockResolvedValueOnce({ url: new URL('http://127.0.0.1:43123/'), done: new Promise(() => {}), stop: stops[0] })
+      .mockResolvedValueOnce({ url: new URL('http://127.0.0.1:43124/'), done: new Promise(() => {}), stop: stops[1] })
+    const onReady = vi.fn()
+      .mockRejectedValueOnce(new PluginImportFailure(['dsh-channel-telegram']))
+      .mockResolvedValueOnce(undefined)
+
+    await (controller(onReady, isolation) as any).launch(runtime())
+
+    expect(quarantine).toHaveBeenCalledOnce()
+    expect(mocks.startBackend).toHaveBeenCalledTimes(2)
+    expect(stops[0]).toHaveBeenCalledOnce()
+    expect(isolation.prepare).toHaveBeenCalledTimes(2)
   })
 
   it('does not automatically retry a validation trial and restores the disabled launch', async () => {

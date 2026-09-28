@@ -1837,3 +1837,17 @@ Remove-Item -LiteralPath 'src/conversation-replay-host-injector.ts','src/convers
 ### Notes
 - 只读检查当前本机 Profile 的受保护 section 仍包含供应商、默认模型和 preset 选择；未输出配置值或凭据。
 - 本轮不会自动切换用户正在运行的 Runtime；升级 Shell 后重新应用 rc.2 才会使用修复。
+
+## 2026-09-28 - Task: 最终 boot pending 插件自动隔离 / Shell 0.1.55
+### What was done
+- 用户明确预期：第三方插件因版本不兼容导致 Web boot 失败时，应先禁用该插件加载并重新启动 DSH，而不是保留整页启动错误。
+- 扩展严格分类器，识别最终 `web boot: N entries did not activate` 报告中的已安装第三方包及 `pending (waiting for service: ...)` 原因；支持单行和多行报告。
+- 前端启动验证除监听主 Frame 控制台外，也读取本地失败页的受限文本并立即分类；精确命中后复用现有隔离状态、临时 disabled overlay 和有界重启。
+- 只有最终 boot 报告生效；单独 pending 文本、核心 `@deepseek-ai/*` 包、网络、认证及未知错误不会自动禁用。插件包、Profile 依赖、配置、凭据和会话不修改。
+- Shell 版本更新到 0.1.55。
+### Testing
+- 先新增失败用例复现 Telegram `settingsScope` 等待错误无法隔离，再验证分类、失败页探测、隔离状态落盘与 disabled overlay。
+- 定向测试覆盖 plugin isolation、frontend health 和 Runtime 重启边界，共 26 项通过；全量 `pnpm test` 50 个文件、367 项通过；`pnpm typecheck`、`pnpm run dist`、`git diff --check` 和真实 Electron 版本管理冒烟通过。
+### Notes
+- 当前只读环境未发现已安装的 Telegram 插件，用户错误可能来自另一时间或环境；不据此修改当前 Profile。
+- 自动隔离后插件仍保留安装和配置，可在插件管理中更新或“重新启用并验证”。
