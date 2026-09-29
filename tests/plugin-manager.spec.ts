@@ -117,6 +117,46 @@ describe('plugin manager pnpm recovery', () => {
       .toEqual(['@deepseek-ai/dsh-web-app', 'dsh-multi-model-orchestrator'])
   })
 
+  it('allows a new GitHub commit when retrying a plugin update', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-plugin-manager-'))
+    const profile = join(root, 'profiles', 'web')
+    await mkdir(profile, { recursive: true })
+    await writeFile(join(profile, 'package.json'), JSON.stringify({
+      dependencies: { 'dsh-multi-model-orchestrator': 'github:ToxicantX/dsh-multi-model-orchestrator' },
+      dsh: { profile: { bundles: ['dsh-multi-model-orchestrator'] } },
+    }))
+    await writeFile(join(profile, 'pnpm-workspace.yaml'), 'packages:\n  - .\nallowBuilds:\n  old-commit: true\n')
+    let calls = 0
+    const key = 'dsh-multi-model-orchestrator@https://codeload.github.com/ToxicantX/dsh-multi-model-orchestrator/tar.gz/new-commit'
+    const manager = new PluginManager({
+      runtime: () => runtime(),
+      home: root,
+      runProcess: () => {
+        calls++
+        const child = new FakeProcess()
+        queueMicrotask(() => {
+          if (calls === 1) child.stderr.write('[ERR_PNPM_IGNORED_BUILDS] Ignored build scripts: ' + key)
+          child.stdout.end()
+          child.stderr.end()
+          child.emit('close', calls === 1 ? 1 : 0, null)
+        })
+        return child as any
+      },
+    })
+
+    const started = await manager.start({ action: 'update', packageName: 'dsh-multi-model-orchestrator' })
+    for (;;) {
+      const status = manager.status(started.operationId)
+      if (status.state !== 'preparing' && status.state !== 'running' && status.state !== 'repairing') {
+        expect(status.state).toBe('succeeded')
+        break
+      }
+      await new Promise(resolve => setTimeout(resolve, 5))
+    }
+    expect(calls).toBe(2)
+    expect(await readFile(join(profile, 'pnpm-workspace.yaml'), 'utf8')).toContain(key + ': true')
+  })
+
   it('removes a plugin from the profile bundles after uninstall', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-plugin-manager-'))
     const profile = join(root, 'profiles', 'web')

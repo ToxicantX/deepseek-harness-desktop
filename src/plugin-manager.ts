@@ -624,7 +624,7 @@ export class PluginManager {
     try { workspaceText = await readFile(workspace, 'utf8') } catch (error: unknown) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     }
-    if (input.action === 'add' && (ALLOW_BUILDS_HINT.test(output) || IGNORED_BUILDS.test(output) || EPERM_SYMLINK.test(output))) {
+    if (input.action !== 'remove' && (ALLOW_BUILDS_HINT.test(output) || IGNORED_BUILDS.test(output) || EPERM_SYMLINK.test(output))) {
       const packageName = allowBuildsKey(output, input)
       if (packageName !== undefined) workspaceText = updateAllowBuildsText(workspaceText, packageName)
     }

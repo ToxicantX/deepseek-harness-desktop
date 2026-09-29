@@ -1851,3 +1851,14 @@ Remove-Item -LiteralPath 'src/conversation-replay-host-injector.ts','src/convers
 ### Notes
 - 当前只读环境未发现已安装的 Telegram 插件，用户错误可能来自另一时间或环境；不据此修改当前 Profile。
 - 自动隔离后插件仍保留安装和配置，可在插件管理中更新或“重新启用并验证”。
+
+## 2026-09-29 - Task: GitHub 插件点击升级自动恢复 / Shell 0.1.56
+### What was done
+- 复现从 dsh-multi-model-orchestrator 0.7.11 点击升级时，pnpm 11 因新的 Git 提交未在 `allowBuilds` 中获准而返回 `ERR_PNPM_IGNORED_BUILDS`。
+- 插件更新与新增现在使用同一条严格恢复路径：只采用 pnpm 输出的精确包键，将该键写为 `true` 后重试；卸载流程不授予构建权限。
+- Profile 文件仍在操作前快照，修复和重试失败时沿用既有回滚。
+### Testing
+- 定向回归 `pnpm vitest run tests/plugin-manager.spec.ts` 7 项通过；全量 `pnpm test` 50 个文件、368 项通过；`pnpm typecheck` 和 `pnpm build` 通过。
+- 真实 DSH 0.1.7-rc.2 / pnpm 11.7.0 隔离 Profile 从 0.7.11 更新到 0.7.13：首次命中 `ERR_PNPM_IGNORED_BUILDS`，自动写入新提交键并重试成功。
+### Notes
+- 根因发生在新插件提交执行前，必须由 Shell 的插件管理恢复逻辑处理；插件包本身无需增加绕过构建审批的代码。
