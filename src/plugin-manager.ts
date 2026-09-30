@@ -168,6 +168,16 @@ export function packageNameFromSpec(spec: string): string | undefined {
   try { return name === undefined ? undefined : validatePackageName(name) } catch { return undefined }
 }
 
+export function isPidAlive(pid: number): boolean {
+  if (typeof pid !== 'number' || Number.isNaN(pid) || pid <= 0) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error: unknown) {
+    return (error as NodeJS.ErrnoException)?.code === 'EPERM'
+  }
+}
+
 export function updateAllowBuildsText(text: string, packageName: string): string {
   const value = parse(text) as Record<string, unknown> | null
   const config = value !== null && typeof value === 'object' && !Array.isArray(value) ? value : {}
@@ -364,9 +374,25 @@ export class PluginManager {
     this.onOperationFinished = options.onOperationFinished ?? (() => {})
   }
 
+  async cleanupStaleLock(profile = 'web'): Promise<void> {
+    const lockPath = join(this.home, 'profiles', profile, 'package.json.lock')
+    try {
+      const text = await this.readText(lockPath)
+      const pid = parseInt(text.trim(), 10)
+      if (!isPidAlive(pid)) {
+        await this.removeFile(lockPath)
+      }
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+        // file missing or unreadable, ignore
+      }
+    }
+  }
+
   async list(): Promise<PluginList> {
     this.assertAvailable()
     if (this.activeOperationId !== undefined) throw new Error('plugin operation is already running')
+    await this.cleanupStaleLock('web')
     const runtime = this.requireRuntime()
     try {
       const result = await this.execute(runtime, ['plugin', '--profile', 'web', 'list', '--depth', '0', '--json'], MAX_LIST_BYTES)
@@ -380,6 +406,7 @@ export class PluginManager {
   async updates(): Promise<PluginUpdateList> {
     this.assertAvailable()
     if (this.activeOperationId !== undefined) return { entries: [] }
+    await this.cleanupStaleLock('web')
     const runtime = this.requireRuntime()
     try {
       const result = await this.execute(runtime, [
@@ -397,6 +424,7 @@ export class PluginManager {
     if (this.activeOperationId !== undefined || this.pendingRestartOperationId !== undefined) {
       throw new Error('plugin operation is already running')
     }
+    await this.cleanupStaleLock('web')
     const input = parseStartInput(value)
     const runtime = this.requireRuntime()
     const operationId = randomUUID()
@@ -634,9 +662,10 @@ export class PluginManager {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     }
     await writeFile(npmrc, ensureNpmrcText(npmrcText))
-    if (EPERM_SYMLINK.test(output) || output.includes(VIRTUAL_STORE_MISMATCH) || output.includes(UNEXPECTED_STORE)) {
+    if (EPERM_SYMLINK.test(output) || output.includes(VIRTUAL_STORE_MISMATCH) || output.includes(UNEXPECTED_STORE) || output.includes('package.json.lock') || output.includes('timed out waiting for the writer lock')) {
       await this.removeDirectory(join(profile, 'node_modules'))
       await this.removeFile(join(profile, 'pnpm-lock.yaml.tmp'))
+      await this.removeFile(join(profile, 'package.json.lock'))
     }
   }
 

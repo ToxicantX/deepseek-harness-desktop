@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   PluginManager,
   ensureNpmrcText,
+  isPidAlive,
   packageNameFromSpec,
   updateAllowBuildsText,
 } from '../src/plugin-manager.ts'
@@ -226,5 +227,74 @@ describe('plugin manager pnpm recovery', () => {
     expect(await readFile(join(profile, 'package.json'), 'utf8')).toBe(originalPackage)
     expect(await readFile(join(profile, 'pnpm-workspace.yaml'), 'utf8')).toBe(originalWorkspace)
     expect(await readFile(join(profile, '.npmrc'), 'utf8')).toBe(originalNpmrc)
+  })
+
+  it('detects live and dead process IDs correctly', () => {
+    expect(isPidAlive(process.pid)).toBe(true)
+    expect(isPidAlive(-1)).toBe(false)
+    expect(isPidAlive(0)).toBe(false)
+    expect(isPidAlive(NaN as any)).toBe(false)
+  })
+
+  it('automatically purges stale dead-PID lock files before running list', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-plugin-manager-'))
+    const profile = join(root, 'profiles', 'web')
+    await mkdir(profile, { recursive: true })
+    await writeFile(join(profile, 'package.json'), JSON.stringify({ dependencies: {} }))
+    const lockPath = join(profile, 'package.json.lock')
+    await writeFile(lockPath, '99999999\n')
+
+    const child = new FakeProcess()
+    const manager = new PluginManager({
+      runtime: () => runtime(),
+      home: root,
+      runProcess: () => {
+        queueMicrotask(() => {
+          child.stdout.write(JSON.stringify([{ name: 'dsh-profile-web', path: profile, dependencies: {} }]))
+          child.stdout.end()
+          child.stderr.end()
+          child.emit('close', 0, null)
+        })
+        return child as any
+      },
+    })
+
+    const list = await manager.list()
+    expect(list.entries).toEqual([])
+    let lockExists = true
+    try {
+      await readFile(lockPath)
+    } catch {
+      lockExists = false
+    }
+    expect(lockExists).toBe(false)
+  })
+
+  it('preserves lock files whose holding process is still alive', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-plugin-manager-'))
+    const profile = join(root, 'profiles', 'web')
+    await mkdir(profile, { recursive: true })
+    await writeFile(join(profile, 'package.json'), JSON.stringify({ dependencies: {} }))
+    const lockPath = join(profile, 'package.json.lock')
+    await writeFile(lockPath, `${process.pid}\n`)
+
+    const child = new FakeProcess()
+    const manager = new PluginManager({
+      runtime: () => runtime(),
+      home: root,
+      runProcess: () => {
+        queueMicrotask(() => {
+          child.stdout.write(JSON.stringify([{ name: 'dsh-profile-web', path: profile, dependencies: {} }]))
+          child.stdout.end()
+          child.stderr.end()
+          child.emit('close', 0, null)
+        })
+        return child as any
+      },
+    })
+
+    const list = await manager.list()
+    expect(list.entries).toEqual([])
+    expect(await readFile(lockPath, 'utf8')).toBe(`${process.pid}\n`)
   })
 })

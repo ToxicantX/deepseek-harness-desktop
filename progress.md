@@ -1862,3 +1862,16 @@ Remove-Item -LiteralPath 'src/conversation-replay-host-injector.ts','src/convers
 - 真实 DSH 0.1.7-rc.2 / pnpm 11.7.0 隔离 Profile 从 0.7.11 更新到 0.7.13：首次命中 `ERR_PNPM_IGNORED_BUILDS`，自动写入新提交键并重试成功。
 ### Notes
 - 根因发生在新插件提交执行前，必须由 Shell 的插件管理恢复逻辑处理；插件包本身无需增加绕过构建审批的代码。
+
+## 2026-09-29 - Task: 自动清理死进程锁与 package.json.lock 锁恢复 / Shell 0.1.57
+### What was done
+- 新增 `isPidAlive` 辅助函数检测持有进程的存活性，并在 `PluginManager` 的 `list`、`updates`、`start` 等插件操作入口前自动清理孤立的 `package.json.lock` 文件。
+- 在插件操作异常恢复判定中增加对 `package.json.lock` 及 `timed out waiting for the writer lock` 错误信息的识别，自动清除遗留的锁文件后重试。
+- 补齐进程存活检查与锁文件自动清理的单元测试。
+- Shell 版本更新到 0.1.57。
+### Testing
+- 定向回归 `pnpm vitest run tests/plugin-manager.spec.ts` 10 项通过。
+- 全量 `pnpm test` 50 个文件、371 项测试通过。
+- `npx tsc --noEmit` 通过。
+### Notes
+- 仅在锁文件中的 PID 对应进程已不存在时自动清除，活跃进程持有的锁仍予以保留。
