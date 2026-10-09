@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { readFile, rm, writeFile } from 'node:fs/promises'
 import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path'
+import { realpath } from 'node:fs/promises'
 import { gt, valid } from 'semver'
 import { parse, stringify } from 'yaml'
 import type { InstalledRuntime } from './runtime-store.ts'
@@ -284,6 +285,16 @@ async function readInstalledPluginVersion(
   }
 }
 
+export async function isSameProfilePath(actual: string, expected: string): Promise<boolean> {
+  if (resolve(actual).toLowerCase() === resolve(expected).toLowerCase()) return true
+  try {
+    const [realActual, realExpected] = await Promise.all([realpath(actual), realpath(expected)])
+    return resolve(realActual).toLowerCase() === resolve(realExpected).toLowerCase()
+  } catch {
+    return false
+  }
+}
+
 async function parsePluginList(
   stdout: string,
   expectedProfilePath: string,
@@ -294,7 +305,7 @@ async function parsePluginList(
   if (!Array.isArray(parsed) || parsed.length !== 1) throw new Error('plugin list must contain one profile')
   const profile = object(parsed[0], 'plugin profile')
   const profilePath = boundedText(profile.path, 'plugin profile path', 32_768)
-  if (!isAbsolute(profilePath) || resolve(profilePath).toLowerCase() !== resolve(expectedProfilePath).toLowerCase()) {
+  if (!isAbsolute(profilePath) || !(await isSameProfilePath(profilePath, expectedProfilePath))) {
     throw new Error('plugin profile path is invalid')
   }
   const listed = profile.dependencies === undefined ? {} : object(profile.dependencies, 'listed dependencies')

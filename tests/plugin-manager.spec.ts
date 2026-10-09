@@ -8,6 +8,7 @@ import {
   PluginManager,
   ensureNpmrcText,
   isPidAlive,
+  isSameProfilePath,
   packageNameFromSpec,
   updateAllowBuildsText,
 } from '../src/plugin-manager.ts'
@@ -296,5 +297,18 @@ describe('plugin manager pnpm recovery', () => {
     const list = await manager.list()
     expect(list.entries).toEqual([])
     expect(await readFile(lockPath, 'utf8')).toBe(`${process.pid}\n`)
+  })
+
+  it('matches profile path across symbolic links and junctions', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-plugin-manager-symlink-'))
+    const realProfile = join(root, 'target', 'profiles', 'web')
+    const linkHome = join(root, 'link-home')
+    await mkdir(realProfile, { recursive: true })
+    const { symlink } = await import('node:fs/promises')
+    await symlink(join(root, 'target'), linkHome, 'junction')
+
+    expect(await isSameProfilePath(realProfile, join(linkHome, 'profiles', 'web'))).toBe(true)
+    expect(await isSameProfilePath(join(linkHome, 'profiles', 'web'), realProfile)).toBe(true)
+    expect(await isSameProfilePath(realProfile, join(root, 'non-existent'))).toBe(false)
   })
 })
