@@ -211,6 +211,16 @@ SignPath Foundation 批准并启用集成后，符合条件的 Shell Release 将
 
 ## 版本与更新说明
 
+### 2026-10-10 - 兼容性检查与一键发版脚本更新
+
+- **全量兼容性核查**：全面核查图示功能（“个性化设置”、“管理 DSH 版本”、“刷新并应用版本策略”、“管理插件”、“管理 MCP”、“管理 Skill”）与最新版 DSH（0.2.1-alpha.2）及历史版本（0.1.0-rc.7 起）的兼容性：
+  - **个性化设置**：与最新 DSH 规范（`$DSH_HOME/AGENTS.md`、64KB 限制、原子保存与修订防并发竞争）完全兼容；在 DSH 0.2.1-alpha.2 退役 `{{cwd}}` 变量的背景下，个性化模板与预设迁移均已适配并保持向下兼容。
+  - **管理 DSH 版本 / 刷新版本策略**：版本目录解析、动态下载校验、原子解压及指向切换均向下兼容所有 `0.1.0-rc.7` 至 `0.2.1-alpha.2` 运行时。
+  - **管理插件**：透传调用最新 `dsh plugin --profile web`，死锁自动清理（PID 检测与 `package.json.lock` 恢复）在新旧版本下稳定运行。
+  - **管理 MCP**：支持最新 `@deepseek-ai/dsh-mcp-client` 所需的标准协议与配置补丁合并（`desktop.patch.yml`），双向向下兼容旧版。
+  - **管理 Skill**：完整支持 `$DSH_HOME` 及 `~/.agents` 下多源 Skill 的 YAML Frontmatter 解析与状态启闭。
+- **一键发版自动化**：新增 `release.bat` 与 `scripts/release.mjs`，支持自动化静态类型检查、单元测试、版本自动递增、Git 打标及远程推送发版。
+
 - **Shell Version**：桌面窗口、下载器、版本管理器和 Runtime 协议的版本。
 - **DSH Version**：对应上游 `dsh-v*` Git Tag。
 - **Runtime Revision**：同一 DSH Version 的不可变桌面构建修订。
