@@ -211,14 +211,12 @@ SignPath Foundation 批准并启用集成后，符合条件的 Shell Release 将
 
 ## 版本与更新说明
 
-### 2026-10-10 - 兼容性检查与一键发版脚本更新
+### 2026-10-10 - 兼容性检查、初始会话提示词智能向下兼容与一键发版脚本
 
-- **全量兼容性核查**：全面核查图示功能（“个性化设置”、“管理 DSH 版本”、“刷新并应用版本策略”、“管理插件”、“管理 MCP”、“管理 Skill”）与最新版 DSH（0.2.1-alpha.2）及历史版本（0.1.0-rc.7 起）的兼容性：
-  - **个性化设置**：与最新 DSH 规范（`$DSH_HOME/AGENTS.md`、64KB 限制、原子保存与修订防并发竞争）完全兼容；在 DSH 0.2.1-alpha.2 退役 `{{cwd}}` 变量的背景下，个性化模板与预设迁移均已适配并保持向下兼容。
-  - **管理 DSH 版本 / 刷新版本策略**：版本目录解析、动态下载校验、原子解压及指向切换均向下兼容所有 `0.1.0-rc.7` 至 `0.2.1-alpha.2` 运行时。
-  - **管理插件**：透传调用最新 `dsh plugin --profile web`，死锁自动清理（PID 检测与 `package.json.lock` 恢复）在新旧版本下稳定运行。
-  - **管理 MCP**：支持最新 `@deepseek-ai/dsh-mcp-client` 所需的标准协议与配置补丁合并（`desktop.patch.yml`），双向向下兼容旧版。
-  - **管理 Skill**：完整支持 `$DSH_HOME` 及 `~/.agents` 下多源 Skill 的 YAML Frontmatter 解析与状态启闭。
+- **初始对话上下文智能向下兼容（AGENTS.md / Skills / MCP）**：
+  - **最新版机制（>= 0.1.3-alpha.1 至 0.2.1-alpha.2）**：DSH 官方核心已内置 `@deepseek-ai/dsh-agent-instructions`、`@deepseek-ai/dsh-tool-skill` 和 `@deepseek-ai/dsh-mcp-client`，会在新会话及后续轮次中原生自动读取并注入全局 `$DSH_HOME/AGENTS.md`、工作区根目录 `AGENTS.md`、可用 Skills（`<available_skills>`）与 MCP 工具。桌面壳智能识别版本并保持干净直通（Pass-through），杜绝双重注入或提示词污染。
+  - **早期老版本兼容（< 0.1.3-alpha.1，如 0.1.0-rc.7 ~ 0.1.1-rc.2）**：上游核心尚未内置上述模块，新增 `src/instructions-context-compatibility.ts` 及 IPC 适配层，在检测到旧版运行时且存在指令或扩展组件时，自动读取全局与工作区 `AGENTS.md`、启用的 Skills 与已加载 MCP，智能构建初始上下文补丁，实现全版本无缝向下兼容。
+- **全量核心功能兼容性审查**：全面核查“个性化设置”、“管理 DSH 版本”、“刷新并应用版本策略”、“管理插件”、“管理 MCP”、“管理 Skill”与最新版 DSH 及全量历史版本运行期的协同机制，验证全部通过。
 - **一键发版自动化**：新增 `release.bat` 与 `scripts/release.mjs`，支持自动化静态类型检查、单元测试、版本自动递增、Git 打标及远程推送发版。
 
 - **Shell Version**：桌面窗口、下载器、版本管理器和 Runtime 协议的版本。

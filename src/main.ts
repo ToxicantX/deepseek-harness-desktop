@@ -28,6 +28,10 @@ import { McpManager, npmGlobalRootsFromEnvironment, type McpList } from './mcp-m
 import { SkillManager, type SkillList } from './skill-manager.ts'
 import { mutateMcpWithRuntime } from './mcp-restart.ts'
 import { PersonalizationManager } from './personalization-manager.ts'
+import {
+  shouldInjectInstructionsCompatibility,
+  buildLegacyInstructionsPrompt,
+} from './instructions-context-compatibility.ts'
 import { parsePetWindowShape, PetWindowController, type PetRendererState as PetWindowState } from './pet-window.ts'
 import type { PetSize } from './pet-size.ts'
 import { PluginManager, validatePackageName } from './plugin-manager.ts'
@@ -1204,6 +1208,21 @@ ipcMain.handle('personalization:save', async (event, value: unknown) => {
 })
 ipcMain.on('personalization:dirty', (event, value: unknown) => {
   if (isPersonalizationSender(event) && typeof value === 'boolean') personalizationDirty = value
+})
+ipcMain.handle('instructions:compatibility-prompt', async (_event, workspaceRoot?: string) => {
+  const runtime = controller?.installedRuntime()
+  if (!runtime || !shouldInjectInstructionsCompatibility(runtime.manifest.dshVersion)) {
+    return ''
+  }
+  const home = process.env.DSH_HOME ?? join(homedir(), '.dsh')
+  const skills = await skillManager?.list().then(l => l.entries).catch(() => [])
+  const mcpEntries = await mcpManager?.list().then(l => l.entries).catch(() => [])
+  return buildLegacyInstructionsPrompt({
+    dshHome: home,
+    workspaceRoot,
+    skills,
+    mcpEntries,
+  })
 })
 ipcMain.handle('mcp-manager:list', async (event) => {
   return mcpService(event).list()
