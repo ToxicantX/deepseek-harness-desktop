@@ -18,11 +18,18 @@ const presentation = (mode: string) => [
   '',
 ].join('\r\n')
 
+interface FixtureOptions {
+  dshVersion?: string
+  agentLoopRegistersCwd?: boolean
+  personaText?: string
+}
+
 async function fixture(
   runtimeMode: string,
   pluginMode = 'code',
   runtimeLayout: 'current' | 'legacy' = 'current',
   personaVersion = '0.1.3-alpha.1',
+  options: FixtureOptions = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), 'dsh-preset-compat-'))
   const runtimePackage = join(root, 'runtime', 'app', 'node_modules', '@deepseek-ai', 'dsh')
@@ -39,21 +46,36 @@ async function fixture(
   await mkdir(personaRoot, { recursive: true })
   await writeFile(join(personaRoot, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-persona', version: personaVersion }))
   await writeFile(join(runtimePresetRoot, runtimePresetId, 'agent.cordis.yml'), presentation(runtimeMode))
+  if (options.dshVersion !== undefined) {
+    const agentLoopLib = join(runtimePackage, 'node_modules', '@deepseek-ai', 'dsh-agent-loop', 'lib')
+    await mkdir(agentLoopLib, { recursive: true })
+    const registers = options.agentLoopRegistersCwd ?? false
+    const source = registers
+      ? 'ctx.systemPrompt.variable("cwd", (context) => context.agent?.options.cwd);\nctx.systemPrompt.variable("model", () => "m");'
+      : 'ctx.systemPrompt.variable("provider", () => "p");\nctx.systemPrompt.variable("model", () => "m");'
+    await writeFile(join(agentLoopLib, 'index.js'), source)
+  }
   const packagePath = join(pluginRoot, 'package.json')
   await writeFile(packagePath, JSON.stringify({
     name: 'dsh-multi-model-orchestrator',
     dsh: { client: { inject: ['@deepseek-ai/dsh-client-runtime', '@deepseek-ai/dsh-client-ui-settings'] } },
   }, null, 2))
+  const sourceContent = options.personaText !== undefined
+    ? presentation(pluginMode).replace('You are the orchestrator.', options.personaText)
+    : presentation(pluginMode)
   const sourcePath = join(pluginRoot, 'preset', 'agent.cordis.yml')
   const legacySourcePath = join(pluginRoot, 'preset-legacy', 'agent.cordis.yml')
-  await writeFile(sourcePath, presentation(pluginMode))
-  await writeFile(legacySourcePath, presentation(pluginMode))
+  await writeFile(sourcePath, sourceContent)
+  await writeFile(legacySourcePath, sourceContent)
   return {
     home: join(root, 'home'),
     packagePath,
     sourcePath,
     legacySourcePath,
-    runtime: { dshBin } as any,
+    runtime: {
+      dshBin,
+      ...(options.dshVersion !== undefined ? { manifest: { dshVersion: options.dshVersion } } : {}),
+    } as any,
   }
 }
 
@@ -126,5 +148,49 @@ describe('plugin preset compatibility', () => {
     const before = await readFile(customized.sourcePath, 'utf8')
     await expect(preparePluginPresetCompatibility(customized)).resolves.toBe('dsh-multi-model-orchestrator')
     expect(await readFile(customized.sourcePath, 'utf8')).toBe(before)
+  })
+
+  it('removes the retired cwd clause when the runtime no longer registers the prompt variable', async () => {
+    const personaText = 'You are the orchestrator powered by {{model}}. Your working directory is {{cwd}}.'
+    const value = await fixture('ptc', 'ptc', 'current', '0.1.3-alpha.2', {
+      dshVersion: '0.2.1-alpha.2',
+      agentLoopRegistersCwd: false,
+      personaText,
+    })
+    const before = await readFile(value.sourcePath, 'utf8')
+    expect(before).toContain('Your working directory is {{cwd}}.')
+    await expect(preparePluginPresetCompatibility(value)).resolves.toBe('dsh-multi-model-orchestrator')
+    const after = await readFile(value.sourcePath, 'utf8')
+    expect(after).not.toContain('{{cwd}}')
+    expect(after).toContain('You are the orchestrator powered by {{model}}.')
+    expect(await readFile(value.legacySourcePath, 'utf8')).not.toContain('{{cwd}}')
+
+    // 验证幂等性
+    await expect(preparePluginPresetCompatibility(value)).resolves.toBe('dsh-multi-model-orchestrator')
+    expect(await readFile(value.sourcePath, 'utf8')).toBe(after)
+  })
+
+  it('preserves the cwd clause for older runtimes to remain backward-compatible', async () => {
+    const personaText = 'You are the orchestrator powered by {{model}}. Your working directory is {{cwd}}.'
+    const value = await fixture('ptc', 'ptc', 'current', '0.1.3-alpha.2', {
+      dshVersion: '0.2.1-alpha.1',
+      agentLoopRegistersCwd: true,
+      personaText,
+    })
+    await preparePluginPresetCompatibility(value)
+    const after = await readFile(value.sourcePath, 'utf8')
+    expect(after).toContain('Your working directory is {{cwd}}.')
+  })
+
+  it('preserves the cwd clause if the runtime agent-loop still registers the variable despite version', async () => {
+    const personaText = 'You are the orchestrator powered by {{model}}. Your working directory is {{cwd}}.'
+    const value = await fixture('ptc', 'ptc', 'current', '0.1.3-alpha.2', {
+      dshVersion: '0.2.1-alpha.2',
+      agentLoopRegistersCwd: true,
+      personaText,
+    })
+    await preparePluginPresetCompatibility(value)
+    const after = await readFile(value.sourcePath, 'utf8')
+    expect(after).toContain('Your working directory is {{cwd}}.')
   })
 })

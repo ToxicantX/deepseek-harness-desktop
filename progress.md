@@ -1875,3 +1875,20 @@ Remove-Item -LiteralPath 'src/conversation-replay-host-injector.ts','src/convers
 - `npx tsc --noEmit` 通过。
 ### Notes
 - 仅在锁文件中的 PID 对应进程已不存在时自动清除，活跃进程持有的锁仍予以保留。
+
+## 2026-09-30 - Task: 兼容 DSH 0.2.1-alpha.2 系统提示词退役 {{cwd}} 变量
+### What was done
+- 确认 DSH 核心自 `0.2.1-alpha.2` 起从 agent-loop 中移除了 `cwd` 提示词变量注册（工作目录改由 `dsh-working-directory` 的必需运行期上下文提供），旧版 `dsh-multi-model-orchestrator` 预设人设模板保留 `Your working directory is {{cwd}}.` 会导致对话发起时提示词组装因严格变量校验抛错 `unknown prompt variable "{{cwd}}" in section "deployment:persona-prefix"`。
+- 参照上游 `E:\AI\deepseek-harness` 规范实施向下兼容迁移：
+  1. **版本门控**：仅在 DSH 核心版本不低于 `0.2.1-alpha.2` 时才考虑迁移；
+  2. **实现二次校验**：检查运行时 `@deepseek-ai/dsh-agent-loop` 代码，若仍注册 `cwd` 变量（如打补丁版本或未来重注册版本）则保持预设模板逐字节不变；
+  3. **最小化精准替换**：仅从模板中剔除 `Your working directory is {{cwd}}.` 子句，保留其他全部提示词、配置、注释与结构，不影响模型获取工作目录上下文；
+  4. **旧版运行时兼容**：旧版运行时（`0.2.1-alpha.1` 及更早）保持原有模板完全不动。
+### Testing
+- `pnpm exec tsc --noEmit` 通过。
+- `pnpm exec vitest run tests/plugin-preset-compatibility.spec.ts` 8 项全部通过（含退役剔除、幂等性、旧版运行时向下兼容、仍注册变量时保持不动等测试）。
+- `pnpm exec vitest run tests/plugin-preset-compatibility.spec.ts tests/plugin-isolation.spec.ts tests/runtime-controller-overlay.spec.ts --maxWorkers=1` 29 项全部通过。
+### Notes
+- `src/plugin-preset-compatibility.ts`：增加 `runtimeDropsCwdPromptVariable` 检测与 `removeCwdClause` 清理逻辑。
+- `tests/plugin-preset-compatibility.spec.ts`：扩展 fixture 支持运行时版本/变量注册模拟，新增向下兼容验证用例。
+- `docs/plugin-preset-compatibility.md`：补充说明此变更背景与向下兼容策略。

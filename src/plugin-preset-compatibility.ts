@@ -11,6 +11,12 @@ const LEGACY_CLIENT = '@deepseek-ai/dsh-client-runtime'
 const PRESENTATION_NAME = '@deepseek-ai/dsh-agent-tool-presentation'
 const PERSONA_NAME = '@deepseek-ai/dsh-persona'
 const PERSONA_PREFIX_VERSION = '0.1.3-alpha.2'
+const AGENT_LOOP_NAME = '@deepseek-ai/dsh-agent-loop'
+// DSH 0.2.1-alpha.2 stopped registering the `cwd` prompt variable; the
+// working-directory service supplies that context instead (upstream
+// dsh-system-prompt README: persona templates must not reference `{{cwd}}`).
+const CWD_VARIABLE_REMOVED_VERSION = '0.2.1-alpha.2'
+const CWD_VARIABLE_REGISTERED_PATTERN = /systemPrompt\.variable\(\s*(['"])cwd\1/
 const PRESET_SOURCES = [
   ['preset', 'agent.cordis.yml'],
   ['preset-legacy', 'agent.cordis.yml'],
@@ -85,6 +91,21 @@ function replacePersonaKey(source: string, key: ScalarRange): string {
   const next = raw.replace(key.value, 'prefix')
   if (next === raw) throw new Error('agent preset persona key range is invalid')
   return source.slice(0, key.start) + next + source.slice(key.end)
+}
+const CWD_CLAUSE_PATTERN = /[ \t]+Your working directory is \{\{cwd\}\}\./g
+const CWD_CLAUSE_LINE_PATTERN = /^[ \t]*Your working directory is \{\{cwd\}\}\.[ \t]*\r?\n/m
+
+function removeCwdClause(source: string): string {
+  return source.replace(CWD_CLAUSE_LINE_PATTERN, '').replace(CWD_CLAUSE_PATTERN, '')
+}
+
+async function runtimeDropsCwdPromptVariable(runtime: InstalledRuntime): Promise<boolean> {
+  const version = valid(runtime.manifest?.dshVersion)
+  if (version === null || !gte(version, CWD_VARIABLE_REMOVED_VERSION)) return false
+  const loopPath = join(dirname(dirname(runtime.dshBin)), 'node_modules', AGENT_LOOP_NAME, 'lib', 'index.js')
+  const source = await readOptional(loopPath)
+  if (source === undefined) return true
+  return !CWD_VARIABLE_REGISTERED_PATTERN.test(source)
 }
 
 async function readOptional(path: string): Promise<string | undefined> {
@@ -204,7 +225,8 @@ export async function preparePluginPresetCompatibility(input: PluginPresetCompat
   }
   if (!await isExpectedPlugin(resolvedPlugin)) return undefined
   const runtimeUsesPersonaPrefix = await personaRequiresPrefix(resolvedPlugin)
-  if (!runtimeUsesPtc && !runtimeUsesPersonaPrefix) return undefined
+  const runtimeDropsCwd = await runtimeDropsCwdPromptVariable(input.runtime)
+  if (!runtimeUsesPtc && !runtimeUsesPersonaPrefix && !runtimeDropsCwd) return undefined
   for (const sourceSegments of PRESET_SOURCES) {
     const sourcePath = join(resolvedPlugin, ...sourceSegments)
     const source = await readOptional(sourcePath)
@@ -214,6 +236,7 @@ export async function preparePluginPresetCompatibility(input: PluginPresetCompat
     if (mode?.value === 'code') replacement = replaceMode(replacement, mode, 'ptc')
     const personaKey = runtimeUsesPersonaPrefix ? legacyPersonaKey(replacement) : undefined
     if (personaKey !== undefined) replacement = replacePersonaKey(replacement, personaKey)
+    if (runtimeDropsCwd) replacement = removeCwdClause(replacement)
     if (replacement !== source) await replaceFile(sourcePath, replacement)
   }
   await removeLegacyClientInjection(resolvedPlugin, input.runtime)
