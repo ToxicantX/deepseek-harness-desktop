@@ -68,6 +68,44 @@ describe('shell-only same-session replay', () => {
     expect(session.deriveMessages().map(item => item.content)).toEqual([message('edited').content])
   })
 
+  it('auto-detects modern Session replacement format without explicit parameter or environment variable', async () => {
+    const { session, agent, land } = fixture()
+    ;(session as any).commit = vi.fn()
+    const append = session.append.bind(session)
+    let surfaceOp: any
+    session.append = ((type: any, data: any, options: any) => {
+      if (options?.surfaceOp?.op === 'replace') {
+        surfaceOp = options.surfaceOp
+        return append(type, data, { ...options, surfaceOp: {
+          op: 'replace', start: surfaceOp.startSeq, end: surfaceOp.endSeq,
+        } })
+      }
+      return append(type, data, options)
+    }) as typeof session.append
+    await admitDesktopReplay(agent, message('edited'), 1)
+    land()
+    expect(surfaceOp).toEqual({ op: 'replace', startSeq: 1, endSeq: 1 })
+  })
+
+  it('falls back to the alternative format if the runtime rejects the initial replace surfaceOp', async () => {
+    const { session, agent, land } = fixture()
+    const append = session.append.bind(session)
+    let replaceAttempts = 0
+    session.append = ((type: any, data: any, options: any) => {
+      if (options?.surfaceOp?.op === 'replace') {
+        replaceAttempts++
+        if (replaceAttempts === 1) {
+          throw new Error('session event "user/message" carries an invalid replace surfaceOp')
+        }
+      }
+      return append(type, data, options)
+    }) as typeof session.append
+    await admitDesktopReplay(agent, message('edited'), 1, true)
+    land()
+    expect(replaceAttempts).toBe(2)
+    expect(session.deriveMessages().map(item => item.content)).toEqual([message('edited').content])
+  })
+
   it('uses existing replacement records readable by the unmodified core', async () => {
     const { session, agent, land } = fixture()
     const originalAppend = session.append

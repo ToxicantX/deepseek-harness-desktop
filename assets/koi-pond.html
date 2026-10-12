@@ -38,7 +38,10 @@
   <main>
     <canvas id="pond" tabindex="0" aria-label="锦鲤池塘：点击水面投喂；方向键移动投喂点，空格投喂"></canvas>
     <section id="running-sessions" class="running-sessions" aria-live="polite" aria-label="正在执行的会话" hidden>
-      <p class="eyebrow">正在执行 <span id="running-count">0</span></p>
+      <div class="running-head">
+        <p class="eyebrow">正在执行 <span id="running-count">0</span></p>
+        <button id="clear-running-sessions" class="running-clear-all" title="清空执行任务">清空</button>
+      </div>
       <div id="running-list"></div>
     </section>
     <header>

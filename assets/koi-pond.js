@@ -1113,11 +1113,17 @@
       const output = document.createElement('small'); output.textContent = item.approval ? '等待审批' : (item.output || '执行中')
       copy.append(name, output)
       const state = document.createElement('span'); state.className = item.approval ? 'running-approval' : ''; state.textContent = item.approval ? '审批' : '正在思考'
-      row.append(copy, state); return row
+      const remove = document.createElement('button'); remove.className = 'running-item-remove'
+      remove.title = '移除此项'; remove.setAttribute('aria-label', '移除 ' + title); remove.textContent = '×'
+      remove.onclick = () => { bridge?.clearRunningSession?.(item.id) }
+      row.append(copy, state, remove); return row
       })())
     }
     runningList.replaceChildren(...rows)
   }
+  // The shell owns the running list, so both controls send a command and render the list it sends back.
+  const clearAllRunning = $('clear-running-sessions')
+  if (clearAllRunning) clearAllRunning.onclick = () => { bridge?.clearAllRunningSessions?.() }
   const deselectFish = () => {
     if (selected !== undefined) {
       selected = undefined

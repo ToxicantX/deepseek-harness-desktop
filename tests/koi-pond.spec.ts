@@ -169,6 +169,32 @@ describe('koi dialogue observer', () => {
     expect(main).toContain("ipcMain.on('pond:session-running'")
   })
 
+  it('wires the pond clear controls through the shell down to the running list', async () => {
+    const html = await readFile(new URL('../assets/koi-pond.html', import.meta.url), 'utf8')
+    const script = await readFile(new URL('../assets/koi-pond.js', import.meta.url), 'utf8')
+    const css = await readFile(new URL('../assets/koi-pond.css', import.meta.url), 'utf8')
+    const preload = await readFile(new URL('../src/koi-pond-preload.ts', import.meta.url), 'utf8')
+    const main = await readFile(new URL('../src/main.ts', import.meta.url), 'utf8')
+    const windowSource = await readFile(new URL('../src/koi-pond-window.ts', import.meta.url), 'utf8')
+    expect(html).toContain('<button id="clear-running-sessions" class="running-clear-all" title="清空执行任务">清空</button>')
+    expect(script).toContain("remove.className = 'running-item-remove'")
+    expect(script).toContain("remove.title = '移除此项'")
+    expect(script).toContain('bridge?.clearRunningSession?.(item.id)')
+    expect(script).toContain('bridge?.clearAllRunningSessions?.()')
+    expect(css).toContain('.running-item-remove')
+    expect(preload).toContain("ipcRenderer.send('pond:clear-running-session', sessionId)")
+    expect(preload).toContain("ipcRenderer.send('pond:clear-all-running-sessions')")
+    expect(main).toContain("ipcMain.on('pond:clear-running-session'")
+    expect(main).toContain("ipcMain.on('pond:clear-all-running-sessions'")
+    expect(main).toContain("koiPond?.clearRunningSession(sessionId)")
+    expect(main).toContain("koiPond?.clearAllRunningSessions()")
+    const clearOne = /clearRunningSession\(sessionId: string\): void \{[\s\S]*?sendRunningSessions\(\)/.exec(windowSource)?.[0]
+    const clearAll = /clearAllRunningSessions\(\): void \{[\s\S]*?sendRunningSessions\(\)/.exec(windowSource)?.[0]
+    expect(clearOne).toContain('this.runningSessions.filter(session => session.id !== sessionId)')
+    expect(clearAll).toContain('this.runningSessions = []')
+    expect(main).toContain('runningSessions.clear()')
+  })
+
   it('uses the koi pond image asset for the floating toggle', async () => {
     const source = await readFile(new URL('../src/koi-pond-toggle.ts', import.meta.url), 'utf8')
     expect(source).toContain("import { KOI_POND_TOGGLE_ICON } from './koi-pond-toggle-icon.ts'")
@@ -183,6 +209,23 @@ describe('koi dialogue observer', () => {
     expect(injectKoiPondDialogue(transformed.source).changed).toBe(false)
     return new (Function(`return (${transformed.source})`)()())()
   }
+  /** Mirrors the runtime controller: the pond hook only sees what subscribe/getSnapshot report. */
+  function runtimeClient(body: string) {
+    const source = `() => class {
+      sessionId = 'runtime-session';
+      running = false;
+      getSnapshot() { return { running: this.running }; }
+      subscribe(listener) { this.listener = listener; return () => { this.listener = undefined; }; }
+      async prompt(content, mode, signal, requestId) { ${body} }
+    }`
+    const transformed = injectKoiPondDialogue(source)
+    expect(transformed.changed).toBe(true)
+    return new (Function(`return (${transformed.source})`)()())()
+  }
+  const runningCalls = (postMessage: ReturnType<typeof vi.fn>) => postMessage.mock.calls
+    .map(([data]) => data)
+    .filter(data => data?.type === 'dsh/session-running')
+
   it.each(['content, mode', 'content, mode, signal, requestId'])('observes accepted main-session messages: %s', async signature => {
     const postMessage = vi.fn()
     vi.stubGlobal('window', { postMessage, location: { origin: 'https://fixture.invalid' } })
@@ -295,6 +338,41 @@ describe('koi dialogue observer', () => {
     session.running = false
     session.listener()
     expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'dsh/session-running', sessionId: 'running-session', requestId: 'request', running: false }), 'https://fixture.invalid')
+  })
+
+  it('stops showing a child agent as running the moment its prompt returns', async () => {
+    const postMessage = vi.fn()
+    vi.stubGlobal('window', { postMessage, location: { origin: 'https://fixture.invalid' } })
+    const session = runtimeClient('return { ok: true };')
+    session.address = 'child'
+    await session.prompt('hello', 'queue', undefined, 'request')
+    expect(runningCalls(postMessage)).toEqual([
+      expect.objectContaining({ sessionId: 'runtime-session', requestId: 'request', running: true, subAgent: true }),
+      expect.objectContaining({ sessionId: 'runtime-session', requestId: 'request', running: false, subAgent: true }),
+    ])
+  })
+
+  it('drops a finished main prompt immediately when its snapshot already reports idle', async () => {
+    const postMessage = vi.fn()
+    vi.stubGlobal('window', { postMessage, location: { origin: 'https://fixture.invalid' } })
+    const session = runtimeClient('return { ok: true };')
+    await session.prompt('hello', 'queue', undefined, 'request')
+    expect(runningCalls(postMessage)).toEqual([
+      expect.objectContaining({ sessionId: 'runtime-session', requestId: 'request', running: true, subAgent: false }),
+      expect.objectContaining({ sessionId: 'runtime-session', requestId: 'request', running: false, subAgent: false }),
+    ])
+  })
+
+  it('keeps a main prompt running until the snapshot reports idle, then clears it', async () => {
+    const postMessage = vi.fn()
+    vi.stubGlobal('window', { postMessage, location: { origin: 'https://fixture.invalid' } })
+    // The runtime flips to busy from inside the prompt, so the first subscription observation stays idle.
+    const session = runtimeClient('this.running = true; return { ok: true };')
+    await session.prompt('hello', 'queue', undefined, 'request')
+    expect(runningCalls(postMessage).filter(data => data.running === false)).toHaveLength(0)
+    session.running = false
+    session.listener()
+    expect(runningCalls(postMessage).at(-1)).toMatchObject({ sessionId: 'runtime-session', requestId: 'request', running: false })
   })
 
   it('keeps accepted messages successful if the pond observer breaks', async () => {

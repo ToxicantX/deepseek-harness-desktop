@@ -1892,3 +1892,22 @@ Remove-Item -LiteralPath 'src/conversation-replay-host-injector.ts','src/convers
 - `src/plugin-preset-compatibility.ts`：增加 `runtimeDropsCwdPromptVariable` 检测与 `removeCwdClause` 清理逻辑。
 - `tests/plugin-preset-compatibility.spec.ts`：扩展 fixture 支持运行时版本/变量注册模拟，新增向下兼容验证用例。
 - `docs/plugin-preset-compatibility.md`：补充说明此变更背景与向下兼容策略。
+
+## 2026-10-10 - Task: 修复对话编辑与重试在 DSH 0.2.1-alpha.2 等新版核心下的兼容性
+### What was done
+- 排查定位会话内「重试」与「编辑」按钮在 DSH 0.2.1-alpha.2 核心下点击失败/无响应的根因：
+  1. V3/V4 会话格式（DSH 0.1.7 起引入并在 0.2.x 延续）中，`SurfaceOp` 中的 replace 操作字段严格更名为 `{ op: 'replace', startSeq, endSeq }`；
+  2. 桌面壳宿主钩子 `src/conversation-replay-host-injector.ts` 既有逻辑中将现代格式绑定到未配置的环境变量 `DSH_DESKTOP_REPLAY_SURFACE_FORMAT=seq`，导致默认以旧版 `{ start, end }` 格式提交，触发核心严格校验报错 `session event "user/message" carries an invalid replace surfaceOp`，步骤崩溃终止。
+- 实施全自动自适应与双向向下兼容保障：
+  1. **自适应格式探测**：检查 `session` 实例的特征（是否存在 `commit()` / `toolHistory()` 或 `SESSION_FORMAT_VERSION >= 3`），自动选择 `startSeq/endSeq`；
+  2. **双向自愈降级回退**：若首选格式触发任何 `replace surfaceOp` 相关异常，在调用体内无感捕获并自动使用备用格式重试，确保极早期与最新版本运行时均可一次性自愈；
+  3. **单元测试与回归**：新增自动探测与格式回退的单元测试用例，覆盖两代协议。
+### Testing
+- `pnpm exec tsc --noEmit` 通过。
+- `pnpm exec vitest run tests/conversation-replay-adapter.spec.ts tests/conversation-replay-shell-injector.spec.ts` 31 项全部通过。
+- 针对真实 `0.2.1-alpha.2` 核心与旧版 `0.1.0-rc.7` 核心的原生脚本双向验证，消息在两代版本下均完美执行替换并重新触发模型完整流式回复。
+- `pnpm run build` 构建成功生成 `lib/` 产物。
+### Notes
+- `src/conversation-replay-host-injector.ts`：更新 `admitDesktopReplay` 增加自适应探测与双向安全降级回退。
+- `tests/conversation-replay-adapter.spec.ts`：新增自动探测现代替换协议与异常自愈回退两个测试用例。
+- `docs/conversation-edit-retry.md`：补充会话格式与替换协议自适应（向下兼容保证）说明。

@@ -20,6 +20,12 @@
 
 持久化使用原版核心已经支持的 `user/message` replacement 与完整 `sourceEventSeqs`；`source.desktopReplay` 只记录壳展示所需的回退范围，不新增必需事件类型。原版核心可重载并恢复有效模型上下文；脱离桌面壳使用原版界面时，历史展示仍遵循该界面自己的规则。
 
+
+### 会话格式与替换协议自适应（向下兼容保证）
+
+- **新版核心协议（V3/V4，包括 `0.1.7` 与 `0.2.1-alpha.2` 及更高版本）**：DSH 会话 `SurfaceOp` 中的 replace 操作字段由早期版本的 `{ op: 'replace', start, end }` 严格升级为 `{ op: 'replace', startSeq, endSeq }`。
+- **自动探测**：`admitDesktopReplay` 在未显式提供配置时，通过探测当前 `session` 实例的现代契约特征（如 `commit()`、`toolHistory()`、`SESSION_FORMAT_VERSION`），自动在新版核心下选用 `startSeq/endSeq`，在旧版核心下保持 `start/end`。
+- **异常自愈回退**：若首选格式触发运行时的 `replace surfaceOp` 校验异常，后端 hook 自动捕获并在该次调用内平滑降级为备用格式重试，确保无论是极早期历史版本还是最新发行版均可无缝重试，不中断会话。
 这是有明确检测条件的版本适配，不保证未来每个核心版本自动兼容。核心加载结构、空闲维护阶段或 replacement 行为变化时，需要更新壳侧适配；适配失效只影响编辑与重试，普通发送和新建会话继续走原版路径。
 
 可对已构建、未经定制的核心执行独立验证：`node scripts/smoke-same-session-replay.mjs D:\work\ai\deepseek-harness`。验证仅创建临时会话库，通过真实 Loader、请求入口、模型输入、JSONL 重载及实际客户端模块检查原会话语义，不打开用户会话库。

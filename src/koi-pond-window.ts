@@ -193,13 +193,31 @@ export class KoiPondWindow {
 
   setRunningSessions(sessions: Array<{ id: string; startedAt: number; projectName?: string; sessionLabel?: string; output?: string; approval?: boolean; subAgent?: boolean }>): void {
     this.runningSessions = sessions.map(session => ({ ...session }))
+    this.sendRunningSessions()
+  }
+
+  /** Drops one stuck entry so the pond stops showing it as still thinking. */
+  clearRunningSession(sessionId: string): void {
+    const remaining = this.runningSessions.filter(session => session.id !== sessionId)
+    if (remaining.length === this.runningSessions.length) return
+    this.runningSessions = remaining
+    this.sendRunningSessions()
+  }
+
+  clearAllRunningSessions(): void {
+    if (this.runningSessions.length === 0) return
+    this.runningSessions = []
+    this.sendRunningSessions()
+  }
+
+  private sendRunningSessions(): void {
     if (this.view && !this.view.webContents.isDestroyed()) this.view.webContents.send('pond:running-sessions', this.runningSessions)
   }
 
   private async publish(): Promise<void> {
     const state = await this.store.view()
     if (this.view && !this.view.webContents.isDestroyed()) this.view.webContents.send('pond:state', state)
-    if (this.view && !this.view.webContents.isDestroyed()) this.view.webContents.send('pond:running-sessions', this.runningSessions)
+    this.sendRunningSessions()
   }
 
   async stop(): Promise<void> {

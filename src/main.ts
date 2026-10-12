@@ -385,7 +385,12 @@ function createWindow(options: { utility?: 'manager' | 'repair' | 'plugin' | 'mc
   })
   window.webContents.on('did-finish-load', () => {
     sendView(window)
-    if (window === mainWindow) { syncMainMenuVisibility(); injectSkinMarket(window) }
+    if (window === mainWindow) {
+      syncMainMenuVisibility(); injectSkinMarket(window)
+      // A reloaded chat page loses every in-page prompt hook, so its stale entries must not stay on the pond.
+      runningSessions.clear()
+      publishRunningSessions()
+    }
   })
   window.webContents.on('console-message', (_event, _level, message) => {
     if (window !== mainWindow || quitting || latestView?.phase !== 'ready') return
@@ -1029,6 +1034,17 @@ function logFatalError(error: unknown): void {
   appendFileSync(join(directory, 'desktop.log'), `[${new Date().toISOString()}] ${detail}\n`, 'utf8')
 }
 
+function publishRunningSessions(): void {
+  koiPond?.setRunningSessions([...runningSessions.values()].map(({ id, startedAt, projectName, sessionLabel, output, approval, subAgent }) => ({
+    id, startedAt,
+    ...(projectName === undefined ? {} : { projectName }),
+    ...(sessionLabel === undefined ? {} : { sessionLabel }),
+    ...(output === undefined ? {} : { output }),
+    ...(approval === undefined ? {} : { approval }),
+    ...(subAgent === undefined ? {} : { subAgent }),
+  })))
+}
+
 ipcMain.on('pond:dialogue', (event, sessionId: unknown, requestId: unknown) => {
   if (!fromTrustedDshWindow(event) || event.senderFrame !== event.sender.mainFrame
     || typeof sessionId !== 'string' || typeof requestId !== 'string') return
@@ -1054,14 +1070,21 @@ ipcMain.on('pond:session-running', (event, sessionId: unknown, requestId: unknow
     current.requests.delete(requestId)
     if (current.requests.size === 0) runningSessions.delete(sessionId)
   }
-  koiPond?.setRunningSessions([...runningSessions.values()].map(({ id, startedAt, projectName, sessionLabel, output, approval, subAgent }) => ({
-    id, startedAt,
-    ...(projectName === undefined ? {} : { projectName }),
-    ...(sessionLabel === undefined ? {} : { sessionLabel }),
-    ...(output === undefined ? {} : { output }),
-    ...(approval === undefined ? {} : { approval }),
-    ...(subAgent === undefined ? {} : { subAgent }),
-  })))
+  publishRunningSessions()
+})
+
+ipcMain.on('pond:clear-running-session', (event, sessionId: unknown) => {
+  if (!fromTrustedDshWindow(event) || event.senderFrame !== event.sender.mainFrame
+    || typeof sessionId !== 'string') return
+  if (!runningSessions.delete(sessionId)) return
+  koiPond?.clearRunningSession(sessionId)
+})
+
+ipcMain.on('pond:clear-all-running-sessions', event => {
+  if (!fromTrustedDshWindow(event) || event.senderFrame !== event.sender.mainFrame) return
+  if (runningSessions.size === 0) return
+  runningSessions.clear()
+  koiPond?.clearAllRunningSessions()
 })
 
 ipcMain.on('pet:set-active-session', (event, value: unknown) => {

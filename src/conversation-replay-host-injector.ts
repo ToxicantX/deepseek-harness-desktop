@@ -9,7 +9,7 @@ import { dirname, join } from 'node:path'
  */
 export async function admitDesktopReplay(
   agent: any, message: any, targetSeq: number,
-  modernSurfaceOp = process.env.DSH_DESKTOP_REPLAY_SURFACE_FORMAT === 'seq',
+  modernSurfaceOp?: boolean,
 ): Promise<void> {
   if (typeof agent.runMaintenance !== 'function' || typeof agent.whenIdle !== 'function') {
     throw new Error('当前 Runtime 不支持原会话重试维护阶段')
@@ -39,18 +39,35 @@ export async function admitDesktopReplay(
       }
       const original = session.append
       const ownDescriptor = Object.getOwnPropertyDescriptor(session, 'append')
+      const detectModern = () => {
+        if (process.env.DSH_DESKTOP_REPLAY_SURFACE_FORMAT === 'seq') return true
+        if (process.env.DSH_DESKTOP_REPLAY_SURFACE_FORMAT === 'legacy') return false
+        if (typeof (session as any)?.commit === 'function' || typeof (session as any)?.toolHistory === 'function') return true
+        const formatVersion = (session?.constructor as any)?.SESSION_FORMAT_VERSION
+        if (typeof formatVersion === 'number') return formatVersion >= 3
+        return false
+      }
+      let isModern = typeof modernSurfaceOp === 'boolean' ? modernSurfaceOp : detectModern()
+      const buildOptions = (targetOptions: any, useModern: boolean) => ({
+        ...targetOptions,
+        surfaceOp: useModern
+          ? { op: 'replace', startSeq: targetSeq, endSeq: sourceEventSeqs.at(-1) }
+          : { op: 'replace', start: targetSeq, end: sourceEventSeqs.at(-1) },
+        sourceEventSeqs,
+      })
       const wrapped = function (this: any, type: string, data: any, options: any) {
         if (type !== 'user/message' || data.id !== replacement.id) return original.call(this, type, data, options)
         cleanup()
         // Commit through the original validator. No history changes if pre-step
         // admission drops the message or replacement validation rejects.
-        return original.call(this, type, data, {
-          ...options,
-          surfaceOp: modernSurfaceOp
-            ? { op: 'replace', startSeq: targetSeq, endSeq: sourceEventSeqs.at(-1) }
-            : { op: 'replace', start: targetSeq, end: sourceEventSeqs.at(-1) },
-          sourceEventSeqs,
-        })
+        try {
+          return original.call(this, type, data, buildOptions(options, isModern))
+        } catch (error) {
+          if (error instanceof Error && error.message.includes('replace surfaceOp')) {
+            return original.call(this, type, data, buildOptions(options, !isModern))
+          }
+          throw error
+        }
       }
       cleanup = () => {
         if (session.append !== wrapped) return

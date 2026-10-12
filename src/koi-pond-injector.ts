@@ -84,6 +84,7 @@ export function injectKoiPondDialogue(source: string): { source: string; changed
           releaseRunning = undefined;
           if (typeof release === "function") release();
         };
+        let promptSettled = false;
         notifyRunning(true, currentOutput() || "正在生成输出…");
         if (typeof this.subscribe === "function" && typeof this.getSnapshot === "function") {
           let observedRunning = false;
@@ -93,7 +94,7 @@ export function injectKoiPondDialogue(source: string): { source: string; changed
             if (active) {
               observedRunning = true;
               notifyRunning(true, currentOutput() || "正在生成输出…");
-            } else if (observedRunning) {
+            } else if (observedRunning || promptSettled) {
               notifyRunning(false);
               stopRunning();
             }
@@ -107,15 +108,25 @@ export function injectKoiPondDialogue(source: string): { source: string; changed
         try {
           result = await this.__dshPondOriginalPrompt(...args);
         } catch (error) {
+          promptSettled = true;
           notifyRunning(false, "执行失败");
           stopRunning();
           throw error;
         }
+        promptSettled = true;
         if (result?.ok !== true) {
           notifyRunning(false, result?.error?.message || "已完成");
           stopRunning();
-        } else if (releaseRunning === undefined) {
+        } else if (this.address !== void 0) {
           notifyRunning(false);
+          stopRunning();
+        } else {
+          let stillRunning = false;
+          try { stillRunning = typeof this.getSnapshot === "function" && this.getSnapshot()?.running === true; } catch {}
+          if (!stillRunning) {
+            notifyRunning(false);
+            stopRunning();
+          }
         }
         try {
           if (result?.ok === true && this.address === void 0) {
