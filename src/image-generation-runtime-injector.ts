@@ -101,12 +101,24 @@ const openAIImageGenerationsApi = {
 				...customHeaders
 			};
 
-			const body = JSON.stringify({
-				model: model.id,
-				prompt: prompt,
-				n: 1,
-				response_format: "b64_json"
-			});
+			const isAgnes = model.id.toLowerCase().includes("agnes") || base.toLowerCase().includes("agnes");
+			const body = isAgnes
+				? JSON.stringify({
+						model: model.id,
+						prompt: prompt,
+						size: "1024x1024",
+						return_base64: true,
+						extra_body: {
+							response_format: "b64_json"
+						}
+				  })
+				: JSON.stringify({
+						model: model.id,
+						prompt: prompt,
+						size: "1024x1024",
+						n: 1,
+						response_format: "b64_json"
+				  });
 
 			try {
 				const res = await fetch(url, {
