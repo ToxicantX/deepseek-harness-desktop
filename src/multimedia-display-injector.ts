@@ -16,15 +16,12 @@ export function detectMediaType(src: string): MediaType {
   return 'unknown'
 }
 
-export function enhanceMultimediaElements(container: HTMLElement | Document = document): number {
-  let count = 0
-
-  // 限制扫描范围或全局目标
-  const isHtmlElement = typeof HTMLElement !== 'undefined' && container instanceof HTMLElement
-  const root = isHtmlElement ? container : (container as any).body || (container as any).documentElement || (container as any)
+export function enhanceMultimediaElements(container?: any): number {
+  if (typeof document === 'undefined') return 0
+  const root = container || document.body || document.documentElement
   if (!root) return 0
 
-  // 1. 查找超链接，如果是音视频格式则转换为内嵌播放卡片（避免重复处理）
+  let count = 0
   const linkList = root.querySelectorAll ? Array.from(root.querySelectorAll('a[href]:not([data-dsh-media-enhanced])')) : []
   linkList.forEach((el: any) => {
     const a = el as HTMLAnchorElement
@@ -40,7 +37,7 @@ export function enhanceMultimediaElements(container: HTMLElement | Document = do
       header.className = 'dsh-multimedia-header'
       header.textContent = mediaType === 'audio' ? '🎵 音频播放' : '🎬 视频播放'
 
-      let player: HTMLElement
+      let player: any
       if (mediaType === 'audio') {
         const audio = document.createElement('audio')
         audio.controls = true
@@ -76,12 +73,10 @@ export function enhanceMultimediaElements(container: HTMLElement | Document = do
     }
   })
 
-  // 2. 增强图片展示：支持点击灯箱放大预览（排除 a 标签包裹的大图或小于等于24px的微缩图标/头像）
   const imageList = root.querySelectorAll ? Array.from(root.querySelectorAll('img:not([data-dsh-media-lightbox])')) : []
   imageList.forEach((el: any) => {
     const img = el as HTMLImageElement
     img.setAttribute('data-dsh-media-lightbox', 'processed')
-    // 排除特定微缩图标或未加载图
     if (img.closest && img.closest('a') !== null) return
 
     img.style.cursor = 'zoom-in'
@@ -95,7 +90,8 @@ export function enhanceMultimediaElements(container: HTMLElement | Document = do
   return count
 }
 
-export function showImageLightbox(src: string, alt: string): HTMLElement {
+export function showImageLightbox(src: string, alt: string): HTMLElement | null {
+  if (typeof document === 'undefined') return null
   const existing = document.getElementById('dsh-media-lightbox-overlay')
   if (existing) existing.remove()
 
@@ -155,7 +151,9 @@ export function showImageLightbox(src: string, alt: string): HTMLElement {
   }
   document.addEventListener('keydown', keyHandler)
 
-  document.body.appendChild(overlay)
+  if (document.body) {
+    document.body.appendChild(overlay)
+  }
   return overlay
 }
 
@@ -225,36 +223,179 @@ export const MULTIMEDIA_STYLES = `
 }
 `
 
-export function installMultimediaDisplayHook(cssStyles: string = MULTIMEDIA_STYLES): void {
-  const globalObject = globalThis as any
-  if (globalObject.__dshDesktopMultimediaDisplayHookInstalled) return
-  globalObject.__dshDesktopMultimediaDisplayHookInstalled = true
+export const INSTALL_MULTIMEDIA_DISPLAY_SOURCE = `(function () {
+  const globalObject = globalThis;
+  if (globalObject.__dshDesktopMultimediaDisplayHookInstalled) return;
+  globalObject.__dshDesktopMultimediaDisplayHookInstalled = true;
+
+  const AUDIO_EXT_REGEX = /\\.(mp3|wav|ogg|m4a|aac|flac)(\\?[^#]*)?(#.*)?$/i;
+  const VIDEO_EXT_REGEX = /\\.(mp4|webm|mov|m4v|mkv|ogv)(\\?[^#]*)?(#.*)?$/i;
+  const IMAGE_EXT_REGEX = /\\.(png|jpe?g|gif|webp|svg|bmp)(\\?[^#]*)?(#.*)?$/i;
+
+  function detectMediaType(src) {
+    const url = (src || '').trim();
+    if (!url) return 'unknown';
+    if (url.startsWith('data:audio/')) return 'audio';
+    if (url.startsWith('data:video/')) return 'video';
+    if (url.startsWith('data:image/')) return 'image';
+    if (AUDIO_EXT_REGEX.test(url)) return 'audio';
+    if (VIDEO_EXT_REGEX.test(url)) return 'video';
+    if (IMAGE_EXT_REGEX.test(url)) return 'image';
+    return 'unknown';
+  }
+
+  function showImageLightbox(src, alt) {
+    const existing = document.getElementById('dsh-media-lightbox-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'dsh-media-lightbox-overlay';
+    overlay.className = 'dsh-lightbox-overlay';
+
+    const img = document.createElement('img');
+    img.src = src;
+    img.alt = alt || 'Preview';
+    img.className = 'dsh-lightbox-img';
+
+    const toolbar = document.createElement('div');
+    toolbar.className = 'dsh-lightbox-toolbar';
+
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.textContent = '复制链接';
+    copyBtn.className = 'dsh-lightbox-btn';
+    copyBtn.onclick = (e) => {
+      e.stopPropagation();
+      navigator.clipboard?.writeText(src);
+      copyBtn.textContent = '已复制！';
+      setTimeout(() => { copyBtn.textContent = '复制链接'; }, 1500);
+    };
+
+    const openBtn = document.createElement('button');
+    openBtn.type = 'button';
+    openBtn.textContent = '新窗口打开';
+    openBtn.className = 'dsh-lightbox-btn';
+    openBtn.onclick = (e) => {
+      e.stopPropagation();
+      window.open(src, '_blank');
+    };
+
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.textContent = '关闭 (ESC)';
+    closeBtn.className = 'dsh-lightbox-btn dsh-lightbox-close';
+    closeBtn.onclick = () => overlay.remove();
+
+    toolbar.appendChild(copyBtn);
+    toolbar.appendChild(openBtn);
+    toolbar.appendChild(closeBtn);
+
+    overlay.appendChild(img);
+    overlay.appendChild(toolbar);
+
+    overlay.onclick = () => overlay.remove();
+    img.onclick = (e) => e.stopPropagation();
+
+    const keyHandler = (e) => {
+      if (e.key === 'Escape') {
+        overlay.remove();
+        document.removeEventListener('keydown', keyHandler);
+      }
+    };
+    document.addEventListener('keydown', keyHandler);
+
+    if (document.body) document.body.appendChild(overlay);
+  }
+
+  function enhanceMultimediaElements(container) {
+    const root = container || document.body || document.documentElement;
+    if (!root) return;
+
+    const linkList = root.querySelectorAll ? Array.from(root.querySelectorAll('a[href]:not([data-dsh-media-enhanced])')) : [];
+    linkList.forEach((a) => {
+      const href = a.getAttribute('href') || '';
+      const mediaType = detectMediaType(href);
+      if (mediaType === 'audio' || mediaType === 'video') {
+        a.setAttribute('data-dsh-media-enhanced', 'true');
+        const card = document.createElement('div');
+        card.className = 'dsh-multimedia-card';
+        card.setAttribute('data-media-type', mediaType);
+
+        const header = document.createElement('div');
+        header.className = 'dsh-multimedia-header';
+        header.textContent = mediaType === 'audio' ? '🎵 音频播放' : '🎬 视频播放';
+
+        const player = document.createElement(mediaType);
+        player.controls = true;
+        player.preload = 'metadata';
+        player.src = href;
+        player.className = 'dsh-multimedia-player';
+
+        const footer = document.createElement('div');
+        footer.className = 'dsh-multimedia-footer';
+        const originalLink = document.createElement('a');
+        originalLink.href = href;
+        originalLink.target = '_blank';
+        originalLink.rel = 'noreferrer noopener';
+        originalLink.textContent = a.textContent?.trim() || '打开原始媒体链接';
+        footer.appendChild(originalLink);
+
+        card.appendChild(header);
+        card.appendChild(player);
+        card.appendChild(footer);
+
+        if (a.parentNode) {
+          a.parentNode.insertBefore(card, a.nextSibling);
+        }
+      }
+    });
+
+    const imageList = root.querySelectorAll ? Array.from(root.querySelectorAll('img:not([data-dsh-media-lightbox])')) : [];
+    imageList.forEach((img) => {
+      img.setAttribute('data-dsh-media-lightbox', 'processed');
+      if (img.closest && img.closest('a') !== null) return;
+
+      img.style.cursor = 'zoom-in';
+      img.addEventListener('click', (e) => {
+        e?.stopPropagation?.();
+        showImageLightbox(img.src, img.alt);
+      });
+    });
+  }
 
   const init = () => {
-    const targetHead = document.head || document.getElementsByTagName('head')[0] || document.documentElement
+    const targetHead = document.head || document.getElementsByTagName('head')[0] || document.documentElement;
     if (targetHead && !document.getElementById('dsh-multimedia-display-style')) {
-      const styleEl = document.createElement('style')
-      styleEl.id = 'dsh-multimedia-display-style'
-      styleEl.textContent = cssStyles
-      targetHead.appendChild(styleEl)
+      const styleEl = document.createElement('style');
+      styleEl.id = 'dsh-multimedia-display-style';
+      styleEl.textContent = ` + JSON.stringify(MULTIMEDIA_STYLES) + `;
+      targetHead.appendChild(styleEl);
     }
 
-    const targetBody = document.body || document.documentElement
+    const targetBody = document.body || document.documentElement;
     if (targetBody) {
       const observer = new MutationObserver(() => {
-        enhanceMultimediaElements()
-      })
+        enhanceMultimediaElements(targetBody);
+      });
       observer.observe(targetBody, {
         childList: true,
         subtree: true
-      })
-      enhanceMultimediaElements()
+      });
+      enhanceMultimediaElements(targetBody);
     }
-  }
+  };
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init, { once: true })
+    document.addEventListener('DOMContentLoaded', init, { once: true });
   } else {
-    init()
+    init();
+  }
+})()`
+
+export function installMultimediaDisplayHook(scriptSource: string = INSTALL_MULTIMEDIA_DISPLAY_SOURCE): void {
+  try {
+    Function(scriptSource)()
+  } catch (err) {
+    console.error('桌面壳多媒体内容展示与播放注入失败', err)
   }
 }

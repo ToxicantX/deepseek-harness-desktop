@@ -5,7 +5,7 @@ import { injectDesktopReplayClient, installDesktopReplayClientHook } from './con
 import { injectKoiPondDialogue, installKoiPondDialogueHook } from './koi-pond-injector.ts'
 import { injectCustomProviderUserAgentFactorySource, installCustomProviderUserAgentHook } from './custom-provider-user-agent-injector.ts'
 import { injectCustomProviderMultimediaFactorySource, installCustomProviderMultimediaHook } from './custom-provider-multimedia-injector.ts'
-import { MULTIMEDIA_STYLES, installMultimediaDisplayHook } from './multimedia-display-injector.ts'
+import { INSTALL_MULTIMEDIA_DISPLAY_SOURCE, installMultimediaDisplayHook } from './multimedia-display-injector.ts'
 import { injectOpenInAppFactorySource, installOpenInAppCompatibilityHook } from './open-in-app-compatibility.ts'
 import { installUsageMonitor } from './usage-monitor-renderer.ts'
 import { installKoiPondToggle } from './koi-pond-toggle.ts'
@@ -48,7 +48,7 @@ runIsolatedShellInjection('桌面壳多媒体模型与生图协议注入启动�
 runIsolatedShellInjection('桌面壳多媒体内容展示与播放注入启动失败', () => {
   contextBridge.executeInMainWorld({
     func: installMultimediaDisplayHook,
-    args: [MULTIMEDIA_STYLES],
+    args: [INSTALL_MULTIMEDIA_DISPLAY_SOURCE],
   })
 })
 runIsolatedShellInjection('桌面壳文件资源管理器兼容注入启动失败', () => {

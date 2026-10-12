@@ -3,14 +3,17 @@ import { registerHooks, type LoadFnOutput, type ModuleHooks } from 'node:module'
 const PI_AI_ENTRY_SUFFIX = '/node_modules/@deepseek-ai/dsh-llm-pi-ai/lib/index.js'
 
 export function extractPromptFromContext(context: any): string {
-  if (!context || !Array.isArray(context.messages)) return ''
-  for (let i = context.messages.length - 1; i >= 0; i--) {
-    const msg = context.messages[i]
+  if (!context) return ''
+  const msgs = Array.isArray(context.messages) ? context.messages : []
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const msg = msgs[i]
     if (msg?.role === 'user') {
       if (typeof msg.content === 'string') return msg.content
       if (Array.isArray(msg.content)) {
-        const textPart = msg.content.find((p: any) => p?.type === 'text' && typeof p.text === 'string')
-        if (textPart) return textPart.text
+        const textParts = msg.content
+          .filter((p: any) => p?.type === 'text' && typeof p.text === 'string')
+          .map((p: any) => p.text)
+        if (textParts.length > 0) return textParts.join('\n')
       }
     }
   }
@@ -57,14 +60,17 @@ const openAIImageGenerationsApi = {
 	streamSimple: (model, context, options) => {
 		async function* generator() {
 			const prompt = (() => {
-				if (!context || !Array.isArray(context.messages)) return "";
-				for (let i = context.messages.length - 1; i >= 0; i--) {
-					const msg = context.messages[i];
+				if (!context) return "";
+				const msgs = Array.isArray(context.messages) ? context.messages : [];
+				for (let i = msgs.length - 1; i >= 0; i--) {
+					const msg = msgs[i];
 					if (msg?.role === "user") {
 						if (typeof msg.content === "string") return msg.content;
 						if (Array.isArray(msg.content)) {
-							const textPart = msg.content.find((p) => p?.type === "text" && typeof p.text === "string");
-							if (textPart) return textPart.text;
+							const textParts = msg.content
+								.filter((p) => p?.type === "text" && typeof p.text === "string")
+								.map((p) => p.text);
+							if (textParts.length > 0) return textParts.join("\\n");
 						}
 					}
 				}
@@ -74,19 +80,25 @@ const openAIImageGenerationsApi = {
 			const startMessage = {
 				role: "assistant",
 				content: [],
-				usage: { input: 0, output: 0, totalTokens: 0 }
+				api: model.api,
+				provider: model.provider,
+				model: model.id,
+				usage: { input: 0, output: 0, totalTokens: 0, cacheRead: 0, cacheWrite: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+				stopReason: "pending",
+				timestamp: Date.now()
 			};
 			yield { type: "start", partial: startMessage };
 
-			const rawBase = (model.baseUrl || model.provider?.baseURL || "").trim();
+			const rawBase = (model.baseUrl || model.baseURL || model.provider?.baseURL || "").trim();
 			const base = rawBase.replace(/\\/+$/, "");
 			const url = base.endsWith("/v1") ? (base + "/images/generations") : (base ? base + "/v1/images/generations" : "/v1/images/generations");
 			
-			const apiKey = options?.apiKey || model.provider?.apiKey || "";
+			const apiKey = options?.apiKey || model.apiKey || model.provider?.apiKey || "";
+			const customHeaders = options?.headers || model.headers || {};
 			const headers = {
 				"content-type": "application/json",
 				...(apiKey ? { "authorization": "Bearer " + apiKey } : {}),
-				...(options?.headers || {})
+				...customHeaders
 			};
 
 			const body = JSON.stringify({
@@ -109,13 +121,23 @@ const openAIImageGenerationsApi = {
 					try {
 						const parsed = JSON.parse(errText);
 						if (parsed.error?.message) errMsg = parsed.error.message;
+						else if (parsed.message) errMsg = parsed.message;
 					} catch {}
+					const formattedErr = "生图接口请求失败 (" + res.status + "): " + errMsg;
+					yield { type: "text_start", contentIndex: 0 };
+					yield { type: "text_delta", contentIndex: 0, delta: formattedErr };
+					yield { type: "text_end", contentIndex: 0, content: formattedErr };
 					yield {
-						type: "error",
-						error: {
-							message: "生图接口请求失败 (" + res.status + "): " + errMsg,
-							stopReason: "error",
-							usage: { input: 0, output: 0, totalTokens: 0 }
+						type: "done",
+						message: {
+							role: "assistant",
+							content: [{ type: "text", text: formattedErr }],
+							api: model.api,
+							provider: model.provider,
+							model: model.id,
+							stopReason: "stop",
+							usage: { input: 0, output: 0, totalTokens: 0, cacheRead: 0, cacheWrite: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+							timestamp: Date.now()
 						}
 					};
 					return;
@@ -123,12 +145,21 @@ const openAIImageGenerationsApi = {
 				const json = await res.json();
 				const images = Array.isArray(json.data) ? json.data : (Array.isArray(json.images) ? json.images : []);
 				if (images.length === 0) {
+					const noImageMsg = "生图模型未返回图像数据";
+					yield { type: "text_start", contentIndex: 0 };
+					yield { type: "text_delta", contentIndex: 0, delta: noImageMsg };
+					yield { type: "text_end", contentIndex: 0, content: noImageMsg };
 					yield {
-						type: "error",
-						error: {
-							message: "生图模型未返回图像数据",
-							stopReason: "error",
-							usage: { input: 0, output: 0, totalTokens: 0 }
+						type: "done",
+						message: {
+							role: "assistant",
+							content: [{ type: "text", text: noImageMsg }],
+							api: model.api,
+							provider: model.provider,
+							model: model.id,
+							stopReason: "stop",
+							usage: { input: 0, output: 0, totalTokens: 0, cacheRead: 0, cacheWrite: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+							timestamp: Date.now()
 						}
 					};
 					return;
@@ -153,8 +184,12 @@ const openAIImageGenerationsApi = {
 					message: {
 						role: "assistant",
 						content: [{ type: "text", text: markdown }],
+						api: model.api,
+						provider: model.provider,
+						model: model.id,
 						stopReason: "stop",
-						usage: { input: 0, output: 0, totalTokens: 0 }
+						usage: { input: 0, output: 0, totalTokens: 0, cacheRead: 0, cacheWrite: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+						timestamp: Date.now()
 					}
 				};
 			} catch (err) {
@@ -162,19 +197,34 @@ const openAIImageGenerationsApi = {
 					yield {
 						type: "error",
 						error: {
-							message: "Aborted",
+							role: "assistant",
+							content: [],
+							api: model.api,
+							provider: model.provider,
+							model: model.id,
+							errorMessage: "Aborted",
 							stopReason: "aborted",
-							usage: { input: 0, output: 0, totalTokens: 0 }
+							usage: { input: 0, output: 0, totalTokens: 0, cacheRead: 0, cacheWrite: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+							timestamp: Date.now()
 						}
 					};
 					return;
 				}
+				const errText = "生图请求异常: " + (err?.message || String(err));
+				yield { type: "text_start", contentIndex: 0 };
+				yield { type: "text_delta", contentIndex: 0, delta: errText };
+				yield { type: "text_end", contentIndex: 0, content: errText };
 				yield {
-					type: "error",
-					error: {
-						message: "生图请求异常: " + (err?.message || String(err)),
-						stopReason: "error",
-						usage: { input: 0, output: 0, totalTokens: 0 }
+					type: "done",
+					message: {
+						role: "assistant",
+						content: [{ type: "text", text: errText }],
+						api: model.api,
+						provider: model.provider,
+						model: model.id,
+						stopReason: "stop",
+						usage: { input: 0, output: 0, totalTokens: 0, cacheRead: 0, cacheWrite: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+						timestamp: Date.now()
 					}
 				};
 			}
@@ -194,11 +244,9 @@ export function promoteImageGenerationRuntimeInput(source: string): ImageGenerat
   if (!source.includes(protocolsSearch)) return { source, changed: false }
 
   let transformed = source
-  // 1. 注入 factory 函数 () => openAIImageGenerationsApi，解决 "factory is not a function"
   const injectedApiDefinition = `${OPENAI_IMAGE_GENERATIONS_API_SOURCE}\nconst PROTOCOLS = {\n\t"openai-image-generations": () => openAIImageGenerationsApi,`
   transformed = transformed.replace(protocolsSearch, injectedApiDefinition)
 
-  // 2. 注入 LISTABLE_PROTOCOLS，支持选择“OpenAI 图像生成”时点击“获取可用模型”
   const listableSearch = 'const LISTABLE_PROTOCOLS = new Set(['
   if (transformed.includes(listableSearch)) {
     const injectedListable = `const LISTABLE_PROTOCOLS = new Set([\n\t"openai-image-generations",`
