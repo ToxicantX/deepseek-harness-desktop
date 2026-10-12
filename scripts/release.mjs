@@ -107,8 +107,8 @@ if (skipTests) {
 } else {
   console.log("[3/6] 执行类型检查与单元测试...");
   try {
-    run("npx tsc --noEmit", { env: { ...process.env, CI: "true" } });
-    run("npx vitest run", { env: { ...process.env, CI: "true" } });
+    run("pnpm run typecheck", { env: { ...process.env, CI: "true" } });
+    run("pnpm test", { env: { ...process.env, CI: "true" } });
     console.log("      验证全部通过！");
   } catch (e) {
     console.error("[ERROR] 校验或测试未通过，已终止发版流程。");
