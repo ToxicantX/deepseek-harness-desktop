@@ -230,19 +230,31 @@ export function installMultimediaDisplayHook(cssStyles: string = MULTIMEDIA_STYL
   if (globalObject.__dshDesktopMultimediaDisplayHookInstalled) return
   globalObject.__dshDesktopMultimediaDisplayHookInstalled = true
 
-  const styleEl = document.createElement('style')
-  styleEl.textContent = cssStyles
-  document.head.appendChild(styleEl)
+  const init = () => {
+    const targetHead = document.head || document.getElementsByTagName('head')[0] || document.documentElement
+    if (targetHead && !document.getElementById('dsh-multimedia-display-style')) {
+      const styleEl = document.createElement('style')
+      styleEl.id = 'dsh-multimedia-display-style'
+      styleEl.textContent = cssStyles
+      targetHead.appendChild(styleEl)
+    }
 
-  // 监听 DOM 树变化并增强元素
-  const observer = new MutationObserver(() => {
-    enhanceMultimediaElements()
-  })
+    const targetBody = document.body || document.documentElement
+    if (targetBody) {
+      const observer = new MutationObserver(() => {
+        enhanceMultimediaElements()
+      })
+      observer.observe(targetBody, {
+        childList: true,
+        subtree: true
+      })
+      enhanceMultimediaElements()
+    }
+  }
 
-  observer.observe(document.body || document.documentElement, {
-    childList: true,
-    subtree: true
-  })
-
-  enhanceMultimediaElements()
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init, { once: true })
+  } else {
+    init()
+  }
 }

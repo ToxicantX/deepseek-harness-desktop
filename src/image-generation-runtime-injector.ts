@@ -194,8 +194,16 @@ export function promoteImageGenerationRuntimeInput(source: string): ImageGenerat
   if (!source.includes(protocolsSearch)) return { source, changed: false }
 
   let transformed = source
-  const injectedApiDefinition = `${OPENAI_IMAGE_GENERATIONS_API_SOURCE}\nconst PROTOCOLS = {\n\t"openai-image-generations": openAIImageGenerationsApi,`
+  // 1. 注入 factory 函数 () => openAIImageGenerationsApi，解决 "factory is not a function"
+  const injectedApiDefinition = `${OPENAI_IMAGE_GENERATIONS_API_SOURCE}\nconst PROTOCOLS = {\n\t"openai-image-generations": () => openAIImageGenerationsApi,`
   transformed = transformed.replace(protocolsSearch, injectedApiDefinition)
+
+  // 2. 注入 LISTABLE_PROTOCOLS，支持选择“OpenAI 图像生成”时点击“获取可用模型”
+  const listableSearch = 'const LISTABLE_PROTOCOLS = new Set(['
+  if (transformed.includes(listableSearch)) {
+    const injectedListable = `const LISTABLE_PROTOCOLS = new Set([\n\t"openai-image-generations",`
+    transformed = transformed.replace(listableSearch, injectedListable)
+  }
 
   return { source: transformed, changed: transformed !== source }
 }
