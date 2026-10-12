@@ -4,6 +4,8 @@ import { SUBAGENT_MODEL_BADGE_SOURCE, injectSubagentModelBadgeFactorySource, ins
 import { injectDesktopReplayClient, installDesktopReplayClientHook } from './conversation-replay-client-injector.ts'
 import { injectKoiPondDialogue, installKoiPondDialogueHook } from './koi-pond-injector.ts'
 import { injectCustomProviderUserAgentFactorySource, installCustomProviderUserAgentHook } from './custom-provider-user-agent-injector.ts'
+import { injectCustomProviderMultimediaFactorySource, installCustomProviderMultimediaHook } from './custom-provider-multimedia-injector.ts'
+import { MULTIMEDIA_STYLES, installMultimediaDisplayHook } from './multimedia-display-injector.ts'
 import { injectOpenInAppFactorySource, installOpenInAppCompatibilityHook } from './open-in-app-compatibility.ts'
 import { installUsageMonitor } from './usage-monitor-renderer.ts'
 import { installKoiPondToggle } from './koi-pond-toggle.ts'
@@ -35,6 +37,18 @@ runIsolatedShellInjection('桌面壳自定义提供方 User-Agent 注入启动�
   contextBridge.executeInMainWorld({
     func: installCustomProviderUserAgentHook,
     args: [injectCustomProviderUserAgentFactorySource.toString()],
+  })
+})
+runIsolatedShellInjection('桌面壳多媒体模型与生图协议注入启动失败', () => {
+  contextBridge.executeInMainWorld({
+    func: installCustomProviderMultimediaHook,
+    args: [injectCustomProviderMultimediaFactorySource.toString()],
+  })
+})
+runIsolatedShellInjection('桌面壳多媒体内容展示与播放注入启动失败', () => {
+  contextBridge.executeInMainWorld({
+    func: installMultimediaDisplayHook,
+    args: [MULTIMEDIA_STYLES],
   })
 })
 runIsolatedShellInjection('桌面壳文件资源管理器兼容注入启动失败', () => {

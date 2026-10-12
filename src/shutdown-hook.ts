@@ -1,4 +1,5 @@
 import { installCustomProviderImageHook } from './custom-provider-image-injector.ts'
+import { installImageGenerationRuntimeHook } from './image-generation-runtime-injector.ts'
 import { installDesktopReplayHostHook } from './conversation-replay-host-injector.ts'
 import { installRuntimeToolCompatibility } from './runtime-tool-compatibility.ts'
 import type { Serializable } from 'node:child_process'
@@ -39,6 +40,7 @@ export function installShutdownHook(target: ShutdownProcess): void {
 }
 
 installCustomProviderImageHook()
+installImageGenerationRuntimeHook()
 installDesktopReplayHostHook()
 installRuntimeToolCompatibility()
 if (process.send !== undefined) installShutdownHook(process)
