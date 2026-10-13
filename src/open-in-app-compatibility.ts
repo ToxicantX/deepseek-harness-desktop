@@ -34,7 +34,13 @@ export function injectOpenInAppFactorySource(source: string): OpenInAppTransform
   const injected = [
     `${indentation}const __dshDesktopOpenExplorer = globalThis.dshDesktopOpenInApp?.openExplorer;`,
     `${indentation}if (appId === "explorer" && typeof __dshDesktopOpenExplorer === "function") {`,
-    `${indentation}\tawait __dshDesktopOpenExplorer(path);`,
+    `${indentation}\ttry {`,
+    `${indentation}\t\tawait __dshDesktopOpenExplorer(path);`,
+    `${indentation}\t\tthis.operation.set({ phase: "idle", path });`,
+    `${indentation}\t} catch (error) {`,
+    `${indentation}\t\tthis.operation.set({ phase: "error", path });`,
+    `${indentation}\t\tthrow error;`,
+    `${indentation}\t}`,
     `${indentation}\treturn;`,
     `${indentation}}`,
   ].join('\n') + '\n'

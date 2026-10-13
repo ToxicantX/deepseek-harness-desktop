@@ -211,6 +211,13 @@ SignPath Foundation 批准并启用集成后，符合条件的 Shell Release 将
 
 ## 版本与更新说明
 
+### 2026-10-13 11:45 - 修复会话顶部“打开工作区目录”按钮点击后卡在 busy 无法再次点击的问题
+
+- **修复：文件资源管理器（Explorer）打开后状态机未复位 Bug**：
+  - 问题定位：在会话顶部右上角的“在应用中打开”分割按钮中，点击打开系统文件资源管理器时，桌面壳的兼容注入层拦截了 `appId === "explorer"` 请求并调用 Electron 主进程的 `shell.openPath()` 打开本机文件夹；但由于在调用前组件控制器已将 `this.operation` 设为 `phase: "busy"`，而注入逻辑在调用完毕后直接 `return`，未将状态复位为 `phase: "idle"`（抛错时也未置为 `phase: "error"`），导致前端按钮 `disabled` 状态被永久锁定，后续再次点击均被 `busy` 保护拦截。
+  - 修复实现：在 `src/open-in-app-compatibility.ts` 中将 Explorer 拦截逻辑包裹在 `try / catch` 中，调用成功后重置 `this.operation.set({ phase: "idle", path })`，失败时设置 `this.operation.set({ phase: "error", path })` 并重新抛出异常以供 Toast 提示；同时同步更新构建产物与根目录 `preload.cjs`。
+  - 测试覆盖：在 `tests/open-in-app-compatibility.spec.ts` 补充单元测试，验证首次打开后 `phase` 恢复为 `idle` 且支持连续多次点击，以及异常情况下正确进入 `error` 阶段。
+
 ### 2026-10-13 08:30 - 全流程视频生成能力扩展与提示词清洗
 
 - **新增：视频生成（Agnes Video 2.5 / OpenAI Videos 协议）端到端支持**：
