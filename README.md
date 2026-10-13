@@ -211,6 +211,27 @@ SignPath Foundation 批准并启用集成后，符合条件的 Shell Release 将
 
 ## 版本与更新说明
 
+### 2026-10-13 08:30 - 全流程视频生成能力扩展与提示词清洗
+
+- **新增：视频生成（Agnes Video 2.5 / OpenAI Videos 协议）端到端支持**：
+  - 支持在自定义生图/多媒体提供商中配置视频模型（如 `agnes-video-2.5`、`agnes-video-2.5-flash`）；
+  - 自动识别视频生成请求，命中 Sub2API 管理 Key 时通过后台调度获取活跃上游凭证并定向至视频端点（`POST /v1/videos`）；
+  - 实现了基于 `video_id` 与 `model_name` 的异步轮询追踪器，在会话中以流式进度实时反馈渲染百分比（`⏳ 渲染进度: XX%`），并在生成完成后自动生成视频 Markdown 播放链接；
+  - 保持与原有 OpenAI 兼容图像生成接口（`/v1/images/generations`）100% 隔离与共存，图像与视频模型互不干扰。
+- **新增：对话区域视频播放与多媒体预览增强**：
+  - 在桌面壳 DOM 监听层全面支持视频 Markdown（`[视频名称](video.mp4)`、`<video>` 及包含视频扩展名的媒体链接），自动原地渲染为可交互 HTML5 视频播放卡片，支持直接播放、倍速/控制条与一键复制源视频链接。
+- **修复：提示词系统残留（`<system-reminder>`）过滤**：
+  - 修复多媒体生成提取用户提示词时夹带 DSH 技能变更注入的 `<system-reminder>` 冗余信息的 Bug，确保发给生图/生视频上游的 prompt 纯净准确，且 Markdown alt 标题整洁美观。
+- **完全遵循非侵入式壳注入原则**：
+  - 所有前端界面适配与后端运行时拦截均通过桌面壳 `executeInMainWorld` 及 Node.js `--import` 运行时钩子实现，未侵入或修改任何 DSH 核心源码。
+
+### 2026-10-13 00:40
+
+- 新增：自定义模型配置支持填写 Sub2API 管理 Key（英文/中文文案 customSub2apiAdminKey），CustomProviderCard 与 ProviderEditor 均可读写 headers["x-sub2api-admin-key"]，并新增 password 输入框（占位文案：可选，用于自动调度生图上游）。
+- 新增：openai-image-generations 生图协议 Sub2API 透明桥接——从请求头/模型头/环境变量（SUB2API_ADMIN_KEY）解析管理 Key，命中 pickstar.asia 或 agnes 目标时通过 /api/v1/admin/groups 与 /api/v1/admin/accounts 自动发现 active 账号及其上游凭证，切换 targetUrl 至上游真实生图地址（默认 https://apihub.agnes-ai.com/v1/images/generations），携带上游真实 Key 与简化 body（model: agnes-image-2.5-flash）；未配置管理 Key 时 agnes 模型给出直连提示。
+- 验证：pnpm run build 通过，无 TypeScript 编译错误；git diff 自检确认改动仅涉及 src/custom-provider-user-agent-injector.ts 与 src/image-generation-runtime-injector.ts。
+
+
 ### 2026-10-12 17:54 - 生图模型协议支持与多媒体展示增强
 
 - **自定义提供商增加生图协议（OpenAI Image Generations）**：

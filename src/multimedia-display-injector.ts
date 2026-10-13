@@ -77,8 +77,39 @@ export function enhanceMultimediaElements(container?: any): number {
   imageList.forEach((el: any) => {
     const img = el as HTMLImageElement
     img.setAttribute('data-dsh-media-lightbox', 'processed')
+    const src = img.getAttribute('src') || ''
+    const mediaType = detectMediaType(src)
+    if (mediaType === 'video') {
+      const card = document.createElement('div')
+      card.className = 'dsh-multimedia-card'
+      card.setAttribute('data-media-type', 'video')
+      const header = document.createElement('div')
+      header.className = 'dsh-multimedia-header'
+      header.textContent = '🎬 视频播放'
+      const video = document.createElement('video')
+      video.controls = true
+      video.preload = 'metadata'
+      video.src = src
+      video.className = 'dsh-multimedia-player'
+      const footer = document.createElement('div')
+      footer.className = 'dsh-multimedia-footer'
+      const originalLink = document.createElement('a')
+      originalLink.href = src
+      originalLink.target = '_blank'
+      originalLink.rel = 'noreferrer noopener'
+      originalLink.textContent = img.alt?.trim() || '打开原始视频链接'
+      footer.appendChild(originalLink)
+      card.appendChild(header)
+      card.appendChild(video)
+      card.appendChild(footer)
+      if (img.parentNode) {
+        img.parentNode.insertBefore(card, img)
+        img.style.display = 'none'
+      }
+      count++
+      return
+    }
     if (img.closest && img.closest('a') !== null) return
-
     img.style.cursor = 'zoom-in'
     img.addEventListener('click', (e: any) => {
       e?.stopPropagation?.()
@@ -353,8 +384,38 @@ export const INSTALL_MULTIMEDIA_DISPLAY_SOURCE = `(function () {
     const imageList = root.querySelectorAll ? Array.from(root.querySelectorAll('img:not([data-dsh-media-lightbox])')) : [];
     imageList.forEach((img) => {
       img.setAttribute('data-dsh-media-lightbox', 'processed');
+      const src = img.getAttribute('src') || '';
+      const mediaType = detectMediaType(src);
+      if (mediaType === 'video') {
+        const card = document.createElement('div');
+        card.className = 'dsh-multimedia-card';
+        card.setAttribute('data-media-type', 'video');
+        const header = document.createElement('div');
+        header.className = 'dsh-multimedia-header';
+        header.textContent = '🎬 视频播放';
+        const video = document.createElement('video');
+        video.controls = true;
+        video.preload = 'metadata';
+        video.src = src;
+        video.className = 'dsh-multimedia-player';
+        const footer = document.createElement('div');
+        footer.className = 'dsh-multimedia-footer';
+        const originalLink = document.createElement('a');
+        originalLink.href = src;
+        originalLink.target = '_blank';
+        originalLink.rel = 'noreferrer noopener';
+        originalLink.textContent = img.alt?.trim() || '打开原始视频链接';
+        footer.appendChild(originalLink);
+        card.appendChild(header);
+        card.appendChild(video);
+        card.appendChild(footer);
+        if (img.parentNode) {
+          img.parentNode.insertBefore(card, img);
+          img.style.display = 'none';
+        }
+        return;
+      }
       if (img.closest && img.closest('a') !== null) return;
-
       img.style.cursor = 'zoom-in';
       img.addEventListener('click', (e) => {
         e?.stopPropagation?.();

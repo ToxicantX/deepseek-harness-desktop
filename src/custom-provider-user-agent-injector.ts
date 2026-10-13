@@ -21,8 +21,8 @@ export function injectCustomProviderUserAgentFactorySource(source: string): Cust
 
   let transformed = source
   const replacements: Array<[string, string]> = [
-    ['customApiUnset: "Not selected",', 'customApiUnset: "Not selected",\n\t\t\tcustomUserAgent: "User-Agent",'],
-    ['customApiUnset: "未选择",', 'customApiUnset: "未选择",\n\t\t\tcustomUserAgent: "User-Agent",'],
+    ['customApiUnset: "Not selected",', 'customApiUnset: "Not selected",\n\t\t\tcustomUserAgent: "User-Agent",\n\t\t\tcustomSub2apiAdminKey: "Sub2API Admin Key",'],
+    ['customApiUnset: "未选择",', 'customApiUnset: "未选择",\n\t\t\tcustomUserAgent: "User-Agent",\n\t\t\tcustomSub2apiAdminKey: "Sub2API 管理 Key",'],
   ]
   for (const [search, replacement] of replacements) {
     const changed = replace(transformed, search, replacement)
@@ -34,7 +34,7 @@ export function injectCustomProviderUserAgentFactorySource(source: string): Cust
     transformed,
     'CustomProviderCard',
     '\t\t\tconst [baseURL, setBaseURL] = (0, react.useState)("");\n\t\t\tconst [protocol, setProtocol]',
-    '\t\t\tconst [baseURL, setBaseURL] = (0, react.useState)("");\n\t\t\tconst [userAgent, setUserAgent] = (0, react.useState)("");\n\t\t\tconst [protocol, setProtocol]',
+    '\t\t\tconst [baseURL, setBaseURL] = (0, react.useState)("");\n\t\t\tconst [userAgent, setUserAgent] = (0, react.useState)("");\n\t\t\tconst [sub2apiAdminKey, setSub2apiAdminKey] = (0, react.useState)("");\n\t\t\tconst [protocol, setProtocol]',
   )
   if (creationState === undefined) return { source, changed: false }
   transformed = creationState
@@ -43,7 +43,7 @@ export function injectCustomProviderUserAgentFactorySource(source: string): Cust
     transformed,
     'CustomProviderCard',
     '\t\t\t\t\t\tmodels: models.map((model) => ({ ...model }))\n\t\t\t\t\t};',
-    '\t\t\t\t\t\tmodels: models.map((model) => ({ ...model })),\n\t\t\t\t\t\t...userAgent.trim().length === 0 ? {} : { headers: { "User-Agent": userAgent.trim() } }\n\t\t\t\t\t};',
+    '\t\t\t\t\t\tmodels: models.map((model) => ({ ...model })),\n\t\t\t\t\t\t...userAgent.trim().length === 0 ? (sub2apiAdminKey.trim().length === 0 ? {} : { headers: { "x-sub2api-admin-key": sub2apiAdminKey.trim() } }) : (sub2apiAdminKey.trim().length === 0 ? { headers: { "User-Agent": userAgent.trim() } } : { headers: { "User-Agent": userAgent.trim(), "x-sub2api-admin-key": sub2apiAdminKey.trim() } })\n\t\t\t\t\t};',
   )
   if (creationProfile === undefined) return { source, changed: false }
   transformed = creationProfile
@@ -89,6 +89,16 @@ export function injectCustomProviderUserAgentFactorySource(source: string): Cust
 \t\t\t\t\tfor (const name of Object.keys(schema.getPath(updated, ["headers"]) ?? {})) if (name.toLowerCase() === "user-agent") updated = schema.deletePath(updated, ["headers", name]);
 \t\t\t\t\treturn value === void 0 ? updated : schema.setPath(updated, ["headers", "User-Agent"], value);
 \t\t\t\t});
+\t\t\t};
+\t\t\tconst sub2apiAdminKeyEntry = (value) => Object.entries(schema.getPath(value, ["headers"]) ?? {}).find(([name]) => name.toLowerCase() === "x-sub2api-admin-key");
+\t\t\tconst sub2apiAdminKey = typeof sub2apiAdminKeyEntry(draft)?.[1] === "string" ? sub2apiAdminKeyEntry(draft)[1] : "";
+\t\t\tconst setSub2apiAdminKey = (next) => {
+\t\t\t\tconst value = next.trim().length === 0 ? void 0 : next;
+\t\t\t\tsetDraft((current) => {
+\t\t\t\t\tlet updated = current;
+\t\t\t\t\tfor (const name of Object.keys(schema.getPath(updated, ["headers"]) ?? {})) if (name.toLowerCase() === "x-sub2api-admin-key") updated = schema.deletePath(updated, ["headers", name]);
+\t\t\t\t\treturn value === void 0 ? updated : schema.setPath(updated, ["headers", "x-sub2api-admin-key"], value);
+\t\t\t\t});
 \t\t\t};`
   const editorStateChanged = replaceInFunction(transformed, 'ProviderEditor', editorState, editorUserAgentState)
   if (editorStateChanged === undefined) return { source, changed: false }
@@ -109,6 +119,23 @@ export function injectCustomProviderUserAgentFactorySource(source: string): Cust
 \t\t\t\t\t\t\t\t\tdisabled,
 \t\t\t\t\t\t\t\t\tonChange: (event) => {
 \t\t\t\t\t\t\t\t\t\tsetUserAgent(event.target.value);
+\t\t\t\t\t\t\t\t\t}
+\t\t\t\t\t\t\t\t})]
+\t\t\t\t\t\t\t}) : null,
+\t\t\t\t\t\t\townsIdentity ? (0, react_jsx_runtime.jsxs)("div", {
+\t\t\t\t\t\t\t\tclassName: ModelsSection_module_css_default["field"],
+\t\t\t\t\t\t\t\tchildren: [(0, react_jsx_runtime.jsx)("span", {
+\t\t\t\t\t\t\t\t\tclassName: ModelsSection_module_css_default["fieldLabel"],
+\t\t\t\t\t\t\t\t\tchildren: t("customSub2apiAdminKey")
+\t\t\t\t\t\t\t\t}), (0, react_jsx_runtime.jsx)("input", {
+\t\t\t\t\t\t\t\t\tclassName: ModelsSection_module_css_default["input"],
+\t\t\t\t\t\t\t\t\ttype: "password",
+\t\t\t\t\t\t\t\t\tvalue: sub2apiAdminKey,
+\t\t\t\t\t\t\t\t\tplaceholder: "可选，用于自动调度生图上游",
+\t\t\t\t\t\t\t\t\t"aria-label": t("customSub2apiAdminKey"),
+\t\t\t\t\t\t\t\t\tdisabled,
+\t\t\t\t\t\t\t\t\tonChange: (event) => {
+\t\t\t\t\t\t\t\t\t\tsetSub2apiAdminKey(event.target.value);
 \t\t\t\t\t\t\t\t\t}
 \t\t\t\t\t\t\t\t})]
 \t\t\t\t\t\t\t}) : null,
