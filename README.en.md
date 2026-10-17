@@ -2,151 +2,82 @@
 
 [中文](README.md) | English
 
-[![Shell release](https://img.shields.io/github/v/release/ToxicantX/deepseek-harness-desktop?label=Shell)](https://github.com/ToxicantX/deepseek-harness-desktop/releases/latest)
+[![Latest release](https://img.shields.io/github/v/release/ToxicantX/deepseek-harness-desktop?label=Release)](https://github.com/ToxicantX/deepseek-harness-desktop/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/ToxicantX/deepseek-harness-desktop/total)](https://github.com/ToxicantX/deepseek-harness-desktop/releases)
-[![License](https://img.shields.io/github/license/ToxicantX/deepseek-harness-desktop)](https://github.com/ToxicantX/deepseek-harness-desktop/blob/main/LICENSE)
-[![Stars](https://img.shields.io/github/stars/ToxicantX/deepseek-harness-desktop)](https://github.com/ToxicantX/deepseek-harness-desktop/stargazers)
-[![Issues](https://img.shields.io/github/issues/ToxicantX/deepseek-harness-desktop)](https://github.com/ToxicantX/deepseek-harness-desktop/issues)
-[![Node.js](https://img.shields.io/badge/node-%3E%3D24-brightgreen?logo=node.js)](https://nodejs.org/)
-[![DSH runtime](https://img.shields.io/github/v/release/deepseek-ai/deepseek-harness?include_prereleases&label=DSH)](https://github.com/deepseek-ai/deepseek-harness/releases)
+[![License](https://img.shields.io/github/license/ToxicantX/deepseek-harness-desktop)](LICENSE)
 
-Windows desktop shell for DeepSeek Harness. The Shell and DSH runtime have independent versions: the installer carries only the Electron Shell, and first launch installs a compatible prebuilt runtime derived from a `dsh-v*` tag in [`deepseek-ai/deepseek-harness`](https://github.com/deepseek-ai/deepseek-harness).
+A Windows desktop client for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), for chatting with AI agents and working on projects. It installs the required runtime automatically and includes plugin management, usage statistics, a desktop pet, and a koi pond.
 
-## Download
+**Windows x64 only. Normal use requires no separate Node.js, pnpm, or Git installation.**
 
-Runtime downloads retry interrupted connections, timeouts, and temporary HTTP failures up to three attempts. Retries resume with Range when supported, otherwise restart the file. Full size and SHA-256 checks remain mandatory. Update diagnostics distinguish catalog checks, installation, and startup failures.
+![DeepSeek Harness Desktop](docs/images/desktop-overview.png)
 
-When an explicitly installed third-party plugin prevents the final Web boot because it is waiting for a missing service, the Shell isolates that exact package, disables its Runtime entry through a temporary overlay, and restarts DSH. Core packages, transient pending messages, network failures, and authentication errors are not automatically isolated. Plugin files, settings, credentials, and sessions remain untouched.
+## Download And Get Started
 
-Before switching runtimes, the Shell snapshots model and preset configuration and validates the migrated result according to the target DSH version. DSH 0.1.7 stores the legacy `agent-presets.default` choice as `agent-preset-registry.selectedDefault`, while rc.2 removes `modeSelectionEnabled`; these equivalent migrations are accepted without weakening checks for providers, models, the default model, or the selected preset value.
+1. Open the [download page](https://github.com/ToxicantX/deepseek-harness-desktop/releases/latest) and choose the Windows x64 installer or the build with `Portable` in its name.
+2. Launch the app and wait for it to download and install DSH Runtime. First launch requires internet access to GitHub.
+3. Open **File → Settings** to configure your model provider, API address, and key, then select a model.
+4. Select or create a workspace and start a new conversation.
 
-Download the Windows x64 installer or portable build from the [Latest Release](https://github.com/ToxicantX/deepseek-harness-desktop/releases/latest). First launch installs the newest compatible DSH runtime automatically.
+Later launches reuse the installed runtime. If a download or startup fails, follow the diagnostics on the startup page to retry or recover.
 
-## Version model
+## Common Actions
 
-- **Shell version** identifies the window, downloader, version manager, and runtime protocol, for example `0.1.0`.
-- **DSH version** identifies an upstream Git tag; `0.1.0-rc.7` corresponds to `dsh-v0.1.0-rc.7`.
-- **Runtime revision** identifies an immutable desktop build of the same upstream DSH tag. Legacy manifests default to revision `0`; rebuilt artifacts must increment it.
-- The Shell declares its minimum DSH version. Each runtime manifest declares `requiredShellRange`, `runtimeProtocolVersion`, and `runtimeRevision`.
-- The default `latest-compatible` policy selects the highest version that has a prebuilt artifact and is compatible with the current Shell.
-- Users can explicitly choose **Automatic** or **Pinned version** under **Runtime → Manage DSH versions**. A pin remains selected until the user restores the automatic policy; the list shows only DSH version numbers and marks the version currently in use.
+| What you want to do | Where to find it |
+| --- | --- |
+| Configure models and providers | **File → Settings** |
+| Set your preferred language and response style | **File → Personalization...** |
+| Install or update plugins, connect MCP servers, manage skills | **Runtime → Manage Plugins / Manage MCP / Manage Skill** |
+| Change the DSH version | **Runtime → Manage DSH versions** |
+| View request counts, token usage, and trends | **Help → Usage Monitor**; counts usage recorded in sessions, without balances or costs |
+| Change the theme or show or hide the pet | **View → Theme / Desktop Pet** |
+| Open the koi pond | Use the floating koi pond entry in the main window to feed and name fish, then return to your conversation |
 
-A new upstream tag does not enter the catalog until its desktop runtime passes the build, compatibility, and smoke gates, so an unprepared version cannot break an existing installation. Release channels stay separate: `shell-v*` publishes the Shell, `runtime-dsh-v*-desktop.<revision>` publishes immutable runtimes, and `runtime-catalog` carries the machine-readable catalog.
+Paste long text and text files directly into the conversation composer, then preview or remove them before sending. Personalization text enters model context; do not put keys, tokens, or passwords in it.
 
-Refreshing the version manager checks official GitHub Releases, including alpha/rc versions, alongside the desktop catalog without restarting the Runtime. It reports whether the latest upstream version is available, awaiting a desktop build, or requires a newer Shell. Automatic policy users can apply a newly discovered version or revision with the update button. Desktop builds check upstream hourly; installation remains gated on build and smoke validation. Offline caches and failed upstream checks are explicitly reported.
+### Optional Plugins
 
-## Installation and updates
+Paste either repository URL into **Runtime → Manage Plugins** to install it, then configure it in Settings. Installing plugins from GitHub requires Git on your system.
 
-On a normal application launch, the local Shell startup page shows only the status ring and catalog, Runtime download, or startup state; it does not expose version selection. For first install, automatic upgrade, or a DSH switch initiated from the version manager, target-version download progress stays at the bottom of the startup page. Version selection appears only under **Runtime → Manage DSH versions**. Animation is disabled when the system requests reduced motion. First launch requires network access. The Shell downloads `runtime-catalog.json`, selects a version, downloads the Windows x64 runtime ZIP, and verifies both its declared size and SHA-256. Extraction occurs in a staging directory. The Shell updates the current version only after Node, pnpm, and DSH are present and Web readiness succeeds. Download, verification, and startup failures leave the previous runtime available.
+| Plugin | Purpose |
+| --- | --- |
+| [dsh-channel-telegram](https://github.com/ToxicantX/dsh-channel-telegram) | Use DSH through Telegram, QQ official bot, or WeChat iLink private messages |
+| [dsh-multi-model-orchestrator](https://github.com/ToxicantX/dsh-multi-model-orchestrator) | Configure specialist agents and let the main agent assign tasks |
 
-Runtimes are stored by default under:
+## Updates And Backups
 
-```text
-%LOCALAPPDATA%\DeepSeek Harness\runtime-manager\runtimes\<dsh-version>
-```
+- **Update the desktop client**: File → Check for Updates.
+- **Update DSH Runtime**: Runtime → Manage DSH versions. The default policy selects the newest compatible version; you can also pin a version. New upstream versions become available when their desktop runtime builds are ready.
+- **Back up your data**: File → Open DSH Data Directory. Fully exit the app before copying this directory. The default is `%USERPROFILE%\.dsh`; a `DSH_HOME` override changes its location.
 
-Profiles, sessions, settings, and plugins remain under `%USERPROFILE%\.dsh`, or the existing `DSH_HOME` override. Runtime switching, Shell updates, and reinstallation do not remove that directory.
+Client updates and runtime switches do not automatically delete sessions, settings, or plugins. Use **Exit** in the system tray menu to fully close the app.
 
-## Pasting text and files
+## Common Problems
 
-The Shell adds native text and file paste handling to the DSH conversation composer. Plain text longer than 500 characters and readable text files first appear as pending attachments that can be previewed, removed, or expanded, and are written into the message only on submit. Text files up to 2 MB are sent as inline context; larger text files send only the user-selected absolute path and segmented-read instructions. A paste handles at most 32 text files and inline text is capped at 8 MB. Images, audio/video, archives, PDFs, Office documents, and other binary content remain under DSH Web's own handling. The Web page context menu exposes undo, redo, cut, copy, paste, delete, and select-all according to Electron's edit flags.
+**First launch is stuck downloading?** Check that your network can reach GitHub and retry from the startup page. Any existing usable runtime is retained.
 
-## Agent personalization
+**The app cannot start after installing a plugin?** Update, disable, or remove the plugin from the startup page or **Runtime → Manage Plugins**. After updating an isolated plugin, use its re-enable and verify action. Do not delete the entire data directory.
 
-Open the global Agent personalization editor from **File → Personalization...**. It directly manages `$DSH_HOME/AGENTS.md` (`%USERPROFILE%\.dsh\AGENTS.md` by default) and supports a starter template, reload, a UTF-8 byte counter, and keyboard save. Saving blank content removes the file. Every mutation checks the observed document revision and uses a same-directory temporary file with atomic replacement. When an external change has already been detected, saving is rejected until the document is reloaded.
+**An old conversation will not open?** Use **Help → Repair Historical Sessions**. Run diagnostics and check the backup location before confirming a repair.
 
-This document is a user-preference layer. It does not modify an Agent preset or grant tools and permissions the preset does not provide. Presets composed with `@deepseek-ai/dsh-agent-instructions` load it for subsequent new sessions while retaining their own role, tools, capabilities, and security boundaries; a workspace `AGENTS.md` can add more specific project rules. Personalization text enters model context, so it must not contain API keys, tokens, passwords, or other credentials.
+**Windows shows Unknown Publisher or a SmartScreen warning?** Check the download source and file signature, and download only from this repository's releases. Some builds may be unsigned; the signature status shown by Windows is authoritative.
 
-## Desktop pet settings
+For other problems, open an [issue](https://github.com/ToxicantX/deepseek-harness-desktop/issues) with the versions shown in **Help → About DeepSeek Harness**, steps to reproduce, and error details with sensitive information removed.
 
-The default pet is an original anime sprite character rendered entirely inside the transparent Electron desktop window. Local transparent PNG strips provide separate frame animations for idle, thinking, speaking, approval, success, error, unavailable, and dragging states; missing, malformed, or undecodable strips fall back to the original procedural Canvas robot. The pet loads no network assets and launches no Web page. When Windows reduced motion is enabled, each state holds a representative frame.
+## Versions And Updates
 
-Choose **File → Desktop Pet Settings → Small / Standard / Large** to resize the character. The three modes use 72, 96, and 128 CSS pixels while retaining the 192×192 Canvas backing store. A size change updates the transparent window, native hit-test shape, bubble anchor, and drag bounds together, then persists the selection in `desktop-pet.json` under application `userData`. Standard preserves the previous 96-pixel appearance. Left-click the character to open the main window; its right-click menu can open the window, change pet size, or hide the pet. A reply bubble stays visible while text streams and closes five seconds after the reply finishes; an approval bubble remains until the request is resolved.
+### 2026-10-17 12:28 (Beijing Time)
 
-The legacy local still-image and animated-GIF skin picker, decoders, and renderer data-URL channel have been removed. After an upgrade, the Shell deletes stale `desktop-pet-skin.png`, `desktop-pet-skin.gif`, and their corresponding `.tmp` files.
+- Simplified both guides around downloads, initial setup, common actions, updates, and troubleshooting.
 
-## Plugins
+### Recent Changes
 
-Open the desktop plugin manager from **Runtime → Manage Plugins**. It lists plugins installed in the current Web profile and supports installing and removing them. For installation, enter a controlled npm package spec or a GitHub HTTPS / `github:` spec, such as `@scope/plugin@1.2.3`, `https://github.com/owner/repo.git`, or `github:owner/repo`. The manager reads installed versions from the pnpm list first and falls back to the controlled installed package manifest when that list omits a version. Registry plugins show an update action only when the bundled pnpm confirms a compatible newer version. GitHub, git, link, file, and workspace sources retain a generic manual update action without depending on registry outdated results. Network failures and unresolved registry versions do not remove those manual update actions. The manager shows operation progress and logs.
+- **0.1.60**: Fixed the workspace folder button becoming unresponsive after opening Explorer.
+- Added custom image generation protocol support, enlarged image previews, and audio/video playback. Generation capabilities depend on the configured provider and model.
+- Added model information to subagent conversations and improved pond backgrounds and task status display.
 
-Before an install, update, or removal, the Shell stops the Runtime so Web/HMR cannot load partially changed files from `node_modules`. The Runtime restarts after success and is also restored after a failed mutation. Closing and reopening the plugin manager does not lose an active operation or a pending Runtime restart; the reopened window resumes the same progress and log. If a plugin fails to load and prevents Web readiness, the Shell-owned plugin manager remains available so you can remove or update the problematic plugin and restart the Runtime again.
+See [Releases](https://github.com/ToxicantX/deepseek-harness-desktop/releases) for the full version history.
 
-If an older Web profile was created with a different pnpm `virtual-store-dir-max-length`, the manager removes the regenerable `.modules.yaml` only after matching that exact compatibility error, then retries the original operation once. It does not delete the profile manifest, lockfile, plugin configuration, or other user data.
+## Code Signing Policy
 
-If a patch under an existing `%USERPROFILE%\.dsh` still references a deleted local plugin file, the setup page offers **Disable stale local plugins and retry**. After confirmation, the Shell backs up and removes only loader entries that exactly match the startup error; it does not clear sessions, settings, credentials, other plugins, or the profile.
-
-If `dsh-multi-model-orchestrator` refuses startup because its managed preset conflicts with the currently installed package, the setup page offers a separate confirmed recovery. It is enabled only when the loader entry, package, target, and conflict reason all match exactly. After confirmation, the Shell moves the complete `multi-model-orchestrator` preset directory to a sibling `desktop-backup`, then runs the installed plugin's installer with fixed `--force --target` arguments. If reset or validation fails, the original directory is restored automatically.
-
-The Shell writes a stable `dsh.cmd` under its user-data directory and puts the active runtime's standard Node and pnpm on `PATH`. As an advanced fallback, open **Runtime → Open plugin management terminal** and use the existing commands:
-
-```powershell
-dsh plugin --profile web list
-dsh plugin --profile web add <package-spec>
-dsh plugin --profile web update <package-spec>
-dsh plugin --profile web remove <package-name>
-```
-
-Git package specifications require system Git on `PATH`. npm, local-directory, and tarball specifications need no global Node or pnpm installation.
-
-## MCP management
-
-Open the desktop MCP manager from **Runtime → Manage MCP**. It scans Bundle patches declared by the current Web profile, the profile patch, `$DSH_HOME/cordis.patch.yml`, and the desktop Runtime overlay in actual Cordis patch order. It recognizes one-server `@deepseek-ai/dsh-mcp-client` entries and multi-server `dsh-mcp-lens` aggregate entries, discovers local MCPs from `%USERPROFILE%\.codex\config.toml` read-only, and scans npm global directories on the desktop process `PATH` for packages declaring `mcpName` or MCP keywords and a `bin`. Those packages appear as `Local npm MCP`; enabling one imports its executable into the DSH profile patch, while later switches only change DSH connection state. The list supports search, DSH connection-state filters, and configuration details. Environment and HTTP header values stay in the main process; URLs lose credentials and query strings, and likely secret arguments are redacted before any data reaches the renderer.
-
-Enabling or disabling requires a stable Cordis entry `id`. The Shell writes only a `disabled` override in the highest controlling profile or home user patch and never changes an installed plugin package or MCP server files. It checks the revision across all effective layers before using a same-directory temporary file and atomic replacement. A Codex MCP switch controls whether that server is connected to DSH: the initial connection writes its execution or connection settings to the DSH profile patch, and later toggles affect only the DSH entry. Codex `config.toml` always remains unchanged. An entry remains visible but cannot be toggled from a lower layer when the higher-priority desktop Runtime overlay locks its state; a dynamic `!!js` state is labeled explicitly. The Runtime stops for the mutation and restarts afterward, including recovery attempts after failures. MCP Lens uses one Cordis entry, so its switch controls every server shown under that Lens entry together.
-
-## Runtime artifacts
-
-`.github/workflows/runtime-release.yml` checks the newest upstream `dsh-v*` tag each hour and also accepts an explicit tag, positive `runtime_revision`, and Shell range. It verifies the tag and CLI version, installs the exact official `@deepseek-ai/dsh` release, adds a checksum-verified official Node 24 runtime and standalone pnpm, runs real Web, settings-open, session-repair, plugin, and shutdown smokes, and publishes the ZIP, manifest, and updated catalog. The catalog accepts only a higher revision for the same DSH version; release tags and assets are never overwritten.
-
-The client does not clone and build the complete upstream repository on the user's machine. Git tags remain the version source of truth without requiring users to install Git, development dependencies, or native build tools.
-
-## Development
-
-Windows x64, Node 24, and pnpm 11 are required:
-
-```powershell
-pnpm install --frozen-lockfile
-pnpm test
-pnpm run typecheck
-pnpm run build
-pnpm run start
-pnpm run dist
-```
-
-Build one complete runtime with:
-
-```powershell
-./scripts/build-runtime.ps1 `
-  -DshTag dsh-v0.1.0-rc.7 `
-  -OutputDirectory "$PWD/runtime-output" `
-  -RuntimeRevision 1 `
-  -RequiredShellRange '>=0.1.0 <1.0.0'
-```
-
-## Windows code signing
-
-Public distribution should use an Authenticode code-signing certificate issued by a Windows-trusted CA. A self-signed certificate is suitable only for managed internal environments where its root is deployed; it does not remove Unknown Publisher or SmartScreen warnings for ordinary users.
-
-For an exportable PKCS#12/PFX certificate, create two Repository secrets under GitHub **Settings → Secrets and variables → Actions**:
-
-- `CSC_LINK`: the Base64 content of the PFX file. Generate it in PowerShell with `[Convert]::ToBase64String([IO.File]::ReadAllBytes('certificate.pfx')) | Set-Clipboard`. Never commit the PFX or its Base64 content.
-- `CSC_KEY_PASSWORD`: the password selected when exporting the PFX.
-
-Only `shell-v*` tag builds receive these secrets. The workflow lets electron-builder sign the main executable, NSIS installer, uninstaller, and portable EXE. When `CSC_LINK` is present, it also requires both published EXEs to report a `Valid` Authenticode status. Increment the `package.json` version and push the matching `shell-v<version>` tag to publish a newly signed version.
-
-Most newly issued public certificates require hardware- or cloud-protected private keys and cannot be exported as PFX. Do not copy a hardware-token key into GitHub. Instead, integrate the provider action for a remote service such as Azure Artifact Signing, DigiCert KeyLocker, or SignPath into the tag build.
-
-Local `dist` artifacts remain unsigned when no certificate is configured. Even with a trusted certificate, SmartScreen reputation may still need to develop through downloads and time.
-
-### Code signing policy
-
-After SignPath Foundation approves and activates the integration, free code signing for eligible Shell releases is provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org). Published and local artifacts may remain unsigned until that integration is active; the signature status shown by Windows is authoritative for each file.
-
-Signing is limited to Desktop Shell artifacts built from this repository's public source by GitHub Actions. Runtime archives and upstream projects' binaries are excluded. See the [complete code signing policy](docs/code-signing-policy.md) for team roles, privacy, approval, and verification details.
-
-## Current scope
-
-- Windows x64 is the only supported target.
-- The default minimum DSH version is `0.1.0-rc.7`.
-- Runtime Releases are always marked as GitHub prereleases so they do not replace the latest Shell Release used by electron-updater.
-- The Shell opens DSH Web over an ephemeral loopback origin. Host code and plugins always run in the downloaded standard-Node runtime.
+After SignPath Foundation approves and activates the integration, free code signing for eligible desktop client releases is provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org). See the [complete code signing policy](docs/code-signing-policy.md).

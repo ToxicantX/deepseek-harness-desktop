@@ -2,328 +2,82 @@
 
 [中文](README.md) | [English](README.en.md)
 
-[![Shell release](https://img.shields.io/github/v/release/ToxicantX/deepseek-harness-desktop?label=Shell)](https://github.com/ToxicantX/deepseek-harness-desktop/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/ToxicantX/deepseek-harness-desktop/total)](https://github.com/ToxicantX/deepseek-harness-desktop/releases)
-[![License](https://img.shields.io/github/license/ToxicantX/deepseek-harness-desktop)](https://github.com/ToxicantX/deepseek-harness-desktop/blob/main/LICENSE)
-[![Stars](https://img.shields.io/github/stars/ToxicantX/deepseek-harness-desktop)](https://github.com/ToxicantX/deepseek-harness-desktop/stargazers)
-[![Issues](https://img.shields.io/github/issues/ToxicantX/deepseek-harness-desktop)](https://github.com/ToxicantX/deepseek-harness-desktop/issues)
-[![Node.js](https://img.shields.io/badge/node-%3E%3D24-brightgreen?logo=node.js)](https://nodejs.org/)
-[![DSH runtime](https://img.shields.io/github/v/release/deepseek-ai/deepseek-harness?include_prereleases&label=DSH)](https://github.com/deepseek-ai/deepseek-harness/releases)
+[![最新版本](https://img.shields.io/github/v/release/ToxicantX/deepseek-harness-desktop?label=Release)](https://github.com/ToxicantX/deepseek-harness-desktop/releases/latest)
+[![下载量](https://img.shields.io/github/downloads/ToxicantX/deepseek-harness-desktop/total)](https://github.com/ToxicantX/deepseek-harness-desktop/releases)
+[![License](https://img.shields.io/github/license/ToxicantX/deepseek-harness-desktop)](LICENSE)
 
-DeepSeek Harness Desktop 是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的 Windows 桌面客户端。它负责安装和切换 DSH Runtime，并补充版本、插件、MCP、个性化、桌面宠物、更新与故障恢复等原生桌面入口。
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的 Windows 桌面客户端，用于与 AI Agent 对话、处理项目任务。应用自动安装所需运行环境，并提供插件管理、用量查看、桌面宠物和后院鱼塘。
 
-普通使用不需要单独安装 Node.js、pnpm 或 Git。当前仅支持 Windows x64。
+**目前仅支持 Windows x64，普通使用无需安装 Node.js、pnpm 或 Git。**
 
 ![DeepSeek Harness Desktop 主界面](docs/images/desktop-overview.png)
 
-## 下载与首次启动
+## 下载与开始使用
 
-1. 从 [Latest Release](https://github.com/ToxicantX/deepseek-harness-desktop/releases/latest) 下载 Windows x64 安装器或 portable 版本。
-2. 启动应用。第一次启动需要联网，Shell 会自动下载并校验最新兼容的 DSH Runtime。
-3. 等待主界面出现后，选择或创建工作区，再开始新会话。
-4. 后续启动会直接复用已安装的 Runtime；更新 Shell 或切换 Runtime 不会删除会话、设置和插件。
+1. 前往 [下载页面](https://github.com/ToxicantX/deepseek-harness-desktop/releases/latest)，选择 Windows x64 安装器，或名称含 `Portable` 的便携版。
+2. 启动应用，等待自动下载并安装 DSH Runtime。首次启动需要联网并能够访问 GitHub。
+3. 在 **文件 → 设置** 中配置模型提供商、API 地址和密钥，选择要使用的模型。
+4. 选择或创建工作区，开始新会话。
 
-Runtime 下载、校验或启动失败时，应用会保留原有可用版本，并在启动页显示诊断与可执行的恢复操作。
+后续启动会复用已安装的运行环境。下载或启动失败时，可根据启动页的诊断提示重试或恢复。
 
-## 关联插件
+## 常用入口
 
-以下插件可以扩展 DeepSeek Harness Desktop 的使用场景。在 **Runtime → 管理插件** 中粘贴仓库地址即可安装或更新：
+| 想做什么 | 在哪里 |
+| --- | --- |
+| 配置模型和提供商 | **文件 → 设置** |
+| 设置 Agent 的语言、输出风格等偏好 | **文件 → 个性化设置...** |
+| 安装或更新插件、接入 MCP、管理 Skill | **Runtime → 管理插件 / 管理 MCP / 管理 Skill** |
+| 更换 DSH 版本 | **Runtime → 管理 DSH 版本** |
+| 查看请求数、Token 用量和趋势 | **帮助 → 用量监控**，仅统计会话已记录的用量，不显示余额或费用 |
+| 切换主题、显示或隐藏桌宠 | **视图 → 主题 / 桌面宠物** |
+| 打开后院鱼塘 | 主界面的“后院鱼塘”悬浮入口，可投喂、命名锦鲤并随时返回对话 |
+
+长文本和文本文件可直接粘贴到对话输入框，发送前可以预览或移除。个性化设置会进入模型上下文，请勿填写密钥、Token 或密码。
+
+### 可选插件
+
+在 **Runtime → 管理插件** 中粘贴下列仓库地址即可安装，完成后到设置页配置。安装 GitHub 来源的插件需要系统已安装 Git。
 
 | 插件 | 用途 |
 | --- | --- |
-| [dsh-channel-telegram](https://github.com/ToxicantX/dsh-channel-telegram) | 将 DSH 会话接入 Telegram 私聊、QQ 官方机器人 C2C 消息和微信 iLink 私聊，并复用同一套 Host、项目与会话选择流程。 |
-| [dsh-multi-model-orchestrator](https://github.com/ToxicantX/dsh-multi-model-orchestrator) | 为 DSH 增加多模型 Agent 编排，可配置最多 3 个专家 Agent，由主 Agent 按职责委派非重叠任务。 |
+| [dsh-channel-telegram](https://github.com/ToxicantX/dsh-channel-telegram) | 通过 Telegram、QQ 官方机器人或微信 iLink 私聊使用 DSH |
+| [dsh-multi-model-orchestrator](https://github.com/ToxicantX/dsh-multi-model-orchestrator) | 配置多个专家 Agent，由主 Agent 分配任务 |
 
-```text
-https://github.com/ToxicantX/dsh-channel-telegram
-https://github.com/ToxicantX/dsh-multi-model-orchestrator
-```
+## 更新与数据备份
 
-安装完成后，Desktop 会自动重启 Runtime；刷新页面后可在 DSH Web 设置中完成插件配置。
+- **更新桌面客户端**：文件 → 检查更新。
+- **更新 DSH Runtime**：Runtime → 管理 DSH 版本。默认自动选择最新兼容版本，也可固定版本；上游新版本需等待对应桌面运行包可用。
+- **备份数据**：文件 → 打开 DSH 数据目录。完全退出应用后备份该目录，默认是 `%USERPROFILE%\.dsh`；设置过 `DSH_HOME` 时以实际目录为准。
 
-## 菜单使用说明
-
-### 文件
-
-![文件菜单](docs/images/menu-file.png)
-
-- **个性化设置...**：编辑全局 `$DSH_HOME/AGENTS.md`，用于记录语言、输出风格和协作偏好。保存前会检查外部修改；不要在其中填写 API Key、Token 或密码。
-- **桌宠设置**：在“小 / 标准 / 大”三档之间调整桌面宠物大小。
-- **设置**：打开 DSH Web 设置页。只有 Runtime 已就绪时可用。
-- **检查更新**：立即检查 Desktop Shell 更新；DSH Runtime 版本由 Runtime 菜单单独管理。
-- **打开 DSH 数据目录**：打开会话、配置、凭据引用和插件所在的数据目录，默认是 `%USERPROFILE%\.dsh`。
-
-### Runtime
-
-![Runtime 菜单](docs/images/menu-runtime.png)
-
-- **管理 DSH 版本**：在“自动选择最新兼容版本”和“固定版本”之间切换，并查看当前使用的版本。
-- **刷新并应用版本策略**：重新读取 Runtime Catalog，按当前策略下载、切换或重启 Runtime。
-- **管理插件**：安装、更新或移除当前 Web Profile 的插件，并查看操作进度与日志。
-- **管理 MCP**：搜索本机 MCP、查看配置来源和 DSH 接入状态，并启用或禁用可管理的条目。
-- **打开终端**：为高级用户打开已配置好 Node、pnpm 和 `dsh` 命令的终端。
-
-插件或 MCP 发生变更时，Shell 会先停止 Runtime，完成原子修改后再自动启动，避免 Web 在依赖变更过程中读取不完整文件。
-
-### 编辑
-
-![编辑菜单](docs/images/menu-edit.png)
-
-- **复制 / 粘贴 / 全选**：作用于当前获得焦点的输入框、编辑器或页面内容。
-- 对话输入框还支持右键菜单中的撤销、重做、剪切、删除等原生编辑操作。
-- 可直接粘贴长文本和文本文件；具体规则见下方“文本与文件粘贴”。
-
-### 视图
-
-![视图菜单](docs/images/menu-view.png)
-
-- **主题**：打开 DSH 主题入口。Runtime 就绪后可用。
-- **桌面宠物**：显示或隐藏桌宠；状态会保留到下次启动。
-- **重新加载**：刷新当前 DSH Web 页面，不会删除会话或配置。
-- **开发者工具**：打开 Electron DevTools，主要用于排查页面问题。
-- **实际大小 / 放大 / 缩小 / 全屏**：调整界面缩放或切换全屏显示。
-
-### 帮助
-
-![帮助菜单](docs/images/menu-help.png)
-
-- **修复历史会话**：输入会话 ID 后先进行诊断，核对异常区间、事件保留状态和备份位置，再确认修复；修复后可从备份回滚。
-- **用量监控**：在独立窗口查看今日、近 7 天、近 30 天及全部记录的请求数、Token 分类、缓存命中率、模型用量和每日趋势，支持手动刷新及每 15 秒自动刷新。
-- **关于 DeepSeek Harness**：查看 Desktop Shell、当前 DSH Runtime 和 Runtime Revision 等版本信息。
-
-用量监控参考 [dsh-damage-pulse](https://github.com/wssfk12138/dsh-damage-pulse) 的用量概览，直接只读 `$DSH_HOME/sessions`（默认 `%USERPROFILE%\.dsh\sessions`）的原生 JSONL / Zstd 会话记录，无需安装插件或配置 API Key，不查询余额，也不计算费用、预算或价格。统计覆盖所有提供方及模型，仅计入含有效 `usage` 的模型回复，未上报用量的请求不会估算；派生会话的继承历史不重复计数。日期范围按北京时间自然日计算，总 Token 为未缓存输入、缓存读取、缓存写入及输出之和，推理 Token 已包含在输出中；缓存命中率为缓存读取 /（未缓存输入 + 缓存读取）。
-
-每次启动桌面壳会在后台初始化一次用量统计，不等待扫描完成才启动 Runtime。同一次启动内，打开或重开面板直接复用最近结果；若预热尚未完成，则共享扫描并显示当前进度，不重复启动扫描。手动刷新及每 15 秒自动刷新会重新检查日志，只重新解析新增或变化的文件。缓存仅在内存中，完全退出后再启动需要重新预热，并非安装后永久只初始化一次；读取失败可通过刷新重试，不改写会话记录。
-
-扫描期间动态显示文件发现阶段、当前日志路径、已扫描文件数、按日志字节量计算的百分比和耗时；发现阶段使用不定进度条，完整扫描结束后才显示 100%。大量日志仍可能需要等待。扫描会识别 `session.jsonl(.zstd)` 及 `session.vN.jsonl(.zstd)`，同一会话只读取最新一代文件，避免遗漏新版 Runtime 的今日记录或重复计算迁移保留的旧副本。已删除的会话不在统计范围内，损坏或未完整写入的日志会显示统计不完整提示。“全部”的趋势最多显示最近 30 个活跃日，汇总数值仍覆盖全部记录。修改桌面壳后需重新构建、打包并重启壳才能更新已安装程序，刷新 Web 页面不会更新原生菜单。
-
-开发验证：`pnpm test`、`pnpm run build`，随后执行 `node scripts/smoke-usage-monitor.mjs`，以临时数据在隔离 Electron 窗口中验证界面、刷新和窄窗口布局，不启动额外 Web 服务。
-
-## 常用功能
-
-### 文本与文件粘贴
-
-- 超过 500 字符的纯文本和可读取的文本文件会先显示为待发送附件，可预览、移除或展开，提交消息时才写入会话。
-- 2 MB 以内的文本文件以内联上下文发送；更大的文本文件只发送所选绝对路径和分段读取说明。
-- 单次最多处理 32 个文本文件，内联文本总量上限为 8 MB。
-- 图片、音视频、压缩包、PDF、Office 文档及其他二进制内容继续由 DSH Web 处理。
-
-### Agent 个性化
-
-**文件 → 个性化设置...** 管理全局用户偏好。装配了 `@deepseek-ai/dsh-agent-instructions` 的 Agent 预设会在后续新会话中加载该文件，同时继续遵从预设自身的角色、工具、能力和安全边界。项目目录中的 `AGENTS.md` 可以添加更具体的项目规则。
-
-保存使用同目录临时文件原子替换；若文件已被其他程序修改，会要求重新加载后再保存。保存空白内容会移除该文件。
-
-### 桌面宠物与托盘
-
-桌宠使用本地透明 PNG 表达待机、思考、说话、审批、成功、错误、不可用和拖动状态，不加载网络图片。Windows 启用“减少动态效果”时会停在代表帧。
-
-- 左键桌宠：打开主窗口。
-- 右键桌宠：打开主窗口、调整大小或隐藏桌宠。
-- 回复气泡：流式回复结束后保留 5 秒；审批气泡会持续到请求被处理。
-- 系统托盘：可显示主窗口、启用或关闭桌宠，以及完全退出应用。
-
-### 后院鱼塘
-
-在主界面左下角悬浮入口点击“后院鱼塘”可无缝切换至庭院视图，或随时返回对话。
-
-![后院鱼塘](readme-assets/fish.png)
-
-- **成长机制**：每次成功发送一条主会话消息，池中每条锦鲤升 1 级（失败、历史加载、助手回复与重试不计入）。投喂不刷等级，无离线惩罚。
-- **体型与繁育**：每 100 级渐长体型、舒展鳍尾；500 级异性配对产卵，再聊 5 次迎来新鱼。每条鱼一生繁育一次，鱼与卵合计上限 16 位。
-- **互动与命名**：支持投喂鱼食与玩水泛起涟漪，点击锦鲤可查看身世并为它落款命名。对话、进食与陪玩会积累亲密度，可能偶遇花信、蜻蜓、蛙客、流萤或跃水锦鲤。
-- **四季与光影**：庭院按本地日期呈现春花、夏萤、秋叶与冬雾；支持根据 Open-Meteo 实时天气或手动切换时段（清晨/日间/傍晚/夜间）与天气（晴/阴/雨/雪），支持一键开启“禅模式”沉浸观赏。
-- **执行感知**：在鱼塘界面可实时感知后台正在执行的 Agent 会话状态与审批提示。
-
-### 插件管理
-
-在 **Runtime → 管理插件** 中输入 npm 包名、GitHub HTTPS 地址或 `github:` spec，例如：
-
-```text
-@scope/plugin@1.2.3
-https://github.com/owner/repo.git
-github:owner/repo
-```
-
-Registry 插件在检测到兼容新版本时显示更新按钮；GitHub、git、link、file 和 workspace 来源提供手动更新。若插件导致 DSH 无法启动，Shell 自带的插件管理器仍可独立打开，用于移除或更新问题插件。
-
-DSH `0.1.3-alpha.1` 起，Shell 支持第三方插件隔离：启动前检查已移除的旧客户端模块依赖，启动时捕获明确归属到插件的导入不兼容错误；最终 Web boot 报告中等待缺失服务而无法激活的已安装第三方插件也会被隔离。Shell 通过临时覆盖层禁用问题插件并重新启动 DSH。核心 `@deepseek-ai/*` 模块、非最终 pending 信息、网络和认证错误不会被自动隔离；自动恢复最多重试三次，无法精确定位时保留诊断。
-
-插件管理中可查看隔离原因、手动禁用，或在升级后选择“重新启用并验证”。更新不会自动解除隔离；只有 Runtime 和客户端界面启动验证均通过才清除隔离记录，失败或应用中断后保持禁用。验证不覆盖插件后续所有业务操作。隔离记录按 DSH 数据目录保存在 Shell 用户数据目录的 `plugin-isolation` 下，不删除插件安装包，不修改 Profile 的依赖、用户配置、凭据或会话。旧 Runtime 暂不支持隔离开关；已有隔离记录时会阻止切换到不支持的 Runtime，以免意外加载问题插件。
-
-高级用户也可以在 **Runtime → 打开终端** 中使用：
-
-```powershell
-dsh plugin --profile web list
-dsh plugin --profile web add <package-spec>
-dsh plugin --profile web update <package-spec>
-dsh plugin --profile web remove <package-name>
-```
-
-只有 Git 来源需要系统 `PATH` 中存在 Git；npm、本地目录和 tarball 不要求全局安装 Node.js 或 pnpm。
-
-### MCP 管理
-
-**Runtime → 管理 MCP** 会按实际 Cordis Patch 顺序读取 Web Profile Bundle、Profile Patch、`$DSH_HOME/cordis.patch.yml` 和 Desktop Runtime Overlay，并只读发现 `%USERPROFILE%\.codex\config.toml` 以及当前桌面进程 `PATH` 对应 npm 全局目录中的本机 MCP 包。带有 `mcpName` 或 MCP 关键词且暴露 `bin` 的包会显示为“Local npm MCP”；首次开启会把包的启动命令接入 DSH Profile Patch，之后开关只修改 DSH 接入状态，不修改 npm 安装目录。
-
-- 搜索名称、Provider 或地址，并按 DSH 接入状态筛选。
-- 环境变量与 HTTP Header 只显示键名；URL 凭据、查询参数和疑似密钥参数不会发送到管理窗口。
-- 开关只修改 DSH 侧的 `disabled` 覆盖，不会改写 Codex `config.toml` 或 MCP Server 文件。
-- 被更高优先级 Runtime Overlay 锁定或使用动态 `!!js` 状态的条目只能查看，不能从低优先级配置切换。
-
-## 数据位置与安全边界
-
-| 内容 | 默认位置 |
-| --- | --- |
-| DSH Runtime | `%LOCALAPPDATA%\DeepSeek Harness\runtime-manager\runtimes\<dsh-version>` |
-| 会话、设置、插件和用户配置 | `%USERPROFILE%\.dsh` |
-| 全局 Agent 个性化 | `%USERPROFILE%\.dsh\AGENTS.md` |
-
-设置 `DSH_HOME` 后，用户数据位置会随之改变。切换 Runtime、更新 Shell 或重新安装不会主动删除该目录。
-
-启动恢复功能只处理与诊断精确匹配的失效插件、Bundle 或预设条目；操作前会备份并检查 revision，不会清空整个 Profile、会话、设置或凭据。诊断模糊、配置已变化或校验失败时会停止操作。
+更新客户端或切换 Runtime 不会主动删除会话、设置和插件。托盘菜单中的“退出”可完全关闭应用。
 
 ## 常见问题
 
-### 第一次启动一直停在下载或启动页
+**首次启动一直停在下载页？** 确认网络能访问 GitHub，按启动页提示重试。已有可用 Runtime 会被保留。
 
-确认能够访问 GitHub Release。应用需要下载 Runtime Catalog 和 Windows x64 Runtime ZIP，并验证文件大小与 SHA-256；网络中断不会覆盖已有可用 Runtime。
+**安装插件后无法启动？** 从启动页或 **Runtime → 管理插件** 更新、禁用或移除问题插件。被自动隔离的插件可在更新后选择“重新启用并验证”。请勿直接删除整个数据目录。
 
-下载遇到断流、超时或临时服务错误时，Shell 最多尝试 3 次；服务器支持 Range 时续传，否则重新下载。重试后仍须通过完整大小和 SHA-256 校验。更新失败会区分检查、安装和启动阶段，下载中断不再误报为 DSH 启动失败。
+**旧会话打不开？** 使用 **帮助 → 修复历史会话**，先诊断并核对备份位置，再确认修复。
 
-### 某个插件导致 Runtime 无法就绪
+**Windows 提示“未知发布者”或 SmartScreen 警告？** 请核对下载来源和文件签名，仅从本仓库发布页下载。部分构建可能未签名，具体以 Windows 显示的签名状态为准。
 
-从启动页或 **Runtime → 管理插件** 移除、更新该插件，然后重新启动 Runtime。不要直接删除整个 `%USERPROFILE%\.dsh`。
-
-### 旧会话无法打开
-
-使用 **帮助 → 修复历史会话** 先诊断。只有在工具确认可保留全部事件并给出备份位置后，再勾选确认并执行修复。
-
-### Windows 显示“未知发布者”或 SmartScreen 提示
-
-未签名构建或尚未积累信誉的新证书都可能触发提示。请只从本仓库的 [Latest Release](https://github.com/ToxicantX/deepseek-harness-desktop/releases/latest) 下载，并在运行前核对发布来源。
-
-## Code signing policy
-
-SignPath Foundation 批准并启用集成后，符合条件的 Shell Release 将使用 [SignPath.io](https://about.signpath.io) 提供的免费代码签名，证书由 [SignPath Foundation](https://signpath.org) 持有。集成启用前的发布和本地构建可能仍未签名；每个文件应以 Windows 显示的实际签名状态为准。
-
-签名只覆盖由本仓库 GitHub Actions 从公开源码构建的 Desktop Shell 产物，不用于 Runtime 压缩包或上游项目二进制。团队角色、隐私声明、审批规则和验证方式见[完整代码签名政策](docs/code-signing-policy.md)。
+其他问题请提交 [Issue](https://github.com/ToxicantX/deepseek-harness-desktop/issues)，附上 **帮助 → 关于 DeepSeek Harness** 中的版本、复现步骤和脱敏后的错误信息。
 
 ## 版本与更新说明
 
-### 2026-10-13 11:45 - 修复会话顶部“打开工作区目录”按钮点击后卡在 busy 无法再次点击的问题
+### 2026-10-17 12:28（北京时间）
 
-- **修复：文件资源管理器（Explorer）打开后状态机未复位 Bug**：
-  - 问题定位：在会话顶部右上角的“在应用中打开”分割按钮中，点击打开系统文件资源管理器时，桌面壳的兼容注入层拦截了 `appId === "explorer"` 请求并调用 Electron 主进程的 `shell.openPath()` 打开本机文件夹；但由于在调用前组件控制器已将 `this.operation` 设为 `phase: "busy"`，而注入逻辑在调用完毕后直接 `return`，未将状态复位为 `phase: "idle"`（抛错时也未置为 `phase: "error"`），导致前端按钮 `disabled` 状态被永久锁定，后续再次点击均被 `busy` 保护拦截。
-  - 修复实现：在 `src/open-in-app-compatibility.ts` 中将 Explorer 拦截逻辑包裹在 `try / catch` 中，调用成功后重置 `this.operation.set({ phase: "idle", path })`，失败时设置 `this.operation.set({ phase: "error", path })` 并重新抛出异常以供 Toast 提示；同时同步更新构建产物与根目录 `preload.cjs`。
-  - 测试覆盖：在 `tests/open-in-app-compatibility.spec.ts` 补充单元测试，验证首次打开后 `phase` 恢复为 `idle` 且支持连续多次点击，以及异常情况下正确进入 `error` 阶段。
+- 精简使用指南，集中展示下载、首次配置、常用入口、更新和排障信息，同步英文版。
 
-### 2026-10-13 08:30 - 全流程视频生成能力扩展与提示词清洗
+### 近期更新
 
-- **新增：视频生成（Agnes Video 2.5 / OpenAI Videos 协议）端到端支持**：
-  - 支持在自定义生图/多媒体提供商中配置视频模型（如 `agnes-video-2.5`、`agnes-video-2.5-flash`）；
-  - 自动识别视频生成请求，命中 Sub2API 管理 Key 时通过后台调度获取活跃上游凭证并定向至视频端点（`POST /v1/videos`）；
-  - 实现了基于 `video_id` 与 `model_name` 的异步轮询追踪器，在会话中以流式进度实时反馈渲染百分比（`⏳ 渲染进度: XX%`），并在生成完成后自动生成视频 Markdown 播放链接；
-  - 保持与原有 OpenAI 兼容图像生成接口（`/v1/images/generations`）100% 隔离与共存，图像与视频模型互不干扰。
-- **新增：对话区域视频播放与多媒体预览增强**：
-  - 在桌面壳 DOM 监听层全面支持视频 Markdown（`[视频名称](video.mp4)`、`<video>` 及包含视频扩展名的媒体链接），自动原地渲染为可交互 HTML5 视频播放卡片，支持直接播放、倍速/控制条与一键复制源视频链接。
-- **修复：提示词系统残留（`<system-reminder>`）过滤**：
-  - 修复多媒体生成提取用户提示词时夹带 DSH 技能变更注入的 `<system-reminder>` 冗余信息的 Bug，确保发给生图/生视频上游的 prompt 纯净准确，且 Markdown alt 标题整洁美观。
-- **完全遵循非侵入式壳注入原则**：
-  - 所有前端界面适配与后端运行时拦截均通过桌面壳 `executeInMainWorld` 及 Node.js `--import` 运行时钩子实现，未侵入或修改任何 DSH 核心源码。
+- **0.1.60**：修复打开工作区目录后按钮无法再次点击的问题。
+- 支持自定义图片生成协议、图片放大预览和音视频播放；生成能力取决于所配置的提供商与模型。
+- 子智能体对话页显示模型信息；优化鱼塘背景和任务状态显示。
 
-### 2026-10-13 00:40
+完整版本记录见 [Releases](https://github.com/ToxicantX/deepseek-harness-desktop/releases)。
 
-- 新增：自定义模型配置支持填写 Sub2API 管理 Key（英文/中文文案 customSub2apiAdminKey），CustomProviderCard 与 ProviderEditor 均可读写 headers["x-sub2api-admin-key"]，并新增 password 输入框（占位文案：可选，用于自动调度生图上游）。
-- 新增：openai-image-generations 生图协议 Sub2API 透明桥接——从请求头/模型头/环境变量（SUB2API_ADMIN_KEY）解析管理 Key，命中 pickstar.asia 或 agnes 目标时通过 /api/v1/admin/groups 与 /api/v1/admin/accounts 自动发现 active 账号及其上游凭证，切换 targetUrl 至上游真实生图地址（默认 https://apihub.agnes-ai.com/v1/images/generations），携带上游真实 Key 与简化 body（model: agnes-image-2.5-flash）；未配置管理 Key 时 agnes 模型给出直连提示。
-- 验证：pnpm run build 通过，无 TypeScript 编译错误；git diff 自检确认改动仅涉及 src/custom-provider-user-agent-injector.ts 与 src/image-generation-runtime-injector.ts。
+## 代码签名政策
 
-
-### 2026-10-12 17:54 - 生图模型协议支持与多媒体展示增强
-
-- **自定义提供商增加生图协议（OpenAI Image Generations）**：
-  - 通过桌面壳前端注入机制，在自定义提供商设置的 API 协议下拉列表中追加 `OpenAI Image Generations`（`openai-image-generations`），并补充中英文国际化标签。
-  - 通过桌面壳 Node.js 运行时钩子拦截生图请求，自动将用户会话 prompt 转换为目标提供商的 `/v1/images/generations` 请求（自适应 baseURL 相对/绝对路径拼接，支持 `b64_json` 与 `url` 响应格式），并将生成结果封装为标准 Markdown 格式融入对话流。
-- **自定义模型配置新增输出类型（Output Modalities）选择**：
-  - 在自定义模型的高级设置面板中，于“输入类型”下方新增“输出类型”区域，提供“图片”、“音频”、“视频”多选框，勾选状态实时保存至模型的 `outputModalities` 属性。
-- **对话区域多媒体展示与交互增强**：
-  - **图片生成与展示**：自动增强对话流中渲染的图片，支持点击弹出大图灯箱预览、原图全屏查看、一键复制图片链接与在新标签页打开。
-  - **音视频原生播放**：自动识别对话内容中的音频链接（`.mp3`, `.wav`, `.ogg`, `.m4a`, `data:audio/...`）与视频链接（`.mp4`, `.webm`, `.mov`, `data:video/...`），在对话流中直接渲染内嵌的 HTML5 原生播放器卡片，支持直接播放、文件名查看与链接跳转。
-- **纯外挂劫持架构**：
-  - 全流程通过桌面壳前端 `executeInMainWorld` 模块工厂转换与主进程 `--import` 运行时加载钩子注入，未改动任何 DSH 上游核心源码，保障原生向下兼容性与升级隔离。
-
-### 2026-10-12 15:52 - 子智能体对话页模型标识
-
-- 在子智能体对话页顶部增加模型信息，便于区分多模型任务；以子会话自身数据为准，不借用主会话模型。
-- 此功能由桌面壳提供，需要使用新构建或更新桌面壳后重新加载页面；现有安装版不会仅因源码更新而自动生效。
-
-### 2026-10-12 15:27 - 阴天鱼塘池底纹理更新
-
-- 参考晴天背景，为阴天水域补充池底卵石纹理，保留冷色阴天气氛与原有庭院构图，弱化阳光波纹。
-- 背景仍使用 `assets/koi-pond-overcast-day.webp`，保持 1723 × 913 的 WebP 格式；安装版需重新打包更新才能使用新图片。
-
-### 2026-10-10 - 优化鱼塘执行感知与残留状态清理机制
-
-- **鱼塘执行状态泄露彻底修复**：
-  - 修复 `src/koi-pond-injector.ts` 中的会话状态收尾判断：当会话 `prompt` 执行完毕后，针对子 Agent 会话立即派发 `running: false` 并释放监听；对普通主会话立即检查当前会话快照，若已非运行态（`!running`）立即派发 `running: false` 并注销订阅；若仍在运行中则维持监听直到状态转为空闲时可靠触发，彻底解决对话完成后鱼塘面板永久残留“正在思考 / 正在生成输出...”的 Bug。
-- **主进程与生命周期状态自愈**：
-  - 主窗口发生页面刷新或重载（`did-finish-load`）时，主进程自动清空残留的内存会话跟踪，并实时同步通知鱼塘更新，防止幽灵任务残留。
-  - 新增安全 IPC 通道 `pond:clear-running-session` 与 `pond:clear-all-running-sessions`，支持单项移除或一键全部清除。
-- **鱼塘前端界面增加交互式清理入口**：
-  - 在鱼塘“正在执行”面板顶部新增“清空”按钮，并为每个执行项增加单项关闭（`×`）按钮，支持随时手动清理已失效的执行展示。
-
-### 2026-10-10 - 兼容性检查、初始会话提示词智能向下兼容与一键发版脚本
-
-- **初始对话上下文智能向下兼容（AGENTS.md / Skills / MCP）**：
-  - **最新版机制（>= 0.1.3-alpha.1 至 0.2.1-alpha.2）**：DSH 官方核心已内置 `@deepseek-ai/dsh-agent-instructions`、`@deepseek-ai/dsh-tool-skill` 和 `@deepseek-ai/dsh-mcp-client`，会在新会话及后续轮次中原生自动读取并注入全局 `$DSH_HOME/AGENTS.md`、工作区根目录 `AGENTS.md`、可用 Skills（`<available_skills>`）与 MCP 工具。桌面壳智能识别版本并保持干净直通（Pass-through），杜绝双重注入或提示词污染。
-  - **早期老版本兼容（< 0.1.3-alpha.1，如 0.1.0-rc.7 ~ 0.1.1-rc.2）**：上游核心尚未内置上述模块，新增 `src/instructions-context-compatibility.ts` 及 IPC 适配层，在检测到旧版运行时且存在指令或扩展组件时，自动读取全局与工作区 `AGENTS.md`、启用的 Skills 与已加载 MCP，智能构建初始上下文补丁，实现全版本无缝向下兼容。
-- **全量核心功能兼容性审查**：全面核查“个性化设置”、“管理 DSH 版本”、“刷新并应用版本策略”、“管理插件”、“管理 MCP”、“管理 Skill”与最新版 DSH 及全量历史版本运行期的协同机制，验证全部通过。
-- **一键发版自动化**：新增 `release.bat` 与 `scripts/release.mjs`，支持自动化静态类型检查、单元测试、版本自动递增、Git 打标及远程推送发版。
-
-- **Shell Version**：桌面窗口、下载器、版本管理器和 Runtime 协议的版本。
-- **DSH Version**：对应上游 `dsh-v*` Git Tag。
-- **Runtime Revision**：同一 DSH Version 的不可变桌面构建修订。
-- 默认策略是 `latest-compatible`，只选择已有预构建产物且兼容当前 Shell 的最高版本。
-- `shell-v*` Release 发布 Desktop Shell；`runtime-dsh-v*-desktop.<revision>` 发布 Runtime；`runtime-catalog` 提供机器可读目录。
-
-上游刚发布但尚未完成桌面构建与冒烟验证的版本不会进入 Catalog，因此不会自动替换现有 Runtime。
-
-版本管理中的“刷新版本目录”会同时检查官方 GitHub Releases（包含 alpha/rc）和桌面目录，并显示上游最新版本是已可用、等待桌面包发布还是需要更新 Shell。刷新不会重启 Runtime；自动策略发现新版本或新修订后，可点击“更新到”应用。桌面构建每小时检查一次上游；构建和冒烟验证完成后，新版本才可安装。网络失败时会明确标示检查失败或使用缓存。
-
-Shell 会在 Runtime 切换前保护模型与预设配置，并按目标 DSH 版本校验迁移结果。DSH 0.1.7 将旧 `agent-presets.default` 迁移为 `agent-preset-registry.selectedDefault`，rc.2 移除了 `modeSelectionEnabled`；这些等价迁移不会再被误判为配置丢失。供应商、模型、默认模型或实际预设选择发生丢失时仍会回滚。
-
-## 开发者说明
-
-需要 Windows x64、Node.js 24 和 pnpm 11：
-
-```powershell
-pnpm install --frozen-lockfile
-pnpm test
-pnpm run typecheck
-pnpm run build
-pnpm run start
-pnpm run dist
-```
-
-`build-windows.bat` 会优先使用已安装 DSH Runtime 中的 Node.js 24 x64，其次查找 nvm 和 PATH。pnpm 优先使用 PATH 中的版本；PATH 未安装 pnpm 时，脚本会根据所选 Runtime 的 `runtime-manifest.json` 复用其独立 pnpm，最后才尝试 Corepack。只有这些位置都没有兼容工具时才需要另行安装 Node.js 24 x64 或 pnpm 11。
-
-构建完整 Runtime：
-
-```powershell
-./scripts/build-runtime.ps1 `
-  -DshTag dsh-v0.1.0-rc.7 `
-  -OutputDirectory "$PWD/runtime-output" `
-  -RuntimeRevision 1 `
-  -RequiredShellRange '>=0.1.0 <1.0.0'
-```
-
-`.github/workflows/runtime-release.yml` 会验证上游 Tag 与 CLI 版本，安装精确的官方 `@deepseek-ai/dsh`、Node 24 和独立 pnpm，运行真实 Web、设置打开、会话修复、插件及关闭冒烟，再发布 ZIP、Manifest 和 Catalog 更新。同一 DSH Version 只能以更高 Runtime Revision 更新。
-
-公开分发应使用 Windows 信任 CA 签发的 Authenticode 证书。`shell-v*` Tag 构建可通过 `CSC_LINK` 和 `CSC_KEY_PASSWORD` 交给 electron-builder 签名；硬件或云端保护的私钥应接入对应远程签名服务，不应复制到仓库或 GitHub Secret。没有证书时，本地 `dist` 保持未签名。
-
-## 当前范围
-
-- 仅支持 Windows x64。
-- 当前 Shell 最低兼容 DSH Version 为 `0.1.0-rc.7`。
-- Runtime Release 始终标记为 GitHub Prerelease，不会替换 electron-updater 使用的 Shell Latest Release。
-- DSH Web 只通过临时 loopback Origin 打开；Host 与插件运行在下载的标准 Node Runtime 中。
+SignPath Foundation 批准并启用集成后，符合条件的桌面客户端发布将使用 [SignPath.io](https://about.signpath.io) 提供的免费代码签名，证书由 [SignPath Foundation](https://signpath.org) 持有。详见[完整代码签名政策](docs/code-signing-policy.md)。
