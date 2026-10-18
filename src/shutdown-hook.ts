@@ -2,6 +2,7 @@ import { installCustomProviderImageHook } from './custom-provider-image-injector
 import { installImageGenerationRuntimeHook } from './image-generation-runtime-injector.ts'
 import { installDesktopReplayHostHook } from './conversation-replay-host-injector.ts'
 import { installRuntimeToolCompatibility } from './runtime-tool-compatibility.ts'
+import { installGrokNativeToolsHook } from './grok-native-tools-injector.ts'
 import type { Serializable } from 'node:child_process'
 
 const SHUTDOWN_MESSAGE = 'dsh/shutdown'
@@ -43,4 +44,5 @@ installCustomProviderImageHook()
 installImageGenerationRuntimeHook()
 installDesktopReplayHostHook()
 installRuntimeToolCompatibility()
+installGrokNativeToolsHook()
 if (process.send !== undefined) installShutdownHook(process)

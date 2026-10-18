@@ -1,7 +1,18 @@
 import { describe, expect, it, vi } from 'vitest'
-import { stripTypeScriptTypes } from 'node:module'
+import { stripTypeScriptTypes, type registerHooks } from 'node:module'
 import { zstdCompressSync, zstdDecompress } from 'node:zlib'
-import { adaptRuntimeCode, adaptRuntimeEditTool, adaptRuntimeGrep, adaptRuntimeLocalEdit, adaptRuntimePwsh, adaptRuntimeRead, adaptRuntimeReadLimit, adaptRuntimeToolPrompt } from '../src/runtime-tool-compatibility.ts'
+import { installRuntimeToolCompatibility, adaptRuntimeCode, adaptRuntimeEditTool, adaptRuntimeGrep, adaptRuntimeLocalEdit, adaptRuntimePwsh, adaptRuntimeRead, adaptRuntimeReadLimit, adaptRuntimeToolPrompt } from '../src/runtime-tool-compatibility.ts'
+
+describe('runtime compatibility hook boundaries', () => {
+  it('passes through the current PTC module and preserves strings without an adapter', () => {
+    const register = vi.fn((_hooks: Parameters<typeof registerHooks>[0]) => ({ deregister() {} }))
+    installRuntimeToolCompatibility(register)
+    const hooks = register.mock.calls[0]?.[0] as unknown as { load: (url: string, context: object, next: () => object) => object }
+    const loaded = { source: 'const text = `换行 import fs from "node:fs"; export const n=1;`; return text;' }
+    expect(hooks.load('file:///runtime/node_modules/@deepseek-ai/dsh-ptc-runtime-node/lib/index.js', {}, () => loaded)).toBe(loaded)
+  })
+})
+
 
 const fixture = `function candidateExists(candidate) {
 \ttry {
