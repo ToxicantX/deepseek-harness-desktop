@@ -3,6 +3,7 @@ import { installImageGenerationRuntimeHook } from './image-generation-runtime-in
 import { installDesktopReplayHostHook } from './conversation-replay-host-injector.ts'
 import { installRuntimeToolCompatibility } from './runtime-tool-compatibility.ts'
 import { installGrokNativeToolsHook } from './grok-native-tools-injector.ts'
+import { installMcpToolDiscoveryHook } from './mcp-tool-discovery-injector.ts'
 import type { Serializable } from 'node:child_process'
 
 const SHUTDOWN_MESSAGE = 'dsh/shutdown'
@@ -45,4 +46,5 @@ installImageGenerationRuntimeHook()
 installDesktopReplayHostHook()
 installRuntimeToolCompatibility()
 installGrokNativeToolsHook()
+installMcpToolDiscoveryHook()
 if (process.send !== undefined) installShutdownHook(process)
