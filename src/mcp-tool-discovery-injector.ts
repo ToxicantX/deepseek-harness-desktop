@@ -20,11 +20,16 @@ function createRuntimeDiscovery(registry: any, discover: typeof createMcpToolDis
     .filter(definition => definition.name.startsWith('mcp__'))
     .map(definition => ({ name: definition.name, description: definition.description ?? '', inputSchema: definition.parameters })))
   const guidance = 'Search MCP tools, then get the exact schema. Call the original name: PTC tools[name](args); native call on the next step.'
+  // These definitions bypass defineTool/register and enter the visible view directly, so the
+  // engine validates their canonical value against this RAW JsonSchemaNode — never the authoring
+  // DSL, whose `{ type: 'json' }` has no raw counterpart (the validator throws "unreachable
+  // variant in JsonSchemaType"). `{}` is the unconstrained raw form: any lossless JSON value,
+  // object for search/lookup hits and null for a missing schema lookup. Renderers are unchanged.
   const definitions = [
     {
       name: 'search_mcp_tools', description: 'Search visible MCP tool summaries with pagination. ' + guidance,
       parameters: { query: { type: 'string' }, server: { type: 'string' }, limit: { type: 'integer' }, offset: { type: 'integer' } },
-      output: { schema: { type: 'json' }, render: (_args: any, value: any) => [{ type: 'text', text: JSON.stringify(value) }] },
+      output: { schema: {}, render: (_args: any, value: any) => [{ type: 'text', text: JSON.stringify(value) }] },
       execute(args: any, exec: any) {
         const visible = registry.view(exec.agent).visible
         prune(exec.agent, visible)
@@ -34,7 +39,7 @@ function createRuntimeDiscovery(registry: any, discover: typeof createMcpToolDis
     {
       name: 'get_mcp_tool_schema', description: 'Get one exact visible MCP schema and activate its native definition (five most recent schema lookups per agent). ' + guidance,
       parameters: { name: { type: 'string', required: true } },
-      output: { schema: { type: 'json' }, render: (_args: any, value: any) => [{ type: 'text', text: JSON.stringify(value) }] },
+      output: { schema: {}, render: (_args: any, value: any) => [{ type: 'text', text: JSON.stringify(value) }] },
       execute(args: any, exec: any) {
         const visible = registry.view(exec.agent).visible
         prune(exec.agent, visible)

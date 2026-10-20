@@ -10,7 +10,7 @@ class Registry {
     this.definitions = new Map(); this.defaultMode = "native";
     this.layers = { chainLayers: scope => scope?.layers ?? [] };
     this.denied = new Set(); this.prepared = new WeakMap(); this.audit = [];
-    this.transport = { name: "run_code", parameters: {}, output: { schema: { type: "json" } } };
+    this.transport = { name: "run_code", parameters: {}, output: { schema: {} } };
   }
   modeFor(scope) {
     const layers = this.layers.chainLayers(scope);
@@ -102,7 +102,7 @@ class Registry {
 const helperNames = ['search_mcp_tools', 'get_mcp_tool_schema']
 function definition(name: string) {
   return { name, description: 'Tool ' + name + ' x'.repeat(400), parameters: { input: { type: 'string', required: true } }, timeoutMs: 123,
-    output: { schema: { type: 'json' }, render: (_args: any, value: any) => [{ type: 'text', text: JSON.stringify(value) }, { type: 'image', data: 'retained' }], presentationMeta: () => ({ original: true }) },
+    output: { schema: {}, render: (_args: any, value: any) => [{ type: 'text', text: JSON.stringify(value) }, { type: 'image', data: 'retained' }], presentationMeta: () => ({ original: true }) },
     execute: vi.fn(async (args: any) => ({ originalName: name, args })),
   }
 }
@@ -138,6 +138,30 @@ describe('MCP runtime discovery presentation', () => {
     expect(adapted.get('mcp__server__tool_511', agent)).toBe(adapted.definitions.get('mcp__server__tool_511'))
   })
 
+  // These helpers bypass defineTool/register and are spliced straight into the visible view, so
+  // the engine validates their canonical value against the RAW JsonSchemaNode they declare — not
+  // the authoring DSL. `{ type: 'json' }` has no raw counterpart and threw "unreachable variant
+  // in JsonSchemaType: json" from the real output validator. `{}` is the unconstrained raw form:
+  // it accepts the object hits and the null miss, so both helpers must declare exactly that.
+  it('declares both injected helpers with an unconstrained raw output schema', () => {
+    // A mocked dispatch accepts anything, so also pin the injected helper source itself: the
+    // authoring-only `json` output root must never reappear in the serialized runtime helper.
+    const adapted = adaptMcpToolDiscoveryRuntime(source).source
+    expect(adapted).not.toMatch(/output:\s*\{\s*schema:\s*\{\s*type:\s*['"]json['"]/)
+    const r = fixture(), ptc = { mode: 'ptc' }
+    for (const scope of [undefined, {}, ptc]) {
+      for (const name of helperNames) {
+        const definition = r.get(name, scope)
+        expect(definition.output.schema).toEqual({})
+        expect(definition.output.schema).not.toHaveProperty('type')
+        expect(Object.keys(definition.output.schema)).toEqual([])
+        expect(JSON.parse(JSON.stringify(definition.output.schema))).toEqual({})
+        expect(definition.output.render({}, { total: 0, items: [] })).toEqual([{ type: 'text', text: '{"total":0,"items":[]}' }])
+        expect(definition.output.render({ name: 'missing' }, null)).toEqual([{ type: 'text', text: 'null' }])
+      }
+    }
+  })
+
   it('uses fresh scoped summaries and detached exact schema lookup with five-entry LRU and agent/service isolation', async () => {
     const r = fixture(), agent = {}, child = Object.create(agent), other = fixture()
     const search = (await r.call('search_mcp_tools', { offset: 1, limit: 99 }, agent)).value
@@ -159,7 +183,7 @@ describe('MCP runtime discovery presentation', () => {
     expect(result.output).toEqual(r.get(result.name, agent).output.schema)
     result.inputSchema.input.type = 'boolean'; result.output.type = 'string'
     expect(r.get(result.name, agent).parameters.input.type).toBe('string')
-    expect(r.get(result.name, agent).output.schema.type).toBe('json')
+    expect(r.get(result.name, agent).output.schema).toEqual({})
     const odd = 'mcp__Mixed-Server__Name.With.Dots'
     r.definitions.set(odd, definition(odd))
     expect((await lookup(r, child, odd)).name).toBe(odd)
