@@ -4,6 +4,7 @@ import { installDesktopReplayHostHook } from './conversation-replay-host-injecto
 import { installRuntimeToolCompatibility } from './runtime-tool-compatibility.ts'
 import { installGrokNativeToolsHook } from './grok-native-tools-injector.ts'
 import { installMcpToolDiscoveryHook } from './mcp-tool-discovery-injector.ts'
+import { installSearchRuntimeHook } from './search-runtime-injector.ts'
 import type { Serializable } from 'node:child_process'
 
 const SHUTDOWN_MESSAGE = 'dsh/shutdown'
@@ -47,4 +48,5 @@ installDesktopReplayHostHook()
 installRuntimeToolCompatibility()
 installGrokNativeToolsHook()
 installMcpToolDiscoveryHook()
+installSearchRuntimeHook()
 if (process.send !== undefined) installShutdownHook(process)

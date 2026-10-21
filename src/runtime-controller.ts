@@ -85,6 +85,7 @@ export interface RuntimeControllerOptions {
   goalGuardPlugin: string
   catalogUrl?: string
   environment?: NodeJS.ProcessEnv
+  searchConfiguration?: () => Promise<string>
   inspectStaleLocalPlugins?: StaleLocalPluginRecoveryInspector
   inspectProfileBundles?: ProfileBundleRecoveryInspector
   inspectPluginPreset?: PluginPresetRecoveryInspector
@@ -107,6 +108,7 @@ export class RuntimeController {
   private readonly goalGuardPlugin: string
   private readonly catalogUrl: string
   private readonly environment: NodeJS.ProcessEnv
+  private readonly searchConfiguration: (() => Promise<string>) | undefined
   private readonly inspectStaleLocalPlugins: StaleLocalPluginRecoveryInspector
   private readonly inspectProfileBundles: ProfileBundleRecoveryInspector
   private readonly inspectPluginPreset: PluginPresetRecoveryInspector
@@ -143,6 +145,7 @@ export class RuntimeController {
     this.goalGuardPlugin = options.goalGuardPlugin
     this.catalogUrl = options.catalogUrl ?? DEFAULT_CATALOG_URL
     this.environment = options.environment ?? process.env
+    this.searchConfiguration = options.searchConfiguration
     this.inspectStaleLocalPlugins = options.inspectStaleLocalPlugins ?? inspectStaleLocalPluginRecovery
     this.inspectProfileBundles = options.inspectProfileBundles ?? inspectProfileBundleRecovery
     this.inspectPluginPreset = options.inspectPluginPreset ?? inspectPluginPresetRecovery
@@ -546,11 +549,13 @@ export class RuntimeController {
       await Promise.all([overlay?.dispose(), isolationOverlay?.dispose()])
     }
     try {
+      const environment = desktopEnvironment(runtime, this.environment)
+      if (this.searchConfiguration !== undefined) environment.DSH_DESKTOP_SEARCH_CONFIG = await this.searchConfiguration()
       backend = await startBackend({
         runtime,
         shutdownHook: this.shutdownHook,
         cwd: home,
-        env: desktopEnvironment(runtime, this.environment),
+        env: environment,
         additionalPatches: [overlay?.path, isolationOverlay?.path].filter((path): path is string => path !== undefined),
         cleanup,
         onOpenSettingsDocument: this.onOpenSettingsDocument,

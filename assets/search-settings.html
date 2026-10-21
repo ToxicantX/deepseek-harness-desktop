@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self'; style-src 'unsafe-inline'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>搜索设置</title>
+  <style>
+    :root { color-scheme: light; font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif; color: #202124; background: #f5f6f8; }
+    * { box-sizing: border-box; letter-spacing: 0; }
+    body { margin: 0; }
+    main { max-width: 720px; margin: auto; padding: 24px; }
+    header { display: flex; align-items: center; gap: 10px; margin-bottom: 24px; }
+    header img { width: 28px; height: 28px; }
+    h1 { margin: 0; font-size: 22px; }
+    h2, summary { font-size: 16px; font-weight: 600; margin: 0 0 16px; }
+    section, details { border-top: 1px solid #d9dde3; padding-top: 18px; margin-top: 20px; }
+    summary { cursor: pointer; }
+    label.field { display: grid; gap: 6px; margin: 14px 0; font-size: 13px; }
+    input:not([type="checkbox"]), select { min-width: 0; width: 100%; min-height: 36px; padding: 8px 10px; border: 1px solid #b9bec6; border-radius: 5px; background: #fff; color: #202124; }
+    input, select, button { font: inherit; }
+    label.remove { display: flex; align-items: center; gap: 7px; font-size: 12px; color: #646a73; }
+    label.remove input { margin: 0; }
+    button { min-height: 36px; padding: 8px 14px; border: 1px solid #c7ccd3; border-radius: 5px; background: #fff; color: #202124; cursor: pointer; }
+    button:disabled { opacity: .55; cursor: default; }
+    input:focus-visible, select:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px solid #1769d2; outline-offset: 2px; }
+    #search-save { background: #1769d2; border-color: #1769d2; color: white; }
+    footer { border-top: 1px solid #d9dde3; margin-top: 24px; padding-top: 18px; display: flex; flex-wrap: wrap; gap: 10px; }
+    #search-status { flex-basis: 100%; min-height: 22px; margin: 2px 0 0; font-size: 13px; overflow-wrap: anywhere; color: #646a73; }
+    #search-status[data-kind="error"] { color: #a92323; }
+    #search-status[data-kind="success"] { color: #21683a; }
+    @media (max-width: 480px) { main { padding: 18px 16px; } }
+  </style>
+</head>
+<body>
+  <main id="search-settings-page">
+    <header><img src="icon.png" alt=""><h1>搜索设置</h1></header>
+    <form id="search-form">
+      <label class="field">搜索渠道
+        <select id="search-provider">
+          <option value="auto">自动选择可用渠道</option>
+          <option value="exa">Exa</option>
+          <option value="perplexity">Perplexity</option>
+          <option value="runtime">DSH 原有搜索渠道</option>
+        </select>
+      </label>
+      <section>
+        <h2>Exa</h2>
+        <label class="field">API 地址<input id="search-exa-url" type="url" value="https://api.exa.ai" required autocomplete="off"></label>
+        <label class="field">API Key<input id="search-exa-key" type="password" autocomplete="off" maxlength="8192" spellcheck="false" placeholder="未保存密钥"></label>
+        <label class="remove"><input id="search-exa-remove" type="checkbox">移除已保存的 Exa 密钥</label>
+      </section>
+      <details id="search-perplexity-details">
+        <summary>Perplexity</summary>
+        <label class="field">API 地址<input id="search-perplexity-url" type="url" value="https://api.perplexity.ai" required autocomplete="off"></label>
+        <label class="field">API Key<input id="search-perplexity-key" type="password" autocomplete="off" maxlength="8192" spellcheck="false" placeholder="未保存密钥"></label>
+        <label class="remove"><input id="search-perplexity-remove" type="checkbox">移除已保存的 Perplexity 密钥</label>
+      </details>
+      <footer>
+        <button id="search-save" type="submit" disabled>保存并重启 Runtime</button>
+        <button id="search-reload" type="button">重新加载</button>
+        <p id="search-status" role="status" aria-live="polite">正在读取搜索设置...</p>
+      </footer>
+    </form>
+  </main>
+</body>
+</html>

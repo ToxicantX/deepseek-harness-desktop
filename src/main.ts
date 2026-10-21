@@ -12,6 +12,7 @@ import {
   Menu,
   nativeImage,
   protocol,
+  safeStorage,
   Tray,
   shell,
   type IpcMainEvent,
@@ -28,6 +29,7 @@ import { McpManager, npmGlobalRootsFromEnvironment, type McpList } from './mcp-m
 import { SkillManager, type SkillList } from './skill-manager.ts'
 import { mutateMcpWithRuntime } from './mcp-restart.ts'
 import { PersonalizationManager } from './personalization-manager.ts'
+import { SearchSettings } from './search-settings.ts'
 import {
   shouldInjectInstructionsCompatibility,
   buildLegacyInstructionsPrompt,
@@ -64,10 +66,11 @@ const pluginManagerPage = join(app.getAppPath(), 'assets', 'plugin-manager.html'
 const mcpManagerPage = join(app.getAppPath(), 'assets', 'mcp-manager.html')
 const skillManagerPage = join(app.getAppPath(), 'assets', 'skill-manager.html')
 const personalizationPage = join(app.getAppPath(), 'assets', 'personalization.html')
+const searchSettingsPage = join(app.getAppPath(), 'assets', 'search-settings.html')
 const shellUpdatePage = join(app.getAppPath(), 'assets', 'shell-update.html')
 const petPage = join(app.getAppPath(), 'assets', 'pet.html')
 const usageMonitorPage = join(app.getAppPath(), 'assets', 'usage-monitor.html')
-const allowedLocalPages = new Set([setupPage, repairPage, pluginManagerPage, mcpManagerPage, skillManagerPage, personalizationPage, shellUpdatePage, petPage, usageMonitorPage])
+const allowedLocalPages = new Set([setupPage, repairPage, pluginManagerPage, mcpManagerPage, skillManagerPage, personalizationPage, shellUpdatePage, petPage, usageMonitorPage, searchSettingsPage])
 const preload = join(moduleDirectory, 'preload.cjs')
 const petPreload = join(moduleDirectory, 'pet-preload.cjs')
 const shutdownHook = app.isPackaged
@@ -85,6 +88,8 @@ let pluginWindow: BrowserWindow | undefined
 let mcpWindow: BrowserWindow | undefined
 let skillWindow: BrowserWindow | undefined
 let personalizationWindow: BrowserWindow | undefined
+let searchSettingsWindow: BrowserWindow | undefined
+let searchSettings: SearchSettings | undefined
 let updateWindow: BrowserWindow | undefined
 let usageMonitorWindow: BrowserWindow | undefined
 let usageMonitor: UsageMonitorService | undefined
@@ -309,7 +314,7 @@ function recoverMainUi(reason: string): void {
   void showSetup(mainWindow).catch(logFatalError)
 }
 
-function createWindow(options: { utility?: 'manager' | 'repair' | 'plugin' | 'mcp' | 'personalization' | 'update' | 'usage' | 'skill' } = {}): BrowserWindow {
+function createWindow(options: { utility?: 'manager' | 'repair' | 'plugin' | 'mcp' | 'personalization' | 'update' | 'usage' | 'skill' | 'search' } = {}): BrowserWindow {
   const utility = options.utility
   const manager = utility === 'manager'
   const repair = utility === 'repair'
@@ -319,12 +324,13 @@ function createWindow(options: { utility?: 'manager' | 'repair' | 'plugin' | 'mc
   const personalization = utility === 'personalization'
   const update = utility === 'update'
   const usage = utility === 'usage'
+  const search = utility === 'search'
   const window = new BrowserWindow({
     ...(update && mainWindow !== undefined ? { parent: mainWindow, modal: true } : {}),
-    width: manager ? 700 : repair ? 760 : plugin ? 740 : mcp ? 860 : skill ? 900 : personalization ? 800 : update ? 480 : usage ? 1000 : 1240,
-    height: manager ? 720 : repair ? 780 : plugin ? 700 : mcp ? 760 : skill ? 760 : personalization ? 720 : update ? 250 : usage ? 780 : 820,
-    minWidth: manager || repair ? 480 : plugin ? 420 : mcp ? 600 : skill ? 600 : personalization ? 520 : update ? 420 : usage ? 640 : 820,
-    minHeight: manager ? 560 : plugin ? 520 : mcp || personalization || skill ? 560 : update ? 220 : 600,
+    width: search ? 640 : manager ? 700 : repair ? 760 : plugin ? 740 : mcp ? 860 : skill ? 900 : personalization ? 800 : update ? 480 : usage ? 1000 : 1240,
+    height: search ? 720 : manager ? 720 : repair ? 780 : plugin ? 700 : mcp ? 760 : skill ? 760 : personalization ? 720 : update ? 250 : usage ? 780 : 820,
+    minWidth: search ? 380 : manager || repair ? 480 : plugin ? 420 : mcp ? 600 : skill ? 600 : personalization ? 520 : update ? 420 : usage ? 640 : 820,
+    minHeight: search ? 520 : manager ? 560 : plugin ? 520 : mcp || personalization || skill ? 560 : update ? 220 : 600,
     ...(update ? { closable: false, minimizable: false, maximizable: false, resizable: false } : {}),
     show: false,
     autoHideMenuBar: utility !== undefined,
@@ -643,6 +649,26 @@ async function openPersonalization(): Promise<void> {
   await window.loadFile(personalizationPage)
 }
 
+async function openSearchSettings(): Promise<void> {
+  if (searchSettingsWindow !== undefined && !searchSettingsWindow.isDestroyed()) {
+    searchSettingsWindow.show(); searchSettingsWindow.focus()
+    return
+  }
+  const window = createWindow({ utility: 'search' })
+  searchSettingsWindow = window
+  window.on('closed', () => { if (searchSettingsWindow === window) searchSettingsWindow = undefined })
+  await window.loadFile(searchSettingsPage)
+}
+
+function searchSettingsService(event: IpcMainInvokeEvent): SearchSettings {
+  if (searchSettingsWindow === undefined || searchSettingsWindow.isDestroyed() || event.sender !== searchSettingsWindow.webContents
+    || event.senderFrame !== event.sender.mainFrame) throw new Error('搜索设置请求来源无效')
+  const url = new URL(event.sender.getURL())
+  if (url.protocol !== 'file:' || url.search !== '' || url.hash !== '' || resolve(fileURLToPath(url)) !== resolve(searchSettingsPage)) throw new Error('搜索设置请求页面无效')
+  if (searchSettings === undefined) throw new Error('搜索设置尚未初始化')
+  return searchSettings
+}
+
 async function showAbout(): Promise<void> {
   const runtimeVersion = latestView?.currentVersion === undefined
     ? '尚未启动'
@@ -823,6 +849,7 @@ function installMenu(): void {
       label: 'Runtime',
       submenu: [
         { label: '管理 DSH 版本', click: () => { void openVersionManager() } },
+        { label: '搜索设置', click: () => { void openSearchSettings().catch(logFatalError) } },
         { label: '刷新并应用版本策略', click: () => { void retryRuntimeFromMenu().catch(logFatalError) } },
         { type: 'separator' },
         {
@@ -953,6 +980,7 @@ async function startApplication(): Promise<void> {
   usageMonitor ??= new UsageMonitorService(home)
   void usageMonitor.initialize().catch(logFatalError)
   pluginIsolation = new PluginIsolation({ home, directory: join(app.getPath('userData'), 'plugin-isolation') })
+  searchSettings = new SearchSettings(join(app.getPath('userData'), 'search-settings.bin'), safeStorage)
   controller = new RuntimeController({
     shellVersion: app.getVersion(),
     store,
@@ -960,6 +988,10 @@ async function startApplication(): Promise<void> {
     userData: app.getPath('userData'),
     goalGuardPlugin,
     pluginIsolation,
+    async searchConfiguration() {
+      try { return await searchSettings!.runtimeConfiguration() }
+      catch (error) { logFatalError(error); return '{}' }
+    },
     ...(process.env.DSH_DESKTOP_CATALOG_URL === undefined ? {} : { catalogUrl: process.env.DSH_DESKTOP_CATALOG_URL }),
     onView: broadcast,
     async onReady(url, _runtime, preparedCliDirectory) {
@@ -1221,6 +1253,28 @@ ipcMain.handle('usage-monitor:read', async (event, initialize: unknown) => {
   }
   if (!usageMonitor) throw new Error('用量监控尚未就绪')
   return initialize === true ? usageMonitor.initialize(onProgress) : usageMonitor.read(onProgress)
+})
+
+ipcMain.handle('search-settings:read', event => searchSettingsService(event).read())
+ipcMain.handle('search-settings:save', async (event, value: unknown) => {
+  const service = searchSettingsService(event), runtimeController = controller
+  if (runtimeController === undefined || quitting) throw new Error('Runtime 尚未就绪或应用正在退出')
+  if (mcpMutationActive || pluginIsolationActive || pluginManager?.current() !== undefined) throw new Error('请等待当前插件或 MCP 操作完成。')
+  mcpMutationActive = true
+  try {
+    const confirmation = await dialog.showMessageBox(searchSettingsWindow!, {
+      type: 'question', title: '应用搜索设置', message: '保存并重启 Runtime？',
+      detail: '正在运行的任务会中断。', buttons: ['取消', '保存并重启'], defaultId: 0, cancelId: 0,
+    })
+    if (confirmation.response !== 1) return { saved: false, settings: await service.read() }
+    if (quitting) throw new Error('应用正在退出，搜索设置未保存。')
+    const settings = await service.save(value)
+    if (quitting) throw new Error('搜索设置已保存，将在下次启动应用时生效。')
+    if (mainWindow !== undefined) await showSetup(mainWindow)
+    await runtimeController.retry()
+    if (latestView?.phase !== 'ready') throw new Error('搜索设置已保存，但 Runtime 未成功启动，请查看启动页诊断。')
+    return { saved: true, settings }
+  } finally { mcpMutationActive = false }
 })
 
 ipcMain.handle('personalization:read', async (event) => {

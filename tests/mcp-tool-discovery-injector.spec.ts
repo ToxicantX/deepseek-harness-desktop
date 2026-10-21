@@ -162,6 +162,24 @@ describe('MCP runtime discovery presentation', () => {
     }
   })
 
+  it('projects object-rooted JSON Schema parameters for providers and SDK renderers', () => {
+    const r = fixture(), agent = {}, ptc = { mode: 'ptc' }
+    const expected = [
+      { name: 'search_mcp_tools', parameters: { type: 'object', properties: {
+        query: { type: 'string' }, server: { type: 'string' }, limit: { type: 'integer' }, offset: { type: 'integer' },
+      } } },
+      { name: 'get_mcp_tool_schema', parameters: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] } },
+    ]
+    const helpers = (schemas: any[]) => schemas.filter(schema => helperNames.includes(schema.name))
+      .map(({ name, parameters }) => ({ name, parameters }))
+    expect(helpers(r.wireSchemas(agent).schemas)).toEqual(expected)
+    expect(helpers(JSON.parse(r.sdkSection().text({ scope: ptc })))).toEqual(expected)
+    for (const { name, parameters } of expected) {
+      expect(r.get(name, agent).parameters).toEqual(parameters)
+      expect(parameters.properties).not.toHaveProperty('name.required')
+    }
+  })
+
   it('uses fresh scoped summaries and detached exact schema lookup with five-entry LRU and agent/service isolation', async () => {
     const r = fixture(), agent = {}, child = Object.create(agent), other = fixture()
     const search = (await r.call('search_mcp_tools', { offset: 1, limit: 99 }, agent)).value

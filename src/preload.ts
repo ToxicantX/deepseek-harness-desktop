@@ -8,6 +8,7 @@ import { injectCustomProviderMultimediaFactorySource, installCustomProviderMulti
 import { INSTALL_MULTIMEDIA_DISPLAY_SOURCE, installMultimediaDisplayHook } from './multimedia-display-injector.ts'
 import { injectOpenInAppFactorySource, installOpenInAppCompatibilityHook } from './open-in-app-compatibility.ts'
 import { installUsageMonitor } from './usage-monitor-renderer.ts'
+import { installSearchSettings } from './search-settings-renderer.ts'
 import { installKoiPondToggle } from './koi-pond-toggle.ts'
 import type { UsageScanProgress } from './usage-monitor.ts'
 import type { RuntimePreference } from './catalog.ts'
@@ -1612,6 +1613,10 @@ window.addEventListener('DOMContentLoaded', () => {
       return () => { ipcRenderer.removeListener('usage-monitor:progress', receive) }
     })
   }
+  else if (document.querySelector('#search-settings-page') !== null) installSearchSettings(
+    () => ipcRenderer.invoke('search-settings:read'),
+    value => ipcRenderer.invoke('search-settings:save', value),
+  )
   else if (document.querySelector('#shell-update-page') !== null) initializeShellUpdatePage()
   else if (document.querySelector('#personalization-page') !== null) initializePersonalizationPage()
   else if (document.querySelector('#mcp-manager-page') !== null) initializeMcpManagerPage()

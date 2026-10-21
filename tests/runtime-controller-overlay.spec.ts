@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../src/goal-guard-overlay.ts', () => ({ prepareGoalGuardOverlay: mocks.prepareOverlay }))
 vi.mock('../src/backend.ts', () => ({
-  desktopEnvironment: (_runtime: unknown, environment: unknown) => environment,
+  desktopEnvironment: (_runtime: unknown, environment: NodeJS.ProcessEnv) => ({ ...environment }),
   startBackend: mocks.startBackend,
 }))
 vi.mock('../src/cli-shell.ts', () => ({ prepareCliShim: vi.fn(async () => 'cli-directory') }))
@@ -32,6 +32,7 @@ function controller(
   preparePluginPresetCompatibility: (input: any) => Promise<string | undefined> = vi.fn(async () => undefined),
   inspectAgentPresetSchema?: any,
   inspectPluginPreset?: any,
+  searchConfiguration?: () => Promise<string>,
 ) {
   return new RuntimeController({
     shellVersion: '0.1.16',
@@ -44,6 +45,7 @@ function controller(
     ...(inspectAgentPresetSchema === undefined ? {} : { inspectAgentPresetSchema }),
     ...(inspectPluginPreset === undefined ? {} : { inspectPluginPreset }),
     environment: { DSH_HOME: 'C:/dsh-home' },
+    ...(searchConfiguration === undefined ? {} : { searchConfiguration }),
     onView: vi.fn(),
     onReady,
     onOpenSettingsDocument: vi.fn(async () => {}),
@@ -56,6 +58,20 @@ beforeEach(() => {
 })
 
 describe('RuntimeController goal guard overlay', () => {
+  it('loads current encrypted search configuration only into the Runtime fork environment', async () => {
+    let config = '{"provider":"exa","exa":{"apiKey":"fixture-one"}}'
+    const searchConfiguration = vi.fn(async () => config)
+    mocks.startBackend.mockResolvedValue({ url: new URL('http://127.0.0.1:43123/'), done: new Promise(() => {}), stop: vi.fn() })
+    const value = controller(undefined, undefined, undefined, undefined, undefined, searchConfiguration)
+    await (value as any).launch(runtime())
+    expect(mocks.startBackend.mock.calls[0]![0].env.DSH_DESKTOP_SEARCH_CONFIG).toBe(config)
+    expect((value as any).environment).toEqual({ DSH_HOME: 'C:/dsh-home' })
+    config = '{"provider":"auto"}'
+    await (value as any).launch(runtime())
+    expect(mocks.startBackend.mock.calls[1]![0].env.DSH_DESKTOP_SEARCH_CONFIG).toBe(config)
+    expect(searchConfiguration).toHaveBeenCalledTimes(2)
+  })
+
   it('automatically migrates the exact DSH 0.1.3 preset schema error before retrying', async () => {
     const apply = vi.fn(async () => {})
     const inspect = vi.fn(async (input: { diagnostics?: string }) => input.diagnostics === undefined

@@ -29,6 +29,7 @@ Later launches reuse the installed runtime. If a download or startup fails, foll
 | Set your preferred language and response style | **File → Personalization...** |
 | Install or update plugins, connect MCP servers, manage skills | **Runtime → Manage Plugins / Manage MCP / Manage Skill** |
 | Change the DSH version | **Runtime → Manage DSH versions** |
+| Configure Exa, Perplexity, or automatic search routing | **Runtime → Search Settings**; enter your API key, then save and restart Runtime |
 | View request counts, token usage, and trends | **Help → Usage Monitor**; counts usage recorded in sessions, without balances or costs |
 | Change the theme or show or hide the pet | **View → Theme / Desktop Pet** |
 | Open the koi pond | Use the floating koi pond entry in the main window to feed and name fish, then return to your conversation |
@@ -66,12 +67,20 @@ For other problems, open an [issue](https://github.com/ToxicantX/deepseek-harnes
 
 ## Versions And Updates
 
+### 0.1.64 · 2026-10-21 20:59 (Beijing Time)
+
+- Added search settings for Exa, Perplexity, and existing DSH search providers. Automatic routing skips channels with missing credentials and uses an available configured provider.
+- Saved keys are encrypted by the operating system and are not returned to the settings window. Applying settings requires confirmation to restart Runtime and interrupts running tasks.
+- Fixed MCP discovery tool parameter schemas that caused WorkBuddy to reject the first request with `11129 invalid function call parameters`.
+- Update and restart the desktop client to apply these changes. Sessions, models, and plugin settings are retained.
+
 ### 2026-10-17 12:28 (Beijing Time)
 
 - Simplified both guides around downloads, initial setup, common actions, updates, and troubleshooting.
 
 ### Recent Changes
 
+- **0.1.64**: Added Exa and Perplexity search settings with automatic fallback, and fixed the MCP parameter format behind WorkBuddy error 11129.
 - **0.1.60**: Fixed the workspace folder button becoming unresponsive after opening Explorer.
 - Added custom image generation protocol support, enlarged image previews, and audio/video playback. Generation capabilities depend on the configured provider and model.
 - Added model information to subagent conversations and improved pond backgrounds and task status display.
