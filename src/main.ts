@@ -56,6 +56,11 @@ import { createClientBundleAdapterScript, createSkinDisposerScript, createSkinMa
 import { ShellSkinStore } from './shell-skin-store.ts'
 import { allowDshWebPermission, shouldOpenInSystemBrowser } from './window-security.ts'
 import { createWebContextMenuTemplate } from './web-context-menu.ts'
+import { createSessionHistoryVirtualizerScript } from './session-history-virtualizer-injector.ts'
+
+// 为 Chromium 渲染进程及主进程 V8 堆内存扩展空间，防止超长会话日志及 DOM 回写瞬间触发 OOM 崩溃
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=4096')
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'dsh-skin', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }])
 
@@ -167,6 +172,7 @@ function injectSkinMarket(window: BrowserWindow): void {
     return
   }
   void (async () => {
+    await window.webContents.executeJavaScript(createSessionHistoryVirtualizerScript())
     await window.webContents.executeJavaScript(createCommandDescriptionLocalizerScript())
     await window.webContents.executeJavaScript(createFileContextInjectorScript())
     await window.webContents.executeJavaScript(createSkinMarketInjectorScript())
@@ -314,6 +320,56 @@ function recoverMainUi(reason: string): void {
   void showSetup(mainWindow).catch(logFatalError)
 }
 
+/**
+ * 渲染线程卡死时抓取真实 JS 调用栈。
+ *
+ * 死循环不会返回，所以 executeJavaScript 永远等不到结果；只有 CDP 的
+ * Debugger.pause 能在 V8 层强制中断脚本并回传当时的调用栈，这是定位
+ * 无限循环的唯一可靠手段。抓取失败不影响后续恢复流程。
+ */
+async function captureStuckStack(contents: WebContents): Promise<void> {
+  if (contents.isDestroyed()) return
+  try {
+    if (!contents.debugger.isAttached()) contents.debugger.attach('1.3')
+  } catch (error) {
+    console.error('[MAIN-STACK] debugger attach failed: ' + String(error))
+    return
+  }
+  const cleanup = (): void => {
+    try { if (contents.debugger.isAttached()) contents.debugger.detach() } catch {}
+  }
+  try {
+    await contents.debugger.sendCommand('Debugger.enable')
+    await contents.debugger.sendCommand('Debugger.pause')
+  } catch (error) {
+    console.error('[MAIN-STACK] Debugger.pause failed: ' + String(error))
+    cleanup()
+    return
+  }
+  const frames = await new Promise<string[]>((resolve) => {
+    const timer = setTimeout(() => resolve(['<pause timeout>']), 5_000)
+    contents.debugger.once('message', (_event, method, params) => {
+      clearTimeout(timer)
+      if (method !== 'Debugger.paused') {
+        resolve(['<unexpected: ' + method + '>'])
+        return
+      }
+      const callFrames = (params as { callFrames?: Array<{ functionName?: string; url?: string; location?: { lineNumber?: number; columnNumber?: number } }> }).callFrames ?? []
+      resolve(callFrames.slice(0, 25).map((frame) => {
+        const fn = frame.functionName === '' ? '<anonymous>' : String(frame.functionName)
+        const url = String(frame.url ?? '')
+        const line = (frame.location?.lineNumber ?? -1) + 1
+        const column = (frame.location?.columnNumber ?? -1) + 1
+        return `${fn} @ ${url}:${line}:${column}`
+      }))
+    })
+  })
+  cleanup()
+  const report = frames.length === 0 ? '<no call frames>' : frames.join('\n    ')
+  console.error('[MAIN-STACK] renderer stuck call stack:\n    ' + report)
+  logFatalError('[MAIN-STACK] renderer stuck call stack:\n    ' + report)
+}
+
 function createWindow(options: { utility?: 'manager' | 'repair' | 'plugin' | 'mcp' | 'personalization' | 'update' | 'usage' | 'skill' | 'search' } = {}): BrowserWindow {
   const utility = options.utility
   const manager = utility === 'manager'
@@ -382,12 +438,50 @@ function createWindow(options: { utility?: 'manager' | 'repair' | 'plugin' | 'mc
   if (utility === undefined) window.setMenuBarVisibility(false)
   window.once('ready-to-show', () => { window.show() })
   window.webContents.on('render-process-gone', (_event, details) => {
+    console.error(`[MAIN-PROCESS] render-process-gone: reason=${details.reason}, exitCode=${details.exitCode}`)
+    logFatalError(`[MAIN-PROCESS] render-process-gone: reason=${details.reason}, exitCode=${details.exitCode}`)
     if (window !== mainWindow) return
-    recoverMainUi(`DSH 界面进程已退出：${details.reason}`)
+    recoverMainUi(`DSH 界面进程已退出：${details.reason} (code: ${details.exitCode})`)
   })
+  // 当渲染进程处理大体量历史或进行长文本排版时，可能短暂占用主线程。
+  // 判断依据是渲染进程是否真的恢复：只要收到 responsive 就撤销告警。
+  // 死循环不会响应，这里 35 秒后强制抓一次 V8 调用栈再恢复界面。
+  const UNRESPONSIVE_GRACE_MS = 35_000
+  let unresponsiveTimer: NodeJS.Timeout | undefined
+  let unresponsiveSince = 0
   window.on('unresponsive', () => {
-    if (window !== mainWindow) return
-    recoverMainUi('DSH 界面无响应')
+    // 只在首次进入 unresponsive 时记录起点，重复事件不能重置计时，
+    // 否则会低估真实阻塞时长（之前 24s 那个数字就是这样被算错的）。
+    const first = unresponsiveSince === 0
+    if (first) unresponsiveSince = Date.now()
+    if (first) {
+      console.error(`[MAIN-WATCHDOG] unresponsive at ${new Date(unresponsiveSince).toISOString()} (mainWindow=${window === mainWindow})`)
+      logFatalError('[MAIN-WATCHDOG] unresponsive detected')
+    }
+    if (window !== mainWindow || quitting || mainUiRecovery) return
+    if (unresponsiveTimer !== undefined) return
+    unresponsiveTimer = setTimeout(() => {
+      unresponsiveTimer = undefined
+      if (window !== mainWindow || quitting || mainUiRecovery) return
+      const blockedMs = unresponsiveSince === 0 ? 0 : Date.now() - unresponsiveSince
+      console.error(`[MAIN-WATCHDOG] still unresponsive after ${Math.round(blockedMs / 1000)}s; recovering UI`)
+      logFatalError(`[MAIN-WATCHDOG] still unresponsive after ${blockedMs} ms; recovering UI`)
+      // 死循环不会返回，executeJavaScript 永远等不到结果；
+      // 只有 CDP 的 Debugger.pause 能在 V8 层强制中断并给出真实调用栈。
+      void captureStuckStack(window.webContents)
+      recoverMainUi('DSH 界面无响应')
+    }, UNRESPONSIVE_GRACE_MS)
+  })
+  window.on('responsive', () => {
+    const blockedMs = unresponsiveSince === 0 ? 0 : Date.now() - unresponsiveSince
+
+    unresponsiveSince = 0
+    if (unresponsiveTimer !== undefined) {
+      clearTimeout(unresponsiveTimer)
+      unresponsiveTimer = undefined
+    }
+    console.log(`[MAIN-WATCHDOG] responsive again after ${blockedMs} ms of blocked main thread`)
+    logFatalError(`[MAIN-WATCHDOG] renderer recovered after ${blockedMs} ms`)
   })
   window.webContents.on('did-finish-load', () => {
     sendView(window)
@@ -398,7 +492,10 @@ function createWindow(options: { utility?: 'manager' | 'repair' | 'plugin' | 'mc
       publishRunningSessions()
     }
   })
-  window.webContents.on('console-message', (_event, _level, message) => {
+  window.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    const levelTag = level === 3 ? 'ERROR' : level === 2 ? 'WARN' : 'INFO'
+    console.log(`[RENDERER-${levelTag}] ${message} (${sourceId}:${line})`)
+    logFatalError(`[RENDERER-${levelTag}] ${message}`)
     if (window !== mainWindow || quitting || latestView?.phase !== 'ready') return
     if (!shouldRecoverModelCatalog(message, modelCatalogRecoveryAttempts)) return
     modelCatalogRecoveryAttempts += 1

@@ -240,7 +240,10 @@ export async function startBackend(options: StartBackendOptions): Promise<Runnin
       })
     })
   })
-  child.stderr?.on('data', (chunk: Buffer | string) => { diagnostics.append(chunk) })
+  child.stderr?.on('data', (chunk: Buffer | string) => {
+    diagnostics.append(chunk)
+    process.stderr.write(chunk)
+  })
 
   let lineBuffer = ''
   let ready = false
@@ -248,6 +251,7 @@ export async function startBackend(options: StartBackendOptions): Promise<Runnin
     child.stdout?.on('data', (chunk: Buffer | string) => {
       diagnostics.append(chunk)
       lineBuffer += chunk.toString()
+      process.stdout.write(chunk)
       for (;;) {
         const newline = lineBuffer.indexOf('\n')
         if (newline === -1) break

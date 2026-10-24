@@ -338,16 +338,25 @@ export const INSTALL_MULTIMEDIA_DISPLAY_SOURCE = `(function () {
     if (document.body) document.body.appendChild(overlay);
   }
 
+  // 处理中标志：本函数会写 DOM（insertBefore），若不加闸会与 MutationObserver
+  // 形成自我激发的指数级回扫。长会话历史里有成百上千个链接时表现为彻底卡死。
+  let enhancing = false;
+  let enhanceScheduled = false;
+
   function enhanceMultimediaElements(container) {
+    if (enhancing) return;
     const root = container || document.body || document.documentElement;
     if (!root) return;
+    enhancing = true;
+    try {
 
     const linkList = root.querySelectorAll ? Array.from(root.querySelectorAll('a[href]:not([data-dsh-media-enhanced])')) : [];
     linkList.forEach((a) => {
+      // 无论是否为媒体链接都打标记，避免下一轮重复扫描同一批节点。
+      a.setAttribute('data-dsh-media-enhanced', 'true');
       const href = a.getAttribute('href') || '';
       const mediaType = detectMediaType(href);
       if (mediaType === 'audio' || mediaType === 'video') {
-        a.setAttribute('data-dsh-media-enhanced', 'true');
         const card = document.createElement('div');
         card.className = 'dsh-multimedia-card';
         card.setAttribute('data-media-type', mediaType);
@@ -369,6 +378,8 @@ export const INSTALL_MULTIMEDIA_DISPLAY_SOURCE = `(function () {
         originalLink.target = '_blank';
         originalLink.rel = 'noreferrer noopener';
         originalLink.textContent = a.textContent?.trim() || '打开原始媒体链接';
+        // 必须打标记：否则下一轮扫描会把卡片里的这个链接再次识别为媒体链接并再套一层卡片，无限增长。
+        originalLink.setAttribute('data-dsh-media-enhanced', 'true');
         footer.appendChild(originalLink);
 
         card.appendChild(header);
@@ -405,6 +416,7 @@ export const INSTALL_MULTIMEDIA_DISPLAY_SOURCE = `(function () {
         originalLink.target = '_blank';
         originalLink.rel = 'noreferrer noopener';
         originalLink.textContent = img.alt?.trim() || '打开原始视频链接';
+        originalLink.setAttribute('data-dsh-media-enhanced', 'true');
         footer.appendChild(originalLink);
         card.appendChild(header);
         card.appendChild(video);
@@ -422,6 +434,9 @@ export const INSTALL_MULTIMEDIA_DISPLAY_SOURCE = `(function () {
         showImageLightbox(img.src, img.alt);
       });
     });
+    } finally {
+      enhancing = false;
+    }
   }
 
   const init = () => {
@@ -435,8 +450,18 @@ export const INSTALL_MULTIMEDIA_DISPLAY_SOURCE = `(function () {
 
     const targetBody = document.body || document.documentElement;
     if (targetBody) {
+      // 关键修复：MutationObserver 必须合并成一次空闲扫描。
+      // 原实现每批变更都全量 querySelectorAll 两遍，而处理过程本身又写 DOM，
+      // 在长会话历史（成百上千个链接）下形成指数级回扫，表现为界面彻底卡死。
       const observer = new MutationObserver(() => {
-        enhanceMultimediaElements(targetBody);
+        if (enhanceScheduled) return;
+        enhanceScheduled = true;
+        const run = () => {
+          enhanceScheduled = false;
+          enhanceMultimediaElements(targetBody);
+        };
+        if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 1000 });
+        else setTimeout(run, 200);
       });
       observer.observe(targetBody, {
         childList: true,

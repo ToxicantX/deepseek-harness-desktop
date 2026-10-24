@@ -1,4 +1,5 @@
 import { installCustomProviderImageHook } from './custom-provider-image-injector.ts'
+import { installSessionCompatibilityHook } from './session-compatibility-injector.ts'
 import { installImageGenerationRuntimeHook } from './image-generation-runtime-injector.ts'
 import { installDesktopReplayHostHook } from './conversation-replay-host-injector.ts'
 import { installRuntimeToolCompatibility } from './runtime-tool-compatibility.ts'
@@ -49,4 +50,5 @@ installRuntimeToolCompatibility()
 installGrokNativeToolsHook()
 installMcpToolDiscoveryHook()
 installSearchRuntimeHook()
+installSessionCompatibilityHook()
 if (process.send !== undefined) installShutdownHook(process)

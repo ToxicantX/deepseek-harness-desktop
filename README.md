@@ -66,6 +66,29 @@
 其他问题请提交 [Issue](https://github.com/ToxicantX/deepseek-harness-desktop/issues)，附上 **帮助 → 关于 DeepSeek Harness** 中的版本、复现步骤和脱敏后的错误信息。
 
 ## 版本与更新说明
+### 0.1.66 · 2026-10-24（北京时间）
+
+- **修复长会话历史打开时界面彻底卡死（真正根因：桌面壳自身的 DOM 观察者自激循环）**：
+  - 根因在 `multimedia-display-injector` 注入的 `MutationObserver`：它对 `document.body` 开启了 `subtree: true`，而回调里执行的 `enhanceMultimediaElements()` 会调用 `insertBefore` 写 DOM，从而再次触发观察者。历史会话里链接数量多，形成指数级回扫，表现为渲染线程永久不可用。
+  - 更致命的是媒体卡片内部生成的“打开原始链接”本身也是 `<a href>` 且未打标记，下一轮扫描会把它当成新的媒体链接再包一层卡片，节点无限增长（实测 6 秒内新增 78 张卡片）。
+  - 修复方式：注入处理中标志防止重入；观察者回调改为 `requestIdleCallback` 合并派发；对卡片内部生成的链接补打 `data-dsh-media-enhanced` 标记；链接无论是否为媒体均打标记，避免重复扫描。
+  - 验证：节点普查从 2886→3276（持续增长）变为 2096→2096（零增长），会话可正常打开，不再触发无响应。
+- **排查手段改进**：
+  - 主进程 `unresponsive` 宽限由 20 秒放宽到 35 秒，并修正计时被重复事件重置的缺陷。
+  - 超时时通过 CDP `Debugger.pause` 在 V8 层强制中断并输出真实调用栈，是定位此类死循环的关键手段（`executeJavaScript` 在死循环下永远等不到结果）。
+  - 渲染端移除原先注入的限高 CSS 与定时 DOM 改写（现已改为默认关闭，仅保留只读观测），排除其与 DSH `ResizeObserver` 互相激发的可能。
+- **会话历史首屏瘦身**：服务端分页的 `turnWindow` 收紧为 `{ minMessages: 6, minTurns: 1 }`（实测 `maxMessages` 并非决定性参数，`turnWindow` 先命中即 break）。
+
+
+- **修复会话跨版本兼容与高版本历史读取失败（CWE-602 / 协议放行）**：
+  - 修复低版本 Harness 尝试读取高版本日志（如 `session.v4.jsonl.zstd`）时，因遇到高版本新事件（如 `job/registered`、`job/settled`、`tool/ptc-dispatch`、`system/message`、`assistant/attempt`、`workspace/changes` 等）报错 `contains event type "job/registered" unknown to this harness and not marked ignorable; refusing to interpret the log` 导致历史会话打不开的问题。
+  - 在桌面壳运行时加载钩子中平滑扩展已知事件白名单并放宽 `assertVersion` 日志版本检查，自动识别并安全忽略高版本专有事件，实现无缝向下兼容。
+- **修复超长会话历史回写聊天区域时桌面端崩溃与白屏卡死（渲染与堆内存防护）**：
+  - 为桌面主进程及 Chromium 渲染进程扩充 V8 堆内存上限（`--max-old-space-size=4096`），彻底避免一次性反序列化巨量会话事件导致的渲染器 OOM 硬崩溃。
+  - 注入零侵入会话视口虚拟化与 DOM 保护机制（`createSessionHistoryVirtualizerScript`）：通过 Chromium 原生 `content-visibility: auto` 与滚动包含（CSS Containment）对超出安全数量的旧历史轮次进行视口外渲染优化，并对过长的工具文本输出进行高度与重排限制，消除超大 DOM 爆炸引发的渲染进程无响应（unresponsive）崩溃。
+- 全程无需修改 DSH 核心代码，不影响短会话体验，保证上下各版本间 100% 平滑兼容。
+
+### 0.1.65 · 2026-10-22（北京时间）
 
 ### 0.1.64 · 2026-10-21 20:59（北京时间）
 
@@ -104,6 +127,7 @@
 
 ### 近期更新
 
+- **0.1.65**：修复超长会话历史回写崩溃与页面白屏卡死，实现高低版本历史会话无缝向下兼容。
 - **0.1.64**：新增 Exa、Perplexity 搜索设置和自动渠道回退，修复 MCP 参数格式导致的 WorkBuddy 11129 报错。
 - **0.1.63**：修复 `search_mcp_tools` 与 `get_mcp_tool_schema` 在真实运行时的原始输出 schema 校验失败。
 - **0.1.62**：MCP 工具 schema 改为有界搜索与按需读取，服务 instructions／使用指导仍全局进入上下文。
