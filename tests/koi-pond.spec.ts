@@ -22,6 +22,9 @@ async function fixture(level?: number) {
   return { store, path }
 }
 afterEach(async () => {
+  // The injected hook caches its document state on the global object, so each test
+  // must start from a document with no published running set.
+  delete (globalThis as Record<string, unknown>).__dshPondRunning
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
   for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true })
@@ -166,7 +169,7 @@ describe('koi dialogue observer', () => {
     expect(css).toMatch(/aside\s*\{[^}]*overflow-y:\s*auto/)
     expect(html).toContain('id="running-sessions"')
     expect(html).not.toContain('id="return"')
-    expect(main).toContain("ipcMain.on('pond:session-running'")
+    expect(main).toContain("ipcMain.on('pond:session-running-set'")
   })
 
   it('wires the pond clear controls through the shell down to the running list', async () => {
@@ -192,7 +195,14 @@ describe('koi dialogue observer', () => {
     const clearAll = /clearAllRunningSessions\(\): void \{[\s\S]*?sendRunningSessions\(\)/.exec(windowSource)?.[0]
     expect(clearOne).toContain('this.runningSessions.filter(session => session.id !== sessionId)')
     expect(clearAll).toContain('this.runningSessions = []')
-    expect(main).toContain('runningSessions.clear()')
+    // Dismissing a row no longer deletes anything inside the shell: it hides that run until the
+    // session genuinely runs again, so the clear handlers only forward to the pond window.
+    expect(main).not.toContain('runningSessions.delete')
+    expect(main).not.toContain('runningSessions.clear()')
+    // A reloaded chat page resets the tracked set, and stale frames can never revive a session.
+    expect(main).toContain("runningSnapshot = { epoch: '', seq: -1, sessions: [] }")
+    expect(main).toContain('seq <= runningSnapshot.seq')
+    expect(main).toContain("ipcMain.on('pond:session-running-set'")
   })
 
   it('uses the koi pond image asset for the floating toggle', async () => {
@@ -209,8 +219,28 @@ describe('koi dialogue observer', () => {
     expect(injectKoiPondDialogue(transformed.source).changed).toBe(false)
     return new (Function(`return (${transformed.source})`)()())()
   }
+  /**
+   * The Runtime's session list projection: the hook reads the authoritative running bit from
+   * here, exactly as the installed controller exposes it (projectList -> byId[id].running).
+   */
+  /** `extra` is shared by every listed id, or computed per id for mixed main/child sets. */
+  function runtimeList(ids: string[] = [], extra: Record<string, unknown> | ((id: string) => Record<string, unknown>) = {}) {
+    const listeners = new Set<() => void>()
+    const state = { running: true, ids, extra }
+    const list = {
+      getSnapshot: () => {
+        const byId: Record<string, unknown> = {}
+        for (const id of state.ids) {
+          byId[id] = { id, running: state.running, ...(typeof state.extra === 'function' ? state.extra(id) : state.extra) }
+        }
+        return { byId }
+      },
+      subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener) } },
+    }
+    return { state, list, notify: () => { for (const listener of [...listeners]) listener() } }
+  }
   /** Mirrors the runtime controller: the pond hook only sees what subscribe/getSnapshot report. */
-  function runtimeClient(body: string) {
+  function runtimeClient(body: string, binding?: ReturnType<typeof runtimeList>) {
     const source = `() => class {
       sessionId = 'runtime-session';
       running = false;
@@ -220,21 +250,34 @@ describe('koi dialogue observer', () => {
     }`
     const transformed = injectKoiPondDialogue(source)
     expect(transformed.changed).toBe(true)
-    return new (Function(`return (${transformed.source})`)()())()
+    const session = new (Function(`return (${transformed.source})`)()())()
+    if (binding) session.actx = { sessions: { list: binding.list } }
+    return session
   }
-  const runningCalls = (postMessage: ReturnType<typeof vi.fn>) => postMessage.mock.calls
+  const runningSets = (postMessage: ReturnType<typeof vi.fn>) => postMessage.mock.calls
     .map(([data]) => data)
-    .filter(data => data?.type === 'dsh/session-running')
+    .filter(data => data?.type === 'dsh/session-running-set')
+  const lastSet = (postMessage: ReturnType<typeof vi.fn>) => runningSets(postMessage).at(-1)
+  const lastIds = (postMessage: ReturnType<typeof vi.fn>) =>
+    (lastSet(postMessage)?.sessions ?? []).map((session: any) => session.id).sort()
 
   it.each(['content, mode', 'content, mode, signal, requestId'])('observes accepted main-session messages: %s', async signature => {
     const postMessage = vi.fn()
     vi.stubGlobal('window', { postMessage, location: { origin: 'https://fixture.invalid' } })
+    const binding = runtimeList()
     const session = client('return { ok: true };', signature)
     session.sessionId = 'main'
+    session.actx = { sessions: { list: binding.list } }
     expect(await session.prompt('hello', 'queue', undefined, 'request')).toEqual({ ok: true })
     expect(postMessage).toHaveBeenCalledWith({ type: 'dsh/pond-dialogue', sessionId: 'main', requestId: 'request' }, 'https://fixture.invalid')
-    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'dsh/session-running', sessionId: 'main', requestId: 'request', running: true, subAgent: false }), 'https://fixture.invalid')
-    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'dsh/session-running', sessionId: 'main', requestId: 'request', running: false }), 'https://fixture.invalid')
+    // A main session that the Runtime does not report as running must never be listed.
+    expect(lastIds(postMessage)).toEqual([])
+    expect(lastSet(postMessage)).toMatchObject({ sessions: [] })
+    // Once the Runtime reports it running, the complete set lists exactly that session.
+    binding.state.ids = ['main']
+    binding.notify()
+    expect(lastIds(postMessage)).toEqual(['main'])
+    expect(lastSet(postMessage)).toMatchObject({ seq: expect.any(Number), epoch: expect.any(String) })
   })
 
   it('uses the current session workspace and title for pond running entries', async () => {
@@ -246,8 +289,9 @@ describe('koi dialogue observer', () => {
       sessions: {
         list: {
           getSnapshot: () => ({ byId: {
-            main: { cwd: 'C:\\Users\\wsx\\deepseek-project', title: '修复模型选择' },
+            main: { id: 'main', running: true, cwd: 'C:\\Users\\wsx\\deepseek-project', title: '修复模型选择' },
           } }),
+          subscribe: () => () => {},
         },
       },
       workspaces: {
@@ -259,9 +303,9 @@ describe('koi dialogue observer', () => {
       },
     }
     await session.prompt('hello', 'queue', undefined, 'request')
-    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'dsh/session-running', projectName: '深度项目', sessionLabel: '修复模型选择',
-    }), 'https://fixture.invalid')
+    expect(lastSet(postMessage).sessions).toEqual([expect.objectContaining({
+      id: 'main', projectName: '深度项目', sessionLabel: '修复模型选择',
+    })])
   })
 
   it('reads names through the runtime context service and never uses the session id as a label', async () => {
@@ -270,31 +314,43 @@ describe('koi dialogue observer', () => {
     const session = client()
     session.sessionId = 'session-123'
     const services = new Map([
-      ['sessions', { list: { getSnapshot: () => ({ byId: { 'session-123': { cwd: 'C:\\work\\named-project', displayTitle: '有名称的会话' } } }) } }],
+      ['sessions', { list: { getSnapshot: () => ({ byId: { 'session-123': { id: 'session-123', running: true, cwd: 'C:\\work\\named-project', displayTitle: '有名称的会话' } } }), subscribe: () => () => {} } }],
       ['workspaces', { list: { getSnapshot: () => ({ items: [{ path: 'C:\\work\\named-project', title: '命名项目' }] }) } }],
     ])
     session.actx = { get: (name: string) => services.get(name) }
     await session.prompt('hello', 'queue', undefined, 'request')
-    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ projectName: '命名项目', sessionLabel: '有名称的会话' }), 'https://fixture.invalid')
+    expect(lastSet(postMessage).sessions).toEqual([expect.objectContaining({ projectName: '命名项目', sessionLabel: '有名称的会话' })])
 
+    // A running session with no usable title falls back to a placeholder: the session id is
+    // never reused as a display label.
+    delete (globalThis as Record<string, unknown>).__dshPondRunning
     const unnamed = client()
     unnamed.sessionId = 'session-id-only'
-    unnamed.actx = { get: () => undefined }
+    unnamed.actx = { sessions: { list: { getSnapshot: () => ({ byId: {
+      'session-id-only': { id: 'session-id-only', running: true },
+    } }), subscribe: () => () => {} } } }
     await unnamed.prompt('hello', 'queue', undefined, 'request-2')
-    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ sessionLabel: '未命名会话' }), 'https://fixture.invalid')
-    expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ sessionLabel: 'session-id-only' }), 'https://fixture.invalid')
+    expect(lastSet(postMessage).sessions).toEqual([
+      expect.objectContaining({ id: 'session-id-only', sessionLabel: '未命名会话' }),
+    ])
+    expect(lastSet(postMessage).sessions[0].sessionLabel).not.toBe('session-id-only')
   })
 
-  it('publishes the latest assistant output for the pond card', async () => {
+  it('publishes the latest assistant output for the pond card only while it runs', async () => {
     const postMessage = vi.fn()
     vi.stubGlobal('window', { postMessage, location: { origin: 'https://fixture.invalid' } })
+    const binding = runtimeList(['main'])
     const session = client()
     session.sessionId = 'main'
+    session.actx = { sessions: { list: binding.list } }
     session.events = [{ data: { message: { content: [{ text: '最后一条输出' }] } } }]
     await session.prompt('hello', 'queue', undefined, 'request')
-    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'dsh/session-running', output: '最后一条输出',
-    }), 'https://fixture.invalid')
+    expect(lastSet(postMessage).sessions).toEqual([expect.objectContaining({ id: 'main', output: '最后一条输出' })])
+
+    // The session stops running: neither its historical output nor a stale row may remain.
+    binding.state.ids = []
+    binding.notify()
+    expect(lastSet(postMessage).sessions).toEqual([])
   })
 
   it('renders a project title for one running session and session titles for shared projects', async () => {
@@ -316,11 +372,12 @@ describe('koi dialogue observer', () => {
     const child = client(); child.address = 'child'
     await child.prompt('hello')
     await expect(client('throw new Error("send failed");').prompt('hello')).rejects.toThrow('send failed')
-    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'dsh/session-running', running: true }), 'https://fixture.invalid')
-    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'dsh/session-running', running: false }), 'https://fixture.invalid')
+    // A failed send and a failed throw never report a running set of their own.
+    expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'dsh/pond-dialogue' }), 'https://fixture.invalid')
+    expect(runningSets(postMessage)).toEqual([])
   })
 
-  it('keeps a session visible until its running snapshot reports completion', async () => {
+  it('keeps a session listed while the Runtime reports it running and drops it on completion', async () => {
     const postMessage = vi.fn()
     vi.stubGlobal('window', { postMessage, location: { origin: 'https://fixture.invalid' } })
     const source = `() => class {
@@ -332,47 +389,105 @@ describe('koi dialogue observer', () => {
     }`
     const transformed = injectKoiPondDialogue(source)
     expect(transformed.changed).toBe(true)
+    const binding = runtimeList(['running-session'])
     const session = new (Function(`return (${transformed.source})`)()())()
+    session.actx = { sessions: { list: binding.list } }
     await session.prompt('hello', 'queue', undefined, 'request')
-    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'dsh/session-running', sessionId: 'running-session', requestId: 'request', running: true, subAgent: false }), 'https://fixture.invalid')
+    expect(lastIds(postMessage)).toEqual(['running-session'])
+    expect(lastSet(postMessage).sessions[0]).toMatchObject({ id: 'running-session' })
+    expect(lastSet(postMessage).sessions[0].subAgent).toBeUndefined()
+    // Completion is the Runtime's verdict, not this page's own guess.
+    binding.state.ids = []
+    binding.notify()
     session.running = false
     session.listener()
-    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'dsh/session-running', sessionId: 'running-session', requestId: 'request', running: false }), 'https://fixture.invalid')
+    expect(lastIds(postMessage)).toEqual([])
   })
 
-  it('stops showing a child agent as running the moment its prompt returns', async () => {
+  it('excludes a child agent session from the pond while the main session runs', async () => {
     const postMessage = vi.fn()
     vi.stubGlobal('window', { postMessage, location: { origin: 'https://fixture.invalid' } })
-    const session = runtimeClient('return { ok: true };')
+    // A child row is indistinguishable from a main row except for its lineage origin, so the
+    // origin marker is the only thing that may keep the child out.
+    const binding = runtimeList(['main-session', 'child-a'], id => id === 'main-session'
+      ? { title: '主会话', parentId: undefined }
+      : { origin: 'subagent', parentId: 'main-session' })
+    const session = runtimeClient('return { ok: true };', binding)
+    session.sessionId = 'main-session'
+    await session.prompt('hello', 'queue', undefined, 'request')
+    expect(lastIds(postMessage)).toEqual(['main-session'])
+    // No published set ever carried the child, not merely the newest one.
+    expect(runningSets(postMessage).every(set => set.sessions.every((item: any) => item.id !== 'child-a'))).toBe(true)
+  })
+
+  it('lists nothing when only child agent sessions are running', async () => {
+    const postMessage = vi.fn()
+    vi.stubGlobal('window', { postMessage, location: { origin: 'https://fixture.invalid' } })
+    const binding = runtimeList(['child-a', 'child-b'], { origin: 'subagent' })
+    const session = runtimeClient('return { ok: true };', binding)
+    session.sessionId = 'main-session'
+    await session.prompt('hello', 'queue', undefined, 'request')
+    expect(lastSet(postMessage).sessions).toEqual([])
+    expect(runningSets(postMessage).every(set => set.sessions.length === 0)).toBe(true)
+  })
+
+  it('drops the main row on completion even while a child of it still runs', async () => {
+    const postMessage = vi.fn()
+    vi.stubGlobal('window', { postMessage, location: { origin: 'https://fixture.invalid' } })
+    const binding = runtimeList(['main-session'], id => (id === 'child-a' ? { origin: 'subagent' } : {}))
+    const session = runtimeClient('return { ok: true };', binding)
+    session.sessionId = 'main-session'
+    await session.prompt('hello', 'queue', undefined, 'request')
+    expect(lastIds(postMessage)).toEqual(['main-session'])
+    // The parent turn finished; the child it started keeps running and must not hold the row.
+    binding.state.ids = ['child-a']
+    binding.notify()
+    expect(lastSet(postMessage).sessions).toEqual([])
+  })
+
+  it('keeps a main session listed from a page that is itself a child session', async () => {
+    const postMessage = vi.fn()
+    vi.stubGlobal('window', { postMessage, location: { origin: 'https://fixture.invalid' } })
+    const binding = runtimeList(['child-a', 'main-session'], id => id === 'child-a'
+      ? { origin: 'subagent', parentId: 'main-session' }
+      : { title: '主会话' })
+    const session = runtimeClient('return { ok: true };', binding)
+    session.sessionId = 'child-a'
     session.address = 'child'
     await session.prompt('hello', 'queue', undefined, 'request')
-    expect(runningCalls(postMessage)).toEqual([
-      expect.objectContaining({ sessionId: 'runtime-session', requestId: 'request', running: true, subAgent: true }),
-      expect.objectContaining({ sessionId: 'runtime-session', requestId: 'request', running: false, subAgent: true }),
-    ])
+    // Both the origin marker and this instance's own child address exclude the child, while the
+    // main session it is running for stays listed.
+    expect(lastIds(postMessage)).toEqual(['main-session'])
   })
 
-  it('drops a finished main prompt immediately when its snapshot already reports idle', async () => {
+  it('does not list a main prompt the Runtime never reports as running', async () => {
     const postMessage = vi.fn()
     vi.stubGlobal('window', { postMessage, location: { origin: 'https://fixture.invalid' } })
-    const session = runtimeClient('return { ok: true };')
+    // The page's own send is not evidence of a running turn: only the Runtime's bit is.
+    const binding = runtimeList([])
+    const session = runtimeClient('return { ok: true };', binding)
     await session.prompt('hello', 'queue', undefined, 'request')
-    expect(runningCalls(postMessage)).toEqual([
-      expect.objectContaining({ sessionId: 'runtime-session', requestId: 'request', running: true, subAgent: false }),
-      expect.objectContaining({ sessionId: 'runtime-session', requestId: 'request', running: false, subAgent: false }),
-    ])
+    expect(runningSets(postMessage).every(set => set.sessions.length === 0)).toBe(true)
+    binding.state.ids = ['runtime-session']
+    binding.notify()
+    expect(lastIds(postMessage)).toEqual(['runtime-session'])
   })
 
-  it('keeps a main prompt running until the snapshot reports idle, then clears it', async () => {
+  it('keeps listing a main session until the Runtime stops reporting it running', async () => {
     const postMessage = vi.fn()
     vi.stubGlobal('window', { postMessage, location: { origin: 'https://fixture.invalid' } })
-    // The runtime flips to busy from inside the prompt, so the first subscription observation stays idle.
-    const session = runtimeClient('this.running = true; return { ok: true };')
+    // The runtime flips to busy from inside the prompt, so the first observation stays idle.
+    const binding = runtimeList(['runtime-session'])
+    const session = runtimeClient('this.running = true; return { ok: true };', binding)
     await session.prompt('hello', 'queue', undefined, 'request')
-    expect(runningCalls(postMessage).filter(data => data.running === false)).toHaveLength(0)
+    expect(lastIds(postMessage)).toEqual(['runtime-session'])
     session.running = false
     session.listener()
-    expect(runningCalls(postMessage).at(-1)).toMatchObject({ sessionId: 'runtime-session', requestId: 'request', running: false })
+    // Its own snapshot going idle is not enough: the session stays until the Runtime agrees.
+    expect(lastIds(postMessage)).toEqual(['runtime-session'])
+    binding.state.ids = []
+    binding.notify()
+    expect(lastIds(postMessage)).toEqual([])
   })
 
   it('keeps accepted messages successful if the pond observer breaks', async () => {

@@ -581,6 +581,48 @@
     if (code === 1 || code === 2 || code === 3 || code === 45 || code === 48) return 'overcast'
     return 'clear'
   }
+  function mapQWeatherToWeather(icon, text = '', precip = 0) {
+    const code = String(icon || '').trim()
+    const desc = String(text || '').trim()
+    const p = Number(precip) || 0
+    if (['402', '403', '410'].includes(code) || desc.includes('大雪') || desc.includes('暴雪')) {
+      return 'heavy_snow'
+    }
+    if (['401', '409', '499'].includes(code) || desc.includes('中雪')) {
+      return 'snow'
+    }
+    const num = parseInt(code, 10)
+    if ((num >= 400 && num <= 499) || desc.includes('雪')) {
+      return 'light_snow'
+    }
+    if (['301', '302', '303', '304', '307', '308', '310', '311', '312', '315', '316', '317', '318'].includes(code)
+      || desc.includes('暴雨') || desc.includes('大雨') || desc.includes('雷阵雨') || desc.includes('特大暴雨') || desc.includes('冰雹')
+      || p >= 6) {
+      return 'storm'
+    }
+    if (['306', '314'].includes(code) || desc.includes('中雨') || (p >= 1.5 && p < 6)) {
+      return 'rain'
+    }
+    if ((num >= 300 && num <= 399) || desc.includes('雨') || p > 0) {
+      return 'drizzle'
+    }
+    if (['101', '102', '103', '104', '151', '152', '153'].includes(code)
+      || (num >= 500 && num <= 515)
+      || desc.includes('云') || desc.includes('阴') || desc.includes('雾') || desc.includes('霾') || desc.includes('沙') || desc.includes('尘')) {
+      return 'overcast'
+    }
+    return 'clear'
+  }
+  function getWeatherConfig() {
+    let host = '', key = ''
+    try {
+      const h = localStorage.getItem('koi-pond-weather-api-host')
+      const k = localStorage.getItem('koi-pond-weather-api-key')
+      if (h && h.trim()) host = h.trim()
+      if (k && k.trim()) key = k.trim()
+    } catch {}
+    return { host, key }
+  }
   const weatherLabels = {
     clear: '晴天', overcast: '阴天', drizzle: '小雨', rain: '中雨',
     storm: '暴雨', light_snow: '小雪', snow: '中雪', heavy_snow: '大雪',
@@ -591,26 +633,37 @@
     makeBackdrop()
     if ($('weather-name')) {
       $('weather-name').textContent = label
-      $('weather-name').title = weatherSetting === 'auto' ? `当前实时天气：${label} (每20分钟自 Open-Meteo 同步)` : `当前手动天气：${label}`
+      $('weather-name').title = weatherSetting === 'auto' ? `当前实时天气：${label} (每20分钟自 和风天气 同步)` : `当前手动天气：${label}`
     }
     if ($('weather-select')) {
       $('weather-select').value = weatherSetting
-      $('weather-select').setAttribute('aria-label', `天气设置：${weatherSetting === 'auto' ? '实时天气 (Open-Meteo)' : `手动 · ${label}`}`)
-      $('weather-select').title = weatherSetting === 'auto' ? `实时天气 · ${label} (Open-Meteo 实时同步)` : `手动 · ${label}`
+      $('weather-select').setAttribute('aria-label', `天气设置：${weatherSetting === 'auto' ? '实时天气 (和风天气)' : `手动 · ${label}`}`)
+      $('weather-select').title = weatherSetting === 'auto' ? `实时天气 · ${label} (和风天气 实时同步)` : `手动 · ${label}`
     }
   }
   async function fetchLiveWeather() {
-    if (weatherSetting !== 'auto' || !bridge?.getLiveWeather) return
+    if (weatherSetting !== 'auto' || !bridge?.getLiveWeather) return false
     try {
-      const data = await bridge.getLiveWeather()
-      if (data && typeof data.weatherCode === 'number') {
-        const nextW = mapWmoToWeather(data.weatherCode, data.rain, data.snowfall)
+      const cfg = getWeatherConfig()
+      if (!cfg.host || !cfg.key) return false
+      const data = await bridge.getLiveWeather(cfg)
+      if (data) {
+        let nextW = 'clear'
+        if (data.icon || data.text) {
+          nextW = mapQWeatherToWeather(data.icon, data.text, data.precip)
+        } else if (typeof data.weatherCode === 'number') {
+          nextW = mapWmoToWeather(data.weatherCode, data.rain, data.snowfall)
+        }
         if (weatherSetting === 'auto') {
           currentWeather = nextW
           updateWeatherUI()
         }
+        return true
       }
-    } catch {}
+      return false
+    } catch {
+      return false
+    }
   }
   function syncWeather(forceFetch = false) {
     if (weatherSetting !== 'auto') {
@@ -1151,11 +1204,84 @@
   if ($('weather-select')) {
     $('weather-select').onchange = () => {
       weatherSetting = $('weather-select').value
+      if (weatherSetting === 'auto') {
+        const cfg = getWeatherConfig()
+        if (!cfg.host || !cfg.key) {
+          notify('请点击右侧⚙输入你的和风天气域名与Key。')
+        }
+      }
       syncWeather(true)
       try { localStorage.setItem('koi-pond-weather-setting', weatherSetting) }
       catch { notify('天气已切换，本次设置未保存。') }
     }
   }
+  const weatherModal = $('weather-config-modal')
+  const hostInput = $('cfg-weather-host')
+  const keyInput = $('cfg-weather-key')
+  function openWeatherConfigModal() {
+    if (!weatherModal) return
+    const cfg = getWeatherConfig()
+    if (hostInput) hostInput.value = cfg.host
+    if (keyInput) keyInput.value = cfg.key
+    weatherModal.hidden = false
+    hostInput?.focus()
+  }
+  function closeWeatherConfigModal() {
+    if (!weatherModal) return
+    weatherModal.hidden = true
+  }
+  if ($('weather-config-btn')) {
+    $('weather-config-btn').onclick = () => openWeatherConfigModal()
+  }
+  if ($('close-weather-modal')) {
+    $('close-weather-modal').onclick = () => closeWeatherConfigModal()
+  }
+  if ($('cfg-weather-cancel')) {
+    $('cfg-weather-cancel').onclick = () => closeWeatherConfigModal()
+  }
+  if ($('cfg-weather-reset')) {
+    $('cfg-weather-reset').onclick = () => {
+      try {
+        localStorage.removeItem('koi-pond-weather-api-host')
+        localStorage.removeItem('koi-pond-weather-api-key')
+      } catch {}
+      if (hostInput) hostInput.value = ''
+      if (keyInput) keyInput.value = ''
+      notify('已清空和风天气配置。')
+    }
+  }
+  if ($('weather-config-form')) {
+    $('weather-config-form').onsubmit = async e => {
+      e.preventDefault()
+      const rawHost = hostInput?.value?.trim() || ''
+      const rawKey = keyInput?.value?.trim() || ''
+      if (!rawHost || !rawKey) {
+        notify('请同时输入和风天气的 API 域名与 Key。')
+        return
+      }
+      try {
+        localStorage.setItem('koi-pond-weather-api-host', rawHost)
+        localStorage.setItem('koi-pond-weather-api-key', rawKey)
+      } catch {
+        notify('配置保存失败（本地存储不可用）。')
+      }
+      closeWeatherConfigModal()
+      notify('和风天气配置已保存，正在同步天气…')
+      const ok = await fetchLiveWeather()
+      if (ok) {
+        notify('和风天气同步成功。')
+      } else {
+        notify('天气同步失败，请检查 API 域名与 Key 是否有效。')
+      }
+    }
+  }
+  window.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && weatherModal && !weatherModal.hidden) {
+      e.preventDefault()
+      e.stopPropagation()
+      closeWeatherConfigModal()
+    }
+  }, true)
 
   $('light').onchange = () => {
     timeSetting = $('light').value

@@ -109,7 +109,7 @@ export function enhanceMultimediaElements(container?: any): number {
       count++
       return
     }
-    if (img.closest && img.closest('a') !== null) return
+    if (img.closest && (img.closest('a') !== null || img.closest('button') !== null || img.closest('[role="button"]') !== null)) return
     img.style.cursor = 'zoom-in'
     img.addEventListener('click', (e: any) => {
       e?.stopPropagation?.()
@@ -427,7 +427,7 @@ export const INSTALL_MULTIMEDIA_DISPLAY_SOURCE = `(function () {
         }
         return;
       }
-      if (img.closest && img.closest('a') !== null) return;
+      if (img.closest && (img.closest('a') !== null || img.closest('button') !== null || img.closest('[role="button"]') !== null)) return;
       img.style.cursor = 'zoom-in';
       img.addEventListener('click', (e) => {
         e?.stopPropagation?.();

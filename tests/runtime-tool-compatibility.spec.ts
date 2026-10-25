@@ -197,6 +197,14 @@ describe('code-generation diagnostics', () => {
     expect(result.source).toContain('array of quoted lines')
     expect(adaptRuntimeToolPrompt(result.source).changed).toBe(false)
   })
+  it('adds shared SDK guidance to renderSdkProgramInstructions in DSH >=0.2.1', () => {
+    const source = 'function renderSdkProgramInstructions(format) {\n\treturn `Inside the program:\noriginal`;\n}'
+    const result = adaptRuntimeToolPrompt(source)
+    expect(result.changed).toBe(true)
+    expect(result.source).toContain('E:/AI/project')
+    expect(result.source).toContain('return `Inside the program:\n- Keep edit and delegation calls short.')
+    expect(adaptRuntimeToolPrompt(result.source).changed).toBe(false)
+  })
 })
 
 describe('read limit normalization', () => {

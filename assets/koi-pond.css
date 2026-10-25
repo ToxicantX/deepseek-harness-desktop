@@ -148,6 +148,25 @@ body[data-weather="heavy_snow"] .garden-label b#weather-name { color: #e4f3f7; }
 .garden-label i { margin: 0 12px; font-style: normal; }
 #notice { position: absolute; z-index: 4; bottom: 16%; left: 50%; transform: translateX(-50%); background: linear-gradient(145deg, #123e35f2, #062521f2), url("koi-pond-washi.webp") center / 260px auto; border: 1px solid #c5b777; color: #f1ebc6; padding: 12px 22px; border-radius: 8px; box-shadow: 0 8px 30px #001b1770, inset 0 1px #fff7cd1f; font-size: 12px; pointer-events: none; opacity: 0; transition: opacity .3s; max-width: 70%; text-align: center; }
 #notice.show { opacity: 1; }
+#weather-config-btn { font-size: calc(14 * var(--unit)); padding: 0 calc(10 * var(--unit)); min-width: calc(36 * var(--unit)); }
+.pond-modal { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; background: rgba(0, 15, 13, 0.72); backdrop-filter: blur(5px); }
+.pond-modal[hidden] { display: none; }
+.pond-modal-card { position: relative; width: min(440px, 92vw); padding: calc(24 * var(--unit)); background: linear-gradient(145deg, #093731fa, #021a19f8); border: 1px solid var(--gold); border-radius: 14px; box-shadow: inset 0 0 0 3px #c9bd8220, inset 0 1px #fff2c51a, 0 20px 50px rgba(0, 0, 0, 0.65); color: var(--ivory); }
+.pond-modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: calc(8 * var(--unit)); }
+.pond-modal-header h3 { margin: 0; font: calc(18 * var(--unit)) "SimSun", serif; color: #f4dda0; }
+.modal-close { background: transparent; border: none; color: var(--muted); font-size: calc(14 * var(--unit)); padding: 4px 8px; cursor: pointer; border-radius: 4px; line-height: 1; }
+.modal-close:hover { color: #fff; background: rgba(255, 255, 255, 0.1); transform: none; }
+.modal-desc { font-size: calc(12 * var(--unit)); color: var(--muted); line-height: 1.6; margin: 0 0 calc(16 * var(--unit)); }
+.form-group { margin-bottom: calc(14 * var(--unit)); }
+.form-group label { display: block; font-size: calc(12 * var(--unit)); color: #efe9bb; margin-bottom: calc(5 * var(--unit)); }
+.form-group input { box-sizing: border-box; width: 100%; background: #021d1db0; border: 1px solid #9b9e6c80; border-radius: 6px; color: var(--ivory); padding: calc(8 * var(--unit)) calc(10 * var(--unit)); font-size: calc(12 * var(--unit)); font-family: inherit; }
+.form-group input:focus { border-color: #f4dda0; outline: none; box-shadow: 0 0 8px rgba(244, 221, 160, 0.3); }
+.field-hint { display: block; font-size: calc(11 * var(--unit)); color: var(--muted); margin-top: calc(4 * var(--unit)); opacity: 0.85; }
+.modal-actions { display: flex; justify-content: flex-end; gap: calc(10 * var(--unit)); margin-top: calc(20 * var(--unit)); }
+.btn-secondary { background: transparent; border: 1px solid #aa9f6870; color: var(--muted); font-size: calc(12 * var(--unit)); padding: calc(6 * var(--unit)) calc(12 * var(--unit)); border-radius: 6px; cursor: pointer; }
+.btn-secondary:hover { color: var(--ivory); border-color: #d7c896; }
+.btn-primary { background: linear-gradient(145deg, #1c5e51, #083832); border: 1px solid #c5b777; color: #fffbdc; font-size: calc(12 * var(--unit)); font-weight: bold; padding: calc(6 * var(--unit)) calc(14 * var(--unit)); border-radius: 6px; cursor: pointer; }
+.btn-primary:hover { background: linear-gradient(145deg, #2b7767, #0d4a42); border-color: #f4dda0; }
 @media(max-width: 800px) {
   :root { --unit: .78px; }
   header { top: 22px; left: 20px; right: 18px; }

@@ -32,7 +32,7 @@
 | 配置 Exa、Perplexity 或自动选择可用搜索 | **Runtime → 搜索设置**，填写 API Key 后保存并重启 Runtime |
 | 查看请求数、Token 用量和趋势 | **帮助 → 用量监控**，仅统计会话已记录的用量，不显示余额或费用 |
 | 切换主题、显示或隐藏桌宠 | **视图 → 主题 / 桌面宠物** |
-| 打开后院鱼塘 | 主界面的“后院鱼塘”悬浮入口，可投喂、命名锦鲤并随时返回对话 |
+| 打开后院鱼塘 | 主界面的“后院鱼塘”悬浮入口，可投喂、命名锦鲤、配置和风天气并随时返回对话 |
 
 长文本和文本文件可直接粘贴到对话输入框，发送前可以预览或移除。个性化设置会进入模型上下文，请勿填写密钥、Token 或密码。
 
@@ -66,6 +66,18 @@
 其他问题请提交 [Issue](https://github.com/ToxicantX/deepseek-harness-desktop/issues)，附上 **帮助 → 关于 DeepSeek Harness** 中的版本、复现步骤和脱敏后的错误信息。
 
 ## 版本与更新说明
+### 0.1.67 · 2026-10-25（北京时间）
+
+- **后院鱼塘运行中会话状态同步优化与过滤**：
+  - 会话运行状态由前端页面统一聚合，采用全量快照和单调递增序列号机制（epoch + seq）向主进程派发，彻底杜绝单事件错序、乱序导致的“卡在运行中”虚假状态。
+  - 支持多任务/子代理过滤与精准会话匹配，子代理（subagent）会话执行不计入主鱼塘显示，且非当前活跃主会话自动剔除。
+  - 增强会话手动划走/移除时的生命周期管理，并支持页面重新加载时的全量状态重置。
+- **鱼塘天气功能扩展**：
+  - 接入和风天气（QWeather）API 接口，支持用户在鱼塘界面配置自定义天气服务地址与 API Key。
+- **多媒体注入与工具适配优化**：
+  - 修复多媒体预览中点击按钮图片时的拦截逻辑，避免误触发全屏预览。
+  - 增强 `runtime-tool-compatibility`，兼顾 DSH 新旧版本的系统指令注入。
+
 ### 0.1.66 · 2026-10-24（北京时间）
 
 - **修复长会话历史打开时界面彻底卡死（真正根因：桌面壳自身的 DOM 观察者自激循环）**：
@@ -89,6 +101,44 @@
 - 全程无需修改 DSH 核心代码，不影响短会话体验，保证上下各版本间 100% 平滑兼容。
 
 ### 0.1.65 · 2026-10-22（北京时间）
+
+### 2026-10-22 21:05 - 适配 DSH 0.2.1-rc.1 工具系统指令注入与兼容性适配
+
+- **问题排查与修复**：
+  - **现象分析**：在启动 DSH 0.2.1-rc.1 时，底层模块加载输出了 `桌面壳工具兼容检查未匹配当前 Runtime，保留原模块：.../@deepseek-ai/dsh-tools/lib/index.js`；若叠加首次插件解析/冷启动 I/O 耗时或超时，该警告成为唯一的错误诊断信息。
+  - **根因定位**：DSH 0.2.1-rc.1 将 `@deepseek-ai/dsh-tools` 中的系统提示词由旧版的静态变量 `const SDK_PROGRAM_INSTRUCTIONS = \`Inside the program:\n\`` 重构为按格式动态渲染函数 `function renderSdkProgramInstructions(programFormat) { return \`Inside the program:\n\` }`。原桌面壳注入逻辑 `adaptRuntimeToolPrompt` 未包含该动态渲染锚点，导致规则未被注入并触发警告。
+  - **修复实现**（`src/runtime-tool-compatibility.ts`）：
+    - 扩展 `adaptRuntimeToolPrompt`，同时兼容旧版静态声明锚点与 DSH 0.2.1+ 的 `return \`Inside the program:\n\`` 动态函数返回值锚点；
+    - 保持既有的 Windows 路径正斜杠规范、编辑工具上下文与长文件写入等增强指令完整注入。
+- **测试与构建验证**：
+  - 新增单测用例 `tests/runtime-tool-compatibility.spec.ts` 覆盖 `renderSdkProgramInstructions` 格式适配与防重复注入断言；
+  - 实机对真实已安装的 DSH 0.2.1-rc.1 进行端到端 backend 启动与停止验证，子进程在 7.4 秒内就绪并解析 URL，且无 stderr 兼容性警告；
+  - 同步更新本地开发 `lib/` 产物及已安装桌面应用的 `shutdown-hook.js`；
+  - `pnpm test` 全量 62 个测试文件、520 个测试用例全部通过；`pnpm run build` 成功。
+
+### 2026-10-22 16:38 - 鱼塘实时天气接入和风天气 API 并支持用户自定义配置
+
+- **需求内容**：
+  - 把后院鱼塘自动获取实时天气的接口从 Open-Meteo 替换为和风天气（QWeather）API 接口。
+  - 不在源码中硬编码私密 API 凭证，支持用户在鱼塘页面中自行填写、持久化保存与清空自己的 API 域名与 Key。
+- **实现细节**：
+  - **主进程与 IPC 桥接**（`src/koi-pond-window.ts` & `src/koi-pond-preload.ts`）：
+    - `fetchQWeather` 采用 IP 经纬度定位（精确到两位小数 `lon,lat`），接入和风天气 `/v7/weather/now` 实时天气端点；
+    - 支持外部传入自定义 `host` 与 `key`，在未配置时安全跳过天气同步，已配置时自动规范化 URL；
+    - 解析返回的 `now.icon`、`now.text`、`now.precip`（降水量）及温度 `now.temp`。
+  - **天气状态映射与动效**（`assets/koi-pond.js`）：
+    - 新增 `mapQWeatherToWeather(icon, text, precip)`，将和风天气的数十种状况代码与文字精准映射为鱼塘现有的 8 种天气状态（晴天、阴天、小雨、中雨、暴雨、小雪、中雪、大雪）；
+    - 联动既有池塘水波、雨滴涟漪、雪花消融粒子与专属日间/夜间雨雪底图；
+    - 保留 `mapWmoToWeather` 保证老版本接口与测试向后兼容。
+  - **页面交互与配置面板**（`assets/koi-pond.html` & `assets/koi-pond.css`）：
+    - 顶部工具栏天气下拉选框增加配置入口齿轮按钮 `#weather-config-btn`；
+    - 新增庭院古典风格和风天气配置模态弹窗 `#weather-config-modal`，提供域名与 Key 输入框、保存并同步、清空配置、取消关闭及 ESC 快速退出；
+    - 配置项本地持久化保存在 `localStorage`（`koi-pond-weather-api-host` / `koi-pond-weather-api-key`）。
+- **测试与构建验证**：
+  - `pnpm test`：全部测试用例通过。
+  - `tests/koi-pond-weather.spec.ts` 专项扩充和风天气状态映射及 UI 配置控件断言，全数通过。
+  - `pnpm run build`（含 `tsc --noEmit` 与 tsdown 打包）：退出码 0，预加载与主进程构建无类型错误。
+  - `git diff --check`：无语法或空白格式缺陷。
 
 ### 0.1.64 · 2026-10-21 20:59（北京时间）
 
@@ -141,3 +191,39 @@
 ## 代码签名政策
 
 SignPath Foundation 批准并启用集成后，符合条件的桌面客户端发布将使用 [SignPath.io](https://about.signpath.io) 提供的免费代码签名，证书由 [SignPath Foundation](https://signpath.org) 持有。详见[完整代码签名政策](docs/code-signing-policy.md)。
+
+## 开发者说明
+
+需要 Windows x64、Node.js 24 和 pnpm 11：
+
+```powershell
+pnpm install --frozen-lockfile
+pnpm test
+pnpm run typecheck
+pnpm run build
+pnpm run start
+pnpm run dist
+```
+
+`build-windows.bat` 会优先使用已安装 DSH Runtime 中的 Node.js 24 x64，其次查找 nvm 和 PATH。pnpm 优先使用 PATH 中的版本；PATH 未安装 pnpm 时，脚本会根据所选 Runtime 的 `runtime-manifest.json` 复用其独立 pnpm，最后才尝试 Corepack。只有这些位置都没有兼容工具时才需要另行安装 Node.js 24 x64 或 pnpm 11。
+
+构建完整 Runtime：
+
+```powershell
+./scripts/build-runtime.ps1 `
+  -DshTag dsh-v0.1.0-rc.7 `
+  -OutputDirectory "$PWD/runtime-output" `
+  -RuntimeRevision 1 `
+  -RequiredShellRange '>=0.1.0 <1.0.0'
+```
+
+`.github/workflows/runtime-release.yml` 会验证上游 Tag 与 CLI 版本，安装精确的官方 `@deepseek-ai/dsh`、Node 24 和独立 pnpm，运行真实 Web、设置打开、会话修复、插件及关闭冒烟，再发布 ZIP、Manifest 和 Catalog 更新。同一 DSH Version 只能以更高 Runtime Revision 更新。
+
+公开分发应使用 Windows 信任 CA 签发的 Authenticode 证书。`shell-v*` Tag 构建可通过 `CSC_LINK` 和 `CSC_KEY_PASSWORD` 交给 electron-builder 签名；硬件或云端保护的私钥应接入对应远程签名服务，不应复制到仓库或 GitHub Secret。没有证书时，本地 `dist` 保持未签名。
+
+## 当前范围
+
+- 仅支持 Windows x64。
+- 当前 Shell 最低兼容 DSH Version 为 `0.1.0-rc.7`。
+- Runtime Release 始终标记为 GitHub Prerelease，不会替换 electron-updater 使用的 Shell Latest Release。
+- DSH Web 只通过临时 loopback Origin 打开；Host 与插件运行在下载的标准 Node Runtime 中。

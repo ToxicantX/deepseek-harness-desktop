@@ -49,7 +49,7 @@
       <div><p class="eyebrow">A LITTLE GARDEN. BETWEEN TASKS</p><h1>后院鱼塘<span>一池清澈，日月生长。</span></h1></div>
       <nav class="window-tools" aria-label="庭院视图">
         <select id="weather-select" title="天气设置" aria-label="天气设置">
-          <option value="auto">实时天气 (Open-Meteo)</option>
+          <option value="auto">实时天气 (和风天气)</option>
           <option value="clear">手动 · 晴天</option>
           <option value="overcast">手动 · 阴天</option>
           <option value="drizzle">手动 · 小雨</option>
@@ -59,6 +59,7 @@
           <option value="snow">手动 · 中雪</option>
           <option value="heavy_snow">手动 · 大雪</option>
         </select>
+        <button id="weather-config-btn" title="配置和风天气 API" aria-label="配置和风天气 API">⚙</button>
         <select id="light" title="时段设置" aria-label="时段设置">
           <option value="auto">自动时段</option>
           <option value="dawn">手动 · 清晨</option>
@@ -101,6 +102,32 @@
       <span class="garden-label"><strong id="period-name">日间</strong><i>·</i><b id="season-name">秋景</b><i>·</i><b id="weather-name">晴天</b><i>·</i><time id="clock">--:--</time><em>日々是好日 ／ KOI GARDEN</em></span>
     </footer>
     <p id="notice" role="status" aria-live="polite"></p>
+    <div id="weather-config-modal" class="pond-modal" hidden>
+      <div class="pond-modal-card" role="dialog" aria-modal="true" aria-labelledby="weather-cfg-title">
+        <div class="pond-modal-header">
+          <h3 id="weather-cfg-title">和风天气 API 配置</h3>
+          <button type="button" id="close-weather-modal" class="modal-close" title="关闭" aria-label="关闭">✕</button>
+        </div>
+        <p class="modal-desc">请输入你的和风天气 API 域名与 Key 以获取实时天气。</p>
+        <form id="weather-config-form">
+          <div class="form-group">
+            <label for="cfg-weather-host">API 域名 (Host)</label>
+            <input id="cfg-weather-host" placeholder="例如 https://devapi.qweather.com 或你的专属域名" autocomplete="off" spellcheck="false">
+            <span class="field-hint">和风天气控制台提供的 API 域名或专属域名</span>
+          </div>
+          <div class="form-group">
+            <label for="cfg-weather-key">API Key</label>
+            <input id="cfg-weather-key" placeholder="和风天气 API Key" autocomplete="off" spellcheck="false">
+            <span class="field-hint">和风天气控制台创建的项目凭据 Key</span>
+          </div>
+          <div class="modal-actions">
+            <button type="button" id="cfg-weather-reset" class="btn-secondary">清空配置</button>
+            <button type="button" id="cfg-weather-cancel" class="btn-secondary">取消</button>
+            <button type="submit" id="cfg-weather-save" class="btn-primary">保存并同步</button>
+          </div>
+        </form>
+      </div>
+    </div>
   </main>
   <script src="koi-pond-refraction.js"></script>
   <script src="koi-pond.js"></script>

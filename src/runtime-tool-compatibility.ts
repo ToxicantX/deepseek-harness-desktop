@@ -110,8 +110,12 @@ export function adaptRuntimeCode(source: string): { source: string; changed: boo
 }
 
 export function adaptRuntimeToolPrompt(source: string): { source: string; changed: boolean } {
-  const anchor = 'const SDK_PROGRAM_INSTRUCTIONS = `Inside the program:\n'
-  if (!source.includes(anchor) || source.includes('Keep edit and delegation calls short.')) return { source, changed: false }
+  const legacyAnchor = 'const SDK_PROGRAM_INSTRUCTIONS = `Inside the program:\n'
+  const renderAnchor = 'return `Inside the program:\n'
+  const anchor = source.includes(legacyAnchor) ? legacyAnchor
+    : source.includes(renderAnchor) ? renderAnchor
+    : undefined
+  if (anchor === undefined || source.includes('Keep edit and delegation calls short.')) return { source, changed: false }
   return {
     source: source.replace(anchor, anchor
       + '- Keep edit and delegation calls short. Use correctly quoted object keys followed by colons. Encode newlines inside ordinary quoted strings as escape sequences; never put literal newlines inside them. Check both the outer tool JSON and the inner TypeScript string escaping.\n'

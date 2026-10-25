@@ -84,10 +84,14 @@ window.addEventListener('message', (event) => {
 })
 
 window.addEventListener('message', (event) => {
-  if (event.source !== window || event.origin !== window.location.origin || event.data?.type !== 'dsh/session-running') return
+  // The page owns running truth and publishes one complete set per change, so a
+  // late frame can never be merged into an already-settled list.
+  if (event.source !== window || event.origin !== window.location.origin || event.data?.type !== 'dsh/session-running-set') return
   const value = event.data as Record<string, unknown>
-  if (typeof value.sessionId !== 'string' || typeof value.requestId !== 'string' || typeof value.running !== 'boolean') return
-  ipcRenderer.send('pond:session-running', value.sessionId, value.requestId, value.running, value.projectName, value.output, value.approval, value.sessionLabel, value.subAgent)
+  if (typeof value.epoch !== 'string' || value.epoch.length === 0 || value.epoch.length > 128) return
+  if (typeof value.seq !== 'number' || !Number.isSafeInteger(value.seq) || value.seq < 0) return
+  if (!Array.isArray(value.sessions) || value.sessions.length > 256) return
+  ipcRenderer.send('pond:session-running-set', value.epoch, value.seq, value.sessions)
 })
 
 contextBridge.exposeInMainWorld('dshDesktopSkins', {

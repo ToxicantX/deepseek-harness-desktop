@@ -66,7 +66,15 @@ class MockElement {
     }
   }
 
-  closest(_selector: string) {
+  closest(selector: string) {
+    let curr: MockElement | null = this
+    while (curr) {
+      if (selector === 'a' && curr.tagName === 'A') return curr
+      if (selector === 'button' && curr.tagName === 'BUTTON') return curr
+      if (selector.includes('role="button"') && curr.getAttribute('role') === 'button') return curr
+      if (curr.tagName.toLowerCase() === selector.toLowerCase()) return curr
+      curr = curr.parentNode
+    }
     return null
   }
 
@@ -149,5 +157,52 @@ describe('multimedia-display-injector', () => {
   it('provides non-empty CSS styles for injection', () => {
     expect(MULTIMEDIA_STYLES).toContain('.dsh-multimedia-card')
     expect(MULTIMEDIA_STYLES).toContain('.dsh-lightbox-overlay')
+  })
+
+  it('ignores images inside button or role=button (e.g. explorer toolbar button)', () => {
+    const origDocument = (globalThis as any).document
+    try {
+      const mockDoc: any = {
+        createElement: (tag: string) => new MockElement(tag),
+        getElementById: () => null,
+        body: new MockElement('body'),
+        documentElement: new MockElement('html')
+      }
+      ;(globalThis as any).document = mockDoc
+
+      const container = new MockElement('div')
+
+      // Button containing an app icon img
+      const btn = new MockElement('button')
+      const btnImg = new MockElement('img')
+      btnImg.src = 'https://example.com/icon.png'
+      btnImg.setAttribute('src', 'https://example.com/icon.png')
+      btn.appendChild(btnImg)
+      container.appendChild(btn)
+
+      // Div with role="button" containing an img
+      const roleBtn = new MockElement('div')
+      roleBtn.setAttribute('role', 'button')
+      const roleBtnImg = new MockElement('img')
+      roleBtnImg.src = 'https://example.com/folder.png'
+      roleBtnImg.setAttribute('src', 'https://example.com/folder.png')
+      roleBtn.appendChild(roleBtnImg)
+      container.appendChild(roleBtn)
+
+      // Ordinary content img (e.g. in markdown chat)
+      const normalImg = new MockElement('img')
+      normalImg.src = 'https://example.com/chat-image.png'
+      normalImg.setAttribute('src', 'https://example.com/chat-image.png')
+      container.appendChild(normalImg)
+
+      const count = enhanceMultimediaElements(container as any)
+      // Only normalImg should be enhanced with zoom-in cursor / lightbox
+      expect(count).toBe(1)
+      expect(normalImg.style.cursor).toBe('zoom-in')
+      expect(btnImg.style.cursor).toBeUndefined()
+      expect(roleBtnImg.style.cursor).toBeUndefined()
+    } finally {
+      ;(globalThis as any).document = origDocument
+    }
   })
 })

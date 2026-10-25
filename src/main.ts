@@ -98,7 +98,10 @@ let searchSettings: SearchSettings | undefined
 let updateWindow: BrowserWindow | undefined
 let usageMonitorWindow: BrowserWindow | undefined
 let usageMonitor: UsageMonitorService | undefined
-const runningSessions = new Map<string, { id: string; startedAt: number; requests: Set<string>; projectName?: string; sessionLabel?: string; output?: string; approval?: boolean; subAgent?: boolean }>()
+/** The latest complete running set published by the chat page; the page is the single owner of running truth. */
+let runningSnapshot: { epoch: string; seq: number; sessions: unknown[] } = { epoch: '', seq: -1, sessions: [] }
+/** Document generations already replaced by a reload; their late frames must never be accepted. */
+const retiredRunningEpochs = new Set<string>()
 let latestUpdateProgress: ShellUpdateProgress | undefined
 let controller: RuntimeController | undefined
 let pluginManager: PluginManager | undefined
@@ -487,9 +490,11 @@ function createWindow(options: { utility?: 'manager' | 'repair' | 'plugin' | 'mc
     sendView(window)
     if (window === mainWindow) {
       syncMainMenuVisibility(); injectSkinMarket(window)
-      // A reloaded chat page loses every in-page prompt hook, so its stale entries must not stay on the pond.
-      runningSessions.clear()
-      publishRunningSessions()
+      // A reloaded chat page loses every in-page prompt hook, so its stale entries must not
+      // stay on the pond: retire that generation and clear the list until the reloaded page republishes.
+      if (runningSnapshot.epoch !== '') retiredRunningEpochs.add(runningSnapshot.epoch)
+      runningSnapshot = { epoch: '', seq: -1, sessions: [] }
+      koiPond?.resetRunningSessions()
     }
   })
   window.webContents.on('console-message', (_event, level, message, line, sourceId) => {
@@ -1164,14 +1169,9 @@ function logFatalError(error: unknown): void {
 }
 
 function publishRunningSessions(): void {
-  koiPond?.setRunningSessions([...runningSessions.values()].map(({ id, startedAt, projectName, sessionLabel, output, approval, subAgent }) => ({
-    id, startedAt,
-    ...(projectName === undefined ? {} : { projectName }),
-    ...(sessionLabel === undefined ? {} : { sessionLabel }),
-    ...(output === undefined ? {} : { output }),
-    ...(approval === undefined ? {} : { approval }),
-    ...(subAgent === undefined ? {} : { subAgent }),
-  })))
+  // An empty epoch means no live page has published yet, so nothing may be shown.
+  if (runningSnapshot.epoch === '') return
+  koiPond?.setRunningSessions(runningSnapshot)
 }
 
 ipcMain.on('pond:dialogue', (event, sessionId: unknown, requestId: unknown) => {
@@ -1180,39 +1180,29 @@ ipcMain.on('pond:dialogue', (event, sessionId: unknown, requestId: unknown) => {
   void koiPond?.recordDialogue(sessionId, requestId).catch(logFatalError)
 })
 
-ipcMain.on('pond:session-running', (event, sessionId: unknown, requestId: unknown, running: unknown, projectName: unknown, output: unknown, approval: unknown, sessionLabel: unknown, subAgent: unknown) => {
+ipcMain.on('pond:session-running-set', (event, epoch: unknown, seq: unknown, sessions: unknown) => {
   if (!fromTrustedDshWindow(event) || event.senderFrame !== event.sender.mainFrame
-    || typeof sessionId !== 'string' || !/^[0-9A-Za-z._~-]{1,128}$/u.test(sessionId)
-    || typeof requestId !== 'string' || !/^[0-9A-Za-z._~-]{1,128}$/u.test(requestId)
-    || typeof running !== 'boolean') return
-  const current = runningSessions.get(sessionId)
-  if (running) {
-    const next = current ?? { id: sessionId, startedAt: Date.now(), requests: new Set<string>() }
-    if (typeof projectName === 'string' && projectName.trim().length > 0) next.projectName = projectName.trim().slice(0, 120)
-    if (typeof sessionLabel === 'string' && sessionLabel.trim().length > 0) next.sessionLabel = sessionLabel.trim().slice(0, 120)
-    if (typeof output === 'string' && output.trim().length > 0) next.output = output.trim().slice(0, 240)
-    if (typeof approval === 'boolean') next.approval = approval
-    if (typeof subAgent === 'boolean') next.subAgent = subAgent
-    next.requests.add(requestId)
-    runningSessions.set(sessionId, next)
-  } else if (current !== undefined) {
-    current.requests.delete(requestId)
-    if (current.requests.size === 0) runningSessions.delete(sessionId)
-  }
+    || typeof epoch !== 'string' || epoch.length === 0 || epoch.length > 128
+    || typeof seq !== 'number' || !Number.isSafeInteger(seq) || seq < 0
+    || !Array.isArray(sessions) || sessions.length > 256) return
+  // A retired generation is a document already replaced by a reload: accepting its frame
+  // would restore the stale list that reload just cleared.
+  if (retiredRunningEpochs.has(epoch)) return
+  // A complete set supersedes the previous one. A frame from the current generation
+  // must advance the sequence, so a stopped session cannot be revived by a late frame.
+  if (epoch === runningSnapshot.epoch && seq <= runningSnapshot.seq) return
+  runningSnapshot = { epoch, seq, sessions: sessions.slice(0, 256) }
   publishRunningSessions()
 })
 
 ipcMain.on('pond:clear-running-session', (event, sessionId: unknown) => {
   if (!fromTrustedDshWindow(event) || event.senderFrame !== event.sender.mainFrame
     || typeof sessionId !== 'string') return
-  if (!runningSessions.delete(sessionId)) return
   koiPond?.clearRunningSession(sessionId)
 })
 
 ipcMain.on('pond:clear-all-running-sessions', event => {
   if (!fromTrustedDshWindow(event) || event.senderFrame !== event.sender.mainFrame) return
-  if (runningSessions.size === 0) return
-  runningSessions.clear()
   koiPond?.clearAllRunningSessions()
 })
 

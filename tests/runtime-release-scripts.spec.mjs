@@ -281,8 +281,9 @@ describe('Runtime release scripts', () => {
     }
     const pnpm = process.env.npm_execpath
     expect(pnpm, 'run this integration test with pnpm test').toBeTruthy()
-    const command = pnpm.endsWith('.exe') ? pnpm : process.execPath
-    const prefix = pnpm.endsWith('.exe') ? [] : [pnpm]
+    const isExe = pnpm.endsWith('.exe') || (!pnpm.endsWith('.js') && !pnpm.endsWith('.cjs') && !pnpm.endsWith('.mjs'))
+    const command = isExe ? pnpm : process.execPath
+    const prefix = isExe ? [] : [pnpm]
     const runPnpm = args => execFileAsync(command, [...prefix, ...args], {
       cwd: source, env: { ...process.env, CI: 'true' }, timeout: 60000,
     })

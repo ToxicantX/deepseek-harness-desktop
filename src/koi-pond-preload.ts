@@ -12,7 +12,7 @@ contextBridge.exposeInMainWorld('koiPond', {
   close: (): Promise<void> => ipcRenderer.invoke('pond:close'),
   getState: (): Promise<PondView> => ipcRenderer.invoke('pond:get-state'),
   rename: (id: string, name: string): Promise<boolean> => ipcRenderer.invoke('pond:rename', id, name),
-  getLiveWeather: (): Promise<{ weatherCode: number; rain: number; snowfall: number } | null> => ipcRenderer.invoke('pond:get-live-weather'),
+  getLiveWeather: (config?: { host?: string; key?: string }): Promise<{ icon?: string; text?: string; precip?: number; temp?: string; weatherCode?: number; rain?: number; snowfall?: number } | null> => ipcRenderer.invoke('pond:get-live-weather', config),
   clearRunningSession: (sessionId: string): void => { ipcRenderer.send('pond:clear-running-session', sessionId) },
   clearAllRunningSessions: (): void => { ipcRenderer.send('pond:clear-all-running-sessions') },
   onVisibility: (listener: (visible: boolean) => void) => {
