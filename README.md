@@ -38,12 +38,15 @@
 
 ### 可选插件
 
-在 **Runtime → 管理插件** 中粘贴下列仓库地址即可安装，完成后到设置页配置。安装 GitHub 来源的插件需要系统已安装 Git。
+Telegram 与多 Agent 插件可在 **Runtime → 管理插件** 中粘贴仓库地址安装，完成后到设置页配置。安装 GitHub 来源的插件需要系统已安装 Git。
 
 | 插件 | 用途 |
 | --- | --- |
 | [dsh-channel-telegram](https://github.com/ToxicantX/dsh-channel-telegram) | 通过 Telegram、QQ 官方机器人或微信 iLink 私聊使用 DSH |
 | [dsh-multi-model-orchestrator](https://github.com/ToxicantX/dsh-multi-model-orchestrator) | 配置多个专家 Agent，由主 Agent 分配任务 |
+| [dsh-ops](https://github.com/T-Auto/dsh-ops) | 可选原生文件、搜索和 PTC 工具，在插件管理页点击“安装 dsh-ops” |
+
+`dsh-ops` 专用入口安装已验证的正式版 `0.4.4`，需要 DSH `>=0.2.0-rc.2 <0.2.2`。使用该插件时，请在 **Runtime → 管理 DSH 版本** 中固定兼容版本；不支持 `0.2.2`（含预发布）。安装完成后新建会话验证工具是否可用。
 
 ## 更新与数据备份
 
@@ -66,6 +69,15 @@
 其他问题请提交 [Issue](https://github.com/ToxicantX/deepseek-harness-desktop/issues)，附上 **帮助 → 关于 DeepSeek Harness** 中的版本、复现步骤和脱敏后的错误信息。
 
 ## 版本与更新说明
+
+### 0.1.68 · 2026-10-28 20:05（北京时间）
+
+- **dsh-ops 可选接入**：插件管理页新增正式版 `0.4.4` 安装入口，复用现有安装、Profile 事务和重启流程；已有安装显示“已安装”。不兼容的 Runtime 会在停止后端或修改 Profile 前被拒绝。
+- **验证**：壳的真实插件管理器与 bundled CLI 在隔离 Profile 安装通过；已安装 `0.2.1-rc.3` 上的原生读取、搜索、编辑、冲突保护及真实 `run_code` → OPS 工具链通过；插件管理页交互与 380px 布局通过（浏览器使用模拟 IPC）。全量 64 个文件/552 项测试、类型检查和构建通过。
+- **空流恢复**：请求尚无内容、工具调用或重放状态时，将明确的 `empty_stream` 交给原有重试策略处理，最多新增两次恢复尝试；持续失败保留原始错误，不生成合成成功回复，也不切换模型。
+- 已安装 Runtime `0.2.1-rc.3` 的真实 Agent 与重试插件离线验证通过，覆盖首次空流后恢复、连续空流达到上限及持久化；取消与已有内容保护也有聚焦回归。未知 Runtime 源码布局保留原行为并给出诊断。
+- 更新并完全重启桌面客户端后生效；OPS 为可选插件，不会自动安装。外部模型端到端调用、可选 Bash 执行和另一台电脑的原始事故仍待验证，不视为修复所有工具报错。
+
 ### 0.1.67 · 2026-10-25（北京时间）
 
 - **后院鱼塘运行中会话状态同步优化与过滤**：

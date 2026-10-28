@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { readFile, rm, writeFile } from 'node:fs/promises'
 import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path'
 import { realpath } from 'node:fs/promises'
-import { gt, valid } from 'semver'
+import { gt, satisfies, valid } from 'semver'
 import { parse, stringify } from 'yaml'
 import type { InstalledRuntime } from './runtime-store.ts'
 
@@ -435,9 +435,14 @@ export class PluginManager {
     if (this.activeOperationId !== undefined || this.pendingRestartOperationId !== undefined) {
       throw new Error('plugin operation is already running')
     }
-    await this.cleanupStaleLock('web')
     const input = parseStartInput(value)
     const runtime = this.requireRuntime()
+    if (input.action === 'add' && input.spec === 'dsh-ops@0.4.4'
+      && !satisfies(runtime.manifest.dshVersion, '>=0.2.0-rc.2 <0.2.2-0', { includePrerelease: true })) {
+      throw new Error('dsh-ops 0.4.4 需要 DSH >=0.2.0-rc.2 <0.2.2，当前版本：' + runtime.manifest.dshVersion
+        + '。请先在 Runtime → 管理 DSH 版本中选择兼容版本。')
+    }
+    await this.cleanupStaleLock('web')
     const operationId = randomUUID()
     const argument = input.action === 'add' ? input.spec : input.packageName
     const args = ['plugin', '--profile', 'web', input.action, argument]

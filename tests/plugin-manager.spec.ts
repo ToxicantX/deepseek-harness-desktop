@@ -11,6 +11,7 @@ import {
   isSameProfilePath,
   packageNameFromSpec,
   updateAllowBuildsText,
+  type PluginOperationStatus,
 } from '../src/plugin-manager.ts'
 
 function runtime() {
@@ -30,6 +31,55 @@ class FakeProcess extends EventEmitter {
 }
 
 describe('plugin manager pnpm recovery', () => {
+  it.each(['0.2.0-rc.1', '0.1.7-alpha.1', '0.2.2-alpha.2', '0.2.2', 'invalid'])('rejects the recommended dsh-ops install on DSH %s before preparing or changing the profile', async version => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-ops-incompatible-'))
+    const profile = join(root, 'profiles', 'web')
+    await mkdir(profile, { recursive: true })
+    const original = '{"dependencies":{"existing-plugin":"1.0.0"}}\n'
+    await writeFile(join(profile, 'package.json'), original)
+    const prepare = vi.fn(async () => {})
+    const runProcess = vi.fn(() => {
+      const child = new FakeProcess()
+      queueMicrotask(() => child.emit('close', 0, null))
+      return child as any
+    })
+    const installed = runtime()
+    installed.manifest.dshVersion = version
+    const manager = new PluginManager({ runtime: () => installed, home: root, runProcess })
+    await expect(manager.start({ action: 'add', spec: 'dsh-ops@0.4.4' }, prepare)).rejects.toThrow('dsh-ops 0.4.4')
+    expect(prepare).not.toHaveBeenCalled()
+    expect(runProcess).not.toHaveBeenCalled()
+    expect(manager.current()).toBeUndefined()
+    expect(await readFile(join(profile, 'package.json'), 'utf8')).toBe(original)
+  })
+
+  it.each(['0.2.0-rc.2', '0.2.1-alpha.3', '0.2.1-rc.3', '0.2.1'])('installs the recommended release through the existing transaction on DSH %s', async version => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-ops-install-'))
+    const profile = join(root, 'profiles', 'web')
+    await mkdir(profile, { recursive: true })
+    await writeFile(join(profile, 'package.json'), JSON.stringify({ dsh: { profile: { bundles: ['existing-plugin'] } } }))
+    const installed = runtime()
+    installed.manifest.dshVersion = version
+    const prepare = vi.fn(async () => {})
+    let complete!: (status: PluginOperationStatus) => void
+    const finished = new Promise<PluginOperationStatus>(resolve => { complete = resolve })
+    const runProcess = vi.fn((_command, _args) => {
+      const child = new FakeProcess()
+      queueMicrotask(() => child.emit('close', 0, null))
+      return child as any
+    })
+    const manager = new PluginManager({
+      runtime: () => installed, home: root, runProcess,
+      onOperationFinished: complete,
+    })
+    await manager.start({ action: 'add', spec: 'dsh-ops@0.4.4' }, prepare)
+    expect((await finished).state).toBe('succeeded')
+    expect(runProcess.mock.calls[0]![1]).toEqual(expect.arrayContaining(['web', 'add', 'dsh-ops@0.4.4']))
+    expect(prepare).toHaveBeenCalledOnce()
+    expect(JSON.parse(await readFile(join(profile, 'package.json'), 'utf8')).dsh.profile.bundles)
+      .toEqual(['existing-plugin', 'dsh-ops'])
+  })
+
   it('derives only the exact package name from GitHub specs', () => {
     expect(packageNameFromSpec('github:ToxicantX/dsh-multi-model-orchestrator')).toBe('dsh-multi-model-orchestrator')
     expect(packageNameFromSpec('https://github.com/ToxicantX/dsh-multi-model-orchestrator.git#main')).toBe('dsh-multi-model-orchestrator')

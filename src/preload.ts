@@ -453,6 +453,7 @@ function errorMessage(error: unknown): string {
 function initializePluginManagerPage(): void {
   const specInput = element<HTMLInputElement>('plugin-spec')
   const installButton = element<HTMLButtonElement>('plugin-install')
+  const opsInstallButton = element<HTMLButtonElement>('plugin-ops-install')
   const refreshButton = element<HTMLButtonElement>('plugin-refresh')
   const progress = element<HTMLProgressElement>('plugin-progress')
   const statusElement = element('plugin-status')
@@ -474,6 +475,7 @@ function initializePluginManagerPage(): void {
     busy = value
     specInput.disabled = value
     installButton.disabled = value
+    opsInstallButton.disabled = value || currentEntries.some(entry => entry.name === 'dsh-ops')
     refreshButton.disabled = value
     progress.hidden = !value
     for (const button of listElement.querySelectorAll<HTMLButtonElement | HTMLInputElement>('button, input')) button.disabled = value
@@ -484,6 +486,9 @@ function initializePluginManagerPage(): void {
     logElement.scrollTop = logElement.scrollHeight
   }
   const renderEntries = (entries: PluginEntry[]): void => {
+    const opsInstalled = entries.some(entry => entry.name === 'dsh-ops')
+    opsInstallButton.textContent = opsInstalled ? '已安装' : '安装 dsh-ops'
+    opsInstallButton.disabled = busy || opsInstalled
     listElement.replaceChildren()
     emptyElement.hidden = entries.length !== 0
     for (const entry of entries) {
@@ -633,6 +638,10 @@ function initializePluginManagerPage(): void {
     const spec = specInput.value
     if (spec.length === 0) { setStatus('请输入插件包名或 GitHub 地址', 'error'); specInput.focus(); return }
     void runOperation({ action: 'add', spec }, '安装插件')
+  })
+  opsInstallButton.addEventListener('click', () => {
+    const spec = opsInstallButton.dataset.packageSpec
+    if (spec !== undefined) void runOperation({ action: 'add', spec }, '安装 dsh-ops')
   })
   specInput.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') installButton.click()

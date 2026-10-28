@@ -38,12 +38,15 @@ Paste long text and text files directly into the conversation composer, then pre
 
 ### Optional Plugins
 
-Paste either repository URL into **Runtime → Manage Plugins** to install it, then configure it in Settings. Installing plugins from GitHub requires Git on your system.
+For the Telegram and orchestrator plugins, paste the repository URL into **Runtime → Manage Plugins**, then configure the plugin in Settings. Installing plugins from GitHub requires Git on your system.
 
 | Plugin | Purpose |
 | --- | --- |
 | [dsh-channel-telegram](https://github.com/ToxicantX/dsh-channel-telegram) | Use DSH through Telegram, QQ official bot, or WeChat iLink private messages |
 | [dsh-multi-model-orchestrator](https://github.com/ToxicantX/dsh-multi-model-orchestrator) | Configure specialist agents and let the main agent assign tasks |
+| [dsh-ops](https://github.com/T-Auto/dsh-ops) | Optional native file, search, and PTC tools; use the dsh-ops install button in Manage Plugins |
+
+The dedicated entry installs the verified stable release `0.4.4`, requiring DSH `>=0.2.0-rc.2 <0.2.2`. Pin a compatible version in **Runtime → Manage DSH versions** when using this plugin; `0.2.2`, including prereleases, is unsupported. After installation, create a new session to check tool availability.
 
 ## Updates And Backups
 
@@ -66,6 +69,14 @@ Client updates and runtime switches do not automatically delete sessions, settin
 For other problems, open an [issue](https://github.com/ToxicantX/deepseek-harness-desktop/issues) with the versions shown in **Help → About DeepSeek Harness**, steps to reproduce, and error details with sensitive information removed.
 
 ## Versions And Updates
+
+### 0.1.68 · 2026-10-28 20:05 (Beijing Time)
+
+- Added optional installation of `dsh-ops@0.4.4` through the existing plugin manager. Unsupported Runtime versions are rejected before stopping the backend or changing the profile; existing installations disable the shortcut.
+- Verified actual installation in an isolated profile, native reading/search/editing and conflict guards, and the real PTC tool path on DSH `0.2.1-rc.3`. Browser interaction checks used mock IPC. All 552 tests, type checking, and the build passed.
+- Added bounded recovery for explicit `empty_stream` failures before any content, tool calls, or replay state. The existing retry policy decides whether to retry, with up to two added recovery attempts; persistent errors stay visible and no synthetic reply or model switch is introduced.
+- Verified recovery and persistent failure with the real Agent and retry plugin on Runtime `0.2.1-rc.3`, using an offline model fixture. Unknown Runtime source layouts retain their original behavior with a diagnostic.
+- Update and fully restart the desktop client to apply the changes. OPS remains optional. External model workflows, optional Bash execution, and the incident on the other computer remain unverified.
 
 ### 0.1.64 · 2026-10-21 20:59 (Beijing Time)
 

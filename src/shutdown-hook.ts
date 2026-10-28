@@ -3,6 +3,7 @@ import { installSessionCompatibilityHook } from './session-compatibility-injecto
 import { installImageGenerationRuntimeHook } from './image-generation-runtime-injector.ts'
 import { installDesktopReplayHostHook } from './conversation-replay-host-injector.ts'
 import { installRuntimeToolCompatibility } from './runtime-tool-compatibility.ts'
+import { installEmptyStreamRecoveryHook } from './empty-stream-recovery-injector.ts'
 import { installGrokNativeToolsHook } from './grok-native-tools-injector.ts'
 import { installMcpToolDiscoveryHook } from './mcp-tool-discovery-injector.ts'
 import { installSearchRuntimeHook } from './search-runtime-injector.ts'
@@ -48,6 +49,7 @@ installImageGenerationRuntimeHook()
 installDesktopReplayHostHook()
 installRuntimeToolCompatibility()
 installGrokNativeToolsHook()
+installEmptyStreamRecoveryHook()
 installMcpToolDiscoveryHook()
 installSearchRuntimeHook()
 installSessionCompatibilityHook()
