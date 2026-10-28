@@ -64,11 +64,19 @@ Client updates and runtime switches do not automatically delete sessions, settin
 
 **An old conversation will not open?** Use **Help → Repair Historical Sessions**. Run diagnostics and check the backup location before confirming a repair.
 
+**Sessions become unavailable after switching to DSH 0.2.2, including new sessions?** If diagnostics contain `agent-preset/invalid`, `tool-subagent-list-agents`, or `/list-agents ... never started`, update `dsh-multi-model-orchestrator` to `0.8.3` or later in **Runtime → Manage Plugins** and wait for Runtime to restart. The old preset references a component entry removed by the new Runtime; deleting history is unnecessary.
+
 **Windows shows Unknown Publisher or a SmartScreen warning?** Check the download source and file signature, and download only from this repository's releases. Some builds may be unsigned; the signature status shown by Windows is authoritative.
 
 For other problems, open an [issue](https://github.com/ToxicantX/deepseek-harness-desktop/issues) with the versions shown in **Help → About DeepSeek Harness**, steps to reproduce, and error details with sensitive information removed.
 
 ## Versions And Updates
+
+### 2026-10-28 20:43 (Beijing Time) · DSH 0.2.2 Session Recovery
+
+- Identified a removed `/list-agents` component referenced by orchestrator `0.8.2`. Updating the installed plugin to the published `0.8.3` through the Shell restored session availability on `0.2.2-alpha.2`; no Shell release or Runtime downgrade was required.
+- Added an isolated regression for the original preset failure, new-session creation, offline reply, persisted listing, and cold resume, with and without the Shell hook. Verified the actual desktop history input became available, preserving the history file and six specialist configurations.
+- Backed up the plugin and managed presets before updating. No real model request was sent; OPS `0.4.4` still does not support DSH `0.2.2`.
 
 ### 0.1.68 · 2026-10-28 20:05 (Beijing Time)
 
