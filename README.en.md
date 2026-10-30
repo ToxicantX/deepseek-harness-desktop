@@ -72,6 +72,13 @@ For other problems, open an [issue](https://github.com/ToxicantX/deepseek-harnes
 
 ## Versions And Updates
 
+### 0.1.69 · 2026-10-30 21:50 (Beijing Time) · Compaction Reasoning Compatibility
+
+- Fix repeated HTTP 400 compaction failures when `gpt-6.1-sol` receives the implicit `none` reasoning effort despite a conversation having a selected effort.
+- The Shell loads a standalone plugin through a temporary startup overlay. Runtime source, installed files and user model configuration are unchanged. Compaction inherits a supported effort from the same conversation model, or uses advertised `low` for this model when no effort can be inherited.
+- Add parameter, cancellation and error propagation tests. Installed DSH `0.2.2-alpha.2` offline checks pass for manual, automatic and child-session compaction, summary persistence and cold resume; 15 Runtime module hashes remain unchanged. Live provider and incident-machine recovery require separate verification.
+- Correct the installed-Runtime composition test to respect Grok's existing passthrough on unknown layouts; Grok functionality and Runtime code are unchanged.
+
 ### 2026-10-28 20:43 (Beijing Time) · DSH 0.2.2 Session Recovery
 
 - Identified a removed `/list-agents` component referenced by orchestrator `0.8.2`. Updating the installed plugin to the published `0.8.3` through the Shell restored session availability on `0.2.2-alpha.2`; no Shell release or Runtime downgrade was required.

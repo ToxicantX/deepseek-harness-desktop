@@ -84,6 +84,9 @@ const shutdownHook = app.isPackaged
 const goalGuardPlugin = app.isPackaged
   ? join(process.resourcesPath, 'app.asar.unpacked', 'resources', 'goal-no-progress-guard', 'index.js')
   : join(app.getAppPath(), 'resources', 'goal-no-progress-guard', 'index.js')
+const compactionPlugin = app.isPackaged
+  ? join(process.resourcesPath, 'app.asar.unpacked', 'resources', 'compaction-reasoning', 'index.mjs')
+  : join(app.getAppPath(), 'resources', 'compaction-reasoning', 'index.mjs')
 
 let mainWindow: BrowserWindow | undefined
 let tray: Tray | undefined
@@ -1089,6 +1092,7 @@ async function startApplication(): Promise<void> {
     shutdownHook,
     userData: app.getPath('userData'),
     goalGuardPlugin,
+    compactionPlugin,
     pluginIsolation,
     async searchConfiguration() {
       try { return await searchSettings!.runtimeConfiguration() }

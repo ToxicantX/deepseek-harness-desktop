@@ -3,10 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   prepareOverlay: vi.fn(),
+  prepareCompactionOverlay: vi.fn(),
   startBackend: vi.fn(),
 }))
 
 vi.mock('../src/goal-guard-overlay.ts', () => ({ prepareGoalGuardOverlay: mocks.prepareOverlay }))
+vi.mock('../src/compaction-overlay.ts', () => ({ prepareCompactionOverlay: mocks.prepareCompactionOverlay }))
 vi.mock('../src/backend.ts', () => ({
   desktopEnvironment: (_runtime: unknown, environment: NodeJS.ProcessEnv) => ({ ...environment }),
   startBackend: mocks.startBackend,
@@ -40,6 +42,7 @@ function controller(
     shutdownHook: 'C:/shutdown-hook.js',
     userData: 'C:/user-data',
     goalGuardPlugin: 'C:/resources/goal-no-progress-guard/index.js',
+    compactionPlugin: 'C:/resources/compaction-reasoning/index.mjs',
     ...(pluginIsolation === undefined ? {} : { pluginIsolation }),
     preparePluginPresetCompatibility,
     ...(inspectAgentPresetSchema === undefined ? {} : { inspectAgentPresetSchema }),
@@ -54,10 +57,44 @@ function controller(
 
 beforeEach(() => {
   mocks.prepareOverlay.mockReset()
+  mocks.prepareCompactionOverlay.mockReset()
   mocks.startBackend.mockReset()
 })
 
 describe('RuntimeController goal guard overlay', () => {
+  it('loads and cleans the independent compaction overlay alongside other Shell patches', async () => {
+    const dispose = vi.fn(async () => {})
+    mocks.prepareCompactionOverlay.mockResolvedValue({ path: 'C:/compaction/patch.yml', dispose })
+    mocks.startBackend.mockResolvedValue({ url: new URL('http://127.0.0.1:43123/'), done: new Promise(() => {}), stop: vi.fn() })
+    await (controller() as any).launch(runtime())
+    const options = mocks.startBackend.mock.calls[0]![0]
+    expect(options.additionalPatches).toEqual(['C:/compaction/patch.yml'])
+    expect(mocks.prepareCompactionOverlay).toHaveBeenCalledWith({
+      runtime: runtime(), pluginFile: 'C:/resources/compaction-reasoning/index.mjs',
+      directory: join('C:/user-data', 'runtime-overlays'),
+    })
+    await options.cleanup()
+    await options.cleanup()
+    expect(dispose).toHaveBeenCalledOnce()
+  })
+
+  it('removes the compaction overlay if preparing another overlay fails', async () => {
+    const dispose = vi.fn(async () => {})
+    mocks.prepareCompactionOverlay.mockResolvedValue({ path: 'C:/compaction/patch.yml', dispose })
+    const isolation = { prepare: vi.fn(async () => { throw new Error('overlay failed') }), quarantine: vi.fn(async () => false) }
+    await expect((controller(undefined, isolation) as any).launch(runtime())).rejects.toThrow('overlay failed')
+    expect(dispose).toHaveBeenCalledOnce()
+    expect(mocks.startBackend).not.toHaveBeenCalled()
+  })
+
+  it('removes the compaction overlay if backend startup fails', async () => {
+    const dispose = vi.fn(async () => {})
+    mocks.prepareCompactionOverlay.mockResolvedValue({ path: 'C:/compaction/patch.yml', dispose })
+    mocks.startBackend.mockRejectedValue(new Error('backend failed'))
+    await expect((controller() as any).launch(runtime())).rejects.toThrow('backend failed')
+    expect(dispose).toHaveBeenCalledOnce()
+  })
+
   it('loads current encrypted search configuration only into the Runtime fork environment', async () => {
     let config = '{"provider":"exa","exa":{"apiKey":"fixture-one"}}'
     const searchConfiguration = vi.fn(async () => config)

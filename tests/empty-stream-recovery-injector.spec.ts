@@ -455,13 +455,19 @@ describe('empty-stream recovery injector', () => {
   }, 90000)
 
   if (installedWorld) {
-    it('composes with the Grok native-tools adaptation of the installed source in either order', () => {
-      const grokFirst = adaptEmptyStreamRecovery(adaptGrokAgentLoop(installedWorld.originalSource).source)
-      const recoveryFirst = adaptGrokAgentLoop(adaptEmptyStreamRecovery(installedWorld.originalSource).source)
+    it('composes with Grok adaptation or its unsupported-layout passthrough in either order', () => {
+      const grok = adaptGrokAgentLoop(installedWorld.originalSource)
+      const recovery = adaptEmptyStreamRecovery(installedWorld.originalSource)
+      const grokFirst = adaptEmptyStreamRecovery(grok.source)
+      const recoveryFirst = adaptGrokAgentLoop(recovery.source)
+      if (!grok.changed) {
+        expect(grok.source).toBe(installedWorld.originalSource)
+        expect(recoveryFirst.changed).toBe(false)
+        expect(recoveryFirst.source).toBe(recovery.source)
+      }
       for (const result of [grokFirst, recoveryFirst]) {
-        expect(result.changed).toBe(true)
         expect(result.source).toContain('desktopEmptyStreamRecoveryCount = 0')
-        expect(result.source).toContain('desktopGrokNativePresentation')
+        expect(result.source.includes('desktopGrokNativePresentation')).toBe(grok.changed)
         new Script(result.source.split('\n').filter(line => !/^import |^export /.test(line)).join('\n'))
       }
     })

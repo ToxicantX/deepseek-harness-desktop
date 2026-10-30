@@ -13,6 +13,7 @@ import {
 import { desktopEnvironment, startBackend, type RunningBackend } from './backend.ts'
 import { prepareCliShim } from './cli-shell.ts'
 import { prepareGoalGuardOverlay } from './goal-guard-overlay.ts'
+import { prepareCompactionOverlay } from './compaction-overlay.ts'
 import { PluginImportFailure, PluginIsolation } from './plugin-isolation.ts'
 import { inspectProfileBundleRecovery, type ProfileBundleRecoveryPlan } from './profile-bundle-recovery.ts'
 import { preparePluginPresetCompatibility, type PluginPresetCompatibilityInput } from './plugin-preset-compatibility.ts'
@@ -83,6 +84,7 @@ export interface RuntimeControllerOptions {
   shutdownHook: string
   userData: string
   goalGuardPlugin: string
+  compactionPlugin?: string
   catalogUrl?: string
   environment?: NodeJS.ProcessEnv
   searchConfiguration?: () => Promise<string>
@@ -106,6 +108,7 @@ export class RuntimeController {
   private readonly shutdownHook: string
   private readonly userData: string
   private readonly goalGuardPlugin: string
+  private readonly compactionPlugin: string | undefined
   private readonly catalogUrl: string
   private readonly environment: NodeJS.ProcessEnv
   private readonly searchConfiguration: (() => Promise<string>) | undefined
@@ -143,6 +146,7 @@ export class RuntimeController {
     this.shutdownHook = options.shutdownHook
     this.userData = options.userData
     this.goalGuardPlugin = options.goalGuardPlugin
+    this.compactionPlugin = options.compactionPlugin
     this.catalogUrl = options.catalogUrl ?? DEFAULT_CATALOG_URL
     this.environment = options.environment ?? process.env
     this.searchConfiguration = options.searchConfiguration
@@ -541,12 +545,22 @@ export class RuntimeController {
       directory: join(this.userData, 'runtime-overlays'),
     })
     let isolationOverlay
-    try { isolationOverlay = await this.pluginIsolation?.prepare(runtime, this.environment, trial) }
-    catch (error) { await overlay?.dispose(); throw error }
+    let compactionOverlay: Awaited<ReturnType<typeof prepareCompactionOverlay>>
+    try {
+      if (this.compactionPlugin !== undefined) compactionOverlay = await prepareCompactionOverlay({
+        runtime,
+        pluginFile: this.compactionPlugin,
+        directory: join(this.userData, 'runtime-overlays'),
+      })
+      isolationOverlay = await this.pluginIsolation?.prepare(runtime, this.environment, trial)
+    } catch (error) {
+      await Promise.all([overlay?.dispose(), compactionOverlay?.dispose()])
+      throw error
+    }
     const cleanup = async (): Promise<void> => {
       if (overlayDisposed) return
       overlayDisposed = true
-      await Promise.all([overlay?.dispose(), isolationOverlay?.dispose()])
+      await Promise.all([overlay?.dispose(), compactionOverlay?.dispose(), isolationOverlay?.dispose()])
     }
     try {
       const environment = desktopEnvironment(runtime, this.environment)
@@ -556,7 +570,7 @@ export class RuntimeController {
         shutdownHook: this.shutdownHook,
         cwd: home,
         env: environment,
-        additionalPatches: [overlay?.path, isolationOverlay?.path].filter((path): path is string => path !== undefined),
+        additionalPatches: [overlay?.path, compactionOverlay?.path, isolationOverlay?.path].filter((path): path is string => path !== undefined),
         cleanup,
         onOpenSettingsDocument: this.onOpenSettingsDocument,
       })
